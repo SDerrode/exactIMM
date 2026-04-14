@@ -1,93 +1,169 @@
-# FofGss
+# FofGss — Fast Optimal Filtering in Gaussian Switching Systems
 
+Implementation of the filtering and simulation algorithms described in:
 
+> *On fast optimal filtering in Gaussian switching systems*  
+> Stéphane Derrode & Wojciech Pieczynski — `docs/CS_Finale.pdf`
 
-## Getting started
+---
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Scientific context
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+The project targets **Gaussian Switching Systems (GSS)**, a class of hidden Markov models where the state $(X_n, Y_n)$ evolves according to a regime $R_n \in \{0,\ldots,K-1\}$:
 
-## Add your files
+$$Z_{n+1} = F(R_{n+1})\,Z_n + W_{n+1}, \qquad Z_n = \begin{bmatrix}X_n \\ Y_n\end{bmatrix}$$
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+with $F(k) = \begin{bmatrix}A_k & B_k \\ C_k & D_k\end{bmatrix}$ and $W_{n+1}\mid R_{n+1}=k \sim \mathcal{N}(0,\Sigma_W(k))$.
+
+The central objective is to compute $\mathbb{E}[X_n \mid Y_{1:n}]$ efficiently (fast optimal filter).
+
+---
+
+## Project structure
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.ec-lyon.fr/sderrode/fofgss.git
-git branch -M main
-git push -uf origin main
+fofgss/
+├── prg/
+│   ├── utils/
+│   │   ├── exceptions.py       # GSSError hierarchy
+│   │   └── matrix_checks.py    # CovarianceMatrix, StochasticMatrix diagnostics
+│   ├── models/
+│   │   ├── base_gss_model.py   # BaseGSSModel (abstract)
+│   │   └── model_gss_K2_q1_s1.py  # Example: K=2, q=1, s=1
+│   ├── classes/
+│   │   ├── FMatrix.py          # Block transition matrix F(k)
+│   │   ├── NoiseCovariance.py  # Block noise covariance Sigma_W(k)
+│   │   ├── GSSParams.py        # Aggregates all model parameters
+│   │   └── GSSSimulator.py     # Iterator-based simulator
+│   └── simulate.py             # CLI entry point
+├── tests/                      # 71 pytest tests
+├── data/
+│   └── simulated/              # Generated CSV files
+├── logs/                       # Execution logs (one file per run)
+├── config.toml                 # Runtime configuration
+└── pyproject.toml
 ```
 
-## Integrate with your tools
-
-* [Set up project integrations](https://gitlab.ec-lyon.fr/sderrode/fofgss/-/settings/integrations)
-
-## Collaborate with your team
-
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+---
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+Python 3.14 is required.  
+**Use a project virtual environment** — the system-wide homebrew installation of numpy does not load correctly on this platform.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+# Create and activate the venv
+python3 -m venv .venv
+source .venv/bin/activate
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+# Install dependencies
+pip install -e ".[dev]"
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+> The `.venv/` directory is excluded from version control (see `.gitignore`).
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+---
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## Running the simulator
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```bash
+# Basic run: 1 000 steps, reproducible seed
+python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42
+
+# Dry run (no CSV written), full debug output
+python -m prg.simulate --model model_gss_K2_q1_s1 -N 500 --no-save --log-level DEBUG -v 2
+
+# Custom output directory
+python -m prg.simulate --model model_gss_K2_q1_s1 -N 2000 --seed 0 --output my_run.csv
+```
+
+Output CSV columns: `n, r, x_0, …, x_{q-1}, y_0, …, y_{s-1}`  
+Log files are written automatically to `logs/`.
+
+### CLI options
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | — | Model name in `prg/models/` (required) |
+| `-N` | — | Number of time steps (required) |
+| `--seed` | `None` | Random seed (omit for non-deterministic) |
+| `--output` | auto | Output CSV filename |
+| `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
+| `--no-save` | `False` | Skip CSV writing (dry run) |
+| `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
+
+---
+
+## Adding a new model
+
+Create a file `prg/models/model_<name>.py` that subclasses `BaseGSSModel`:
+
+```python
+import numpy as np
+from prg.models.base_gss_model import BaseGSSModel
+
+class ModelMyGSS(BaseGSSModel):
+    K, q, s = 3, 2, 1
+
+    P = np.array(...)          # (K, K) row-stochastic
+
+    A_list = [...]             # list of K arrays, each (q, q)
+    B_list = [...]             # list of K arrays, each (q, s)
+    C_list = [...]             # list of K arrays, each (s, q)
+    D_list = [...]             # list of K arrays, each (s, s)
+
+    Sigma_U_list = [...]       # list of K arrays, each (q, q) — SPD
+    Delta_list   = [...]       # list of K arrays, each (q, s)
+    Sigma_V_list = [...]       # list of K arrays, each (s, s) — SPD
+
+    pi0 = None                 # None → stationary distribution of P
+    mu_z0_list    = [...]      # list of K arrays, each (q+s, 1)
+    Sigma_z0_list = [...]      # list of K arrays, each (q+s, q+s) — SPD
+
+    def get_params(self) -> dict:
+        return {k: getattr(self, k) for k in (
+            "K", "q", "s", "P",
+            "A_list", "B_list", "C_list", "D_list",
+            "Sigma_U_list", "Delta_list", "Sigma_V_list",
+            "pi0", "mu_z0_list", "Sigma_z0_list",
+        )}
+```
+
+Then run with `--model model_my_gss`.
+
+---
+
+## Testing
+
+```bash
+source .venv/bin/activate
+pytest
+```
+
+71 tests covering matrix diagnostics, parameter validation, iterator protocol,
+reproducibility, CSV output, and statistical sanity checks.
+
+---
+
+## Configuration
+
+Edit `config.toml` to change default paths and log level:
+
+```toml
+[general]
+log_level = "INFO"    # DEBUG | INFO | WARNING | ERROR
+
+[paths]
+data_simulated  = "data/simulated"
+logs            = "logs"
+```
+
+---
+
+## Authors
+
+Stéphane Derrode — `stephane.derrode@ec-lyon.fr`
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+GNU Affero General Public License v3.0 — see `LICENSE`.

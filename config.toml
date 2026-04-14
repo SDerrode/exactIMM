@@ -1,0 +1,25 @@
+# FofGss – Application configuration
+# Edit this file to tune simulation and I/O parameters.
+
+[general]
+project_name   = "fofgss"
+random_seed    = 42
+log_level      = "INFO"   # DEBUG | INFO | WARNING | ERROR
+
+[paths]
+data_simulated  = "data/simulated"
+data_output     = "data/output"
+data_plot       = "data/plot"
+history_tracker = "data/historyTracker"
+logs            = "logs"
+
+[simulation]
+# TODO: add simulation-specific parameters here
+# n_steps    = 1000
+# dt         = 0.01
+# n_particles = 500
+
+[output]
+save_interval = 10       # save every N steps
+plot_format   = "png"    # png | pdf | svg
+dpi           = 150

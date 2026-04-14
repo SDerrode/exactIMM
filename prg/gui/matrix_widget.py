@@ -4,7 +4,6 @@
 prg/gui/matrix_widget.py
 ========================
 MatrixTableWidget — editable QTableWidget for a (q+s) × (q+s) matrix with:
-  - Block colour coding: A (blue), B (green), C (yellow), D (pink)
   - Per-cell float validation (red background on parse error)
   - Optional SPD validation for covariance matrices
   - validity_changed signal
@@ -20,25 +19,7 @@ from PyQt6.QtWidgets import (
 from prg.utils.matrix_checks import CovarianceMatrix
 
 
-# ---------------------------------------------------------------------------
-# Block colour palette
-# ---------------------------------------------------------------------------
-_COLOUR_A = QColor("#ddeeff")   # top-left  — A_k
-_COLOUR_B = QColor("#d4f5d4")   # top-right — B_k
-_COLOUR_C = QColor("#fffacc")   # bot-left  — C_k
-_COLOUR_D = QColor("#ffd4d4")   # bot-right — D_k
-_COLOUR_BAD = QColor("#ff8888") # invalid cell
-
-
-def _block_colour(row: int, col: int, q: int) -> QColor:
-    """Return background colour for a cell at (row, col) given q hidden dims."""
-    if row < q and col < q:
-        return _COLOUR_A
-    if row < q:
-        return _COLOUR_B
-    if col < q:
-        return _COLOUR_C
-    return _COLOUR_D
+_COLOUR_BAD = QColor("#ff8888")  # invalid cell
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +28,7 @@ def _block_colour(row: int, col: int, q: int) -> QColor:
 
 class MatrixTableWidget(QWidget):
     """
-    Editable (q+s) × (q+s) table with block colour coding.
+    Editable (q+s) × (q+s) table.
 
     Parameters
     ----------
@@ -133,7 +114,7 @@ class MatrixTableWidget(QWidget):
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
                     )
-                    item.setBackground(QBrush(_block_colour(r, c, self._q)))
+                    item.setBackground(QBrush(QColor("white")))
                     self._table.setItem(r, c, item)
         finally:
             self._building = False
@@ -165,7 +146,7 @@ class MatrixTableWidget(QWidget):
         r, c = item.row(), item.column()
         try:
             float(item.text())
-            item.setBackground(QBrush(_block_colour(r, c, self._q)))
+            item.setBackground(QBrush(QColor("white")))
             return True
         except ValueError:
             item.setBackground(QBrush(_COLOUR_BAD))

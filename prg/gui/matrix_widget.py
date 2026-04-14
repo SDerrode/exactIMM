@@ -115,6 +115,7 @@ class MatrixTableWidget(QWidget):
                         Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
                     )
                     item.setBackground(QBrush(QColor("white")))
+                    item.setForeground(QBrush(QColor("black")))
                     self._table.setItem(r, c, item)
         finally:
             self._building = False
@@ -147,6 +148,7 @@ class MatrixTableWidget(QWidget):
         try:
             float(item.text())
             item.setBackground(QBrush(QColor("white")))
+            item.setForeground(QBrush(QColor("black")))
             return True
         except ValueError:
             item.setBackground(QBrush(_COLOUR_BAD))

@@ -56,8 +56,11 @@ Python 3.14 is required.
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
+# Core + dev dependencies
 pip install -e ".[dev]"
+
+# Optional: GUI dependencies (PyQt6 + matplotlib)
+pip install -e ".[gui]"
 ```
 
 > The `.venv/` directory is excluded from version control (see `.gitignore`).
@@ -91,6 +94,32 @@ Log files are written automatically to `logs/`.
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip CSV writing (dry run) |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
+
+---
+
+## Graphical interface
+
+The GUI requires `pip install -e ".[gui]"` (PyQt6 + matplotlib).
+
+```bash
+# Standalone launch: choose K, q, s interactively
+python -m prg.gui.main -K 2 -q 1 -s 1
+
+# Pre-fill from an existing model file
+python -m prg.gui.main --model model_gss_K2_q1_s1
+```
+
+**Features**
+
+| Panel | Description |
+|---|---|
+| Parameter tabs | One tab per Markov state; editable F(k) and Σ_W(k) tables with block colour coding |
+| Validation | [Simuler] disabled + red text when any matrix is invalid (non-float entry or non-SPD Σ_W) |
+| Simulation | Runs in a background thread; modal wait dialog prevents interaction |
+| Plot | 1 + q + s subplots: R_n (step), X_i (lines), Y_i (lines); full matplotlib toolbar |
+| Save | [Enregistrer CSV] writes `data/simulated/simulated_gui_N{N}_seed{seed}_{ts}.csv` |
+
+Fixed (non-editable) parameters: P = uniform 1/K (or model's P), π₀ = stationary, μ_{z0} = 0, Σ_{z0} = I.
 
 ---
 

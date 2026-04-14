@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-14
+
+### Added
+- `prg/gui/__init__.py` — GUI package
+- `prg/gui/matrix_widget.py` — `MatrixTableWidget`: editable QTableWidget with
+  block colour coding (A=blue, B=green, C=yellow, D=pink), per-cell float
+  validation, optional SPD check for covariance matrices, `validity_changed` signal
+- `prg/gui/param_panel.py` — `ParamPanel`: QTabWidget with one `_StateTab` per
+  Markov state; each tab holds F(k) and Σ_W(k) widgets side by side
+- `prg/gui/plot_panel.py` — `PlotPanel`: embedded matplotlib canvas
+  (FigureCanvasQTAgg + NavigationToolbar2QT) with 1 + q + s subplots
+  (R_n step, X_i lines, Y_i lines)
+- `prg/gui/main_window.py` — `GSSMainWindow`: left panel (ParamPanel + N spinbox +
+  seed field + [Simuler] / [Enregistrer CSV] buttons) + right PlotPanel;
+  background `_SimWorker` (QThread) + modal `_WaitDialog`; [Simuler] disabled +
+  red when any parameter is invalid; CSV auto-saved to `data/simulated/`
+- `prg/gui/main.py` — CLI entry point (`python -m prg.gui.main`):
+  optional `--model` flag pre-fills tables from any `BaseGSSModel`; `-K/-q/-s`
+  for standalone launch without a model file
+
+### Changed
+- `pyproject.toml` — added `[gui]` optional-dependency group (PyQt6≥6.6, matplotlib≥3.8)
+- `README.md` — added GUI section
+
 ## [0.2.0] — 2026-04-14
 
 ### Added

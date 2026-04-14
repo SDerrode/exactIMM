@@ -183,7 +183,7 @@ class MatrixTableWidget(QWidget):
             self._set_valid(True, "Définie positive")
         else:
             reason = next(
-                (r.message for r in report.results if r.status.name == "FAIL"),
+                (c.message for c in report.checks if c.status.name == "FAIL"),
                 "Non définie positive",
             )
             self._set_valid(False, reason)

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=72", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "fofgss"
+version = "0.2.0"
+description = "Fast optimal filtering in Gaussian switching systems"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Stéphane Derrode", email = "stephane.derrode@ec-lyon.fr" },
+]
+requires-python = ">=3.14"
+dependencies = [
+    "numpy>=2.4",
+    "pandas>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["prg*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["prg"]
+omit = ["tests/*"]

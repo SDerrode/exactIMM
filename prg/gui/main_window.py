@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QLabel, QSpinBox, QLineEdit, QPushButton,
     QDialog, QMessageBox, QSizePolicy, QSplitter,
-    QFileDialog,
+    QFileDialog, QFrame,
 )
 
 from prg.classes.FMatrix import FMatrix
@@ -251,10 +251,36 @@ class GSSMainWindow(QMainWindow):
 
         left_layout.addLayout(btn_grid)
 
-        self._eqm_label = QLabel("")
-        self._eqm_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._eqm_label.setStyleSheet("font-size: 10px; padding: 2px;")
-        left_layout.addWidget(self._eqm_label)
+        # ── MSE display box ──────────────────────────────────────────
+        self._mse_frame = QFrame()
+        self._mse_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._mse_frame.setVisible(False)
+        mse_layout = QVBoxLayout(self._mse_frame)
+        mse_layout.setContentsMargins(8, 6, 8, 6)
+        mse_layout.setSpacing(2)
+
+        mse_title = QLabel("Filter quality")
+        mse_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mse_title.setStyleSheet(
+            "font-weight: bold; font-size: 11px; "
+            "border-bottom: 1px solid palette(mid); padding-bottom: 3px;"
+        )
+        mse_layout.addWidget(mse_title)
+
+        self._mse_global_label = QLabel("")
+        self._mse_global_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mse_global_label.setStyleSheet("font-size: 11px; font-weight: bold;")
+        mse_layout.addWidget(self._mse_global_label)
+
+        self._rmse_label = QLabel("")
+        self._rmse_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._rmse_label.setStyleSheet("font-size: 10px;")
+        mse_layout.addWidget(self._rmse_label)
+
+        # Per-component labels (created dynamically in _on_filter_finished)
+        self._mse_comp_labels: list[QLabel] = []
+
+        left_layout.addWidget(self._mse_frame)
 
         self._status_bar = QLabel("")
         self._status_bar.setWordWrap(True)
@@ -300,7 +326,7 @@ class GSSMainWindow(QMainWindow):
         self._btn_simulate.setEnabled(False)
         self._btn_save.setEnabled(False)
         self._btn_filter.setEnabled(False)
-        self._eqm_label.setText("")
+        self._mse_frame.setVisible(False)
         self._plot_panel.clear_filter_overlay()
         self._status_bar.setText("")
 
@@ -346,7 +372,7 @@ class GSSMainWindow(QMainWindow):
         _, _, _, ys, _ = self._last_data
 
         self._btn_filter.setEnabled(False)
-        self._eqm_label.setText("")
+        self._mse_frame.setVisible(False)
         self._status_bar.setText("")
 
         self._wait_dlg = _WaitDialog("Filtering…", parent=self)
@@ -374,10 +400,43 @@ class GSSMainWindow(QMainWindow):
         # Overlay filtered estimates on the plot
         self._plot_panel.add_filter_overlay(ns, E_xs, Var_xs)
 
-        # Compute and display EQMM (mean squared error averaged over time and components)
-        sq_err = np.mean((xs - E_xs) ** 2, axis=1)   # (N,)
-        eqm = float(sq_err.mean())
-        self._eqm_label.setText(f"MSE: {eqm:.5f}")
+        # Compute and display MSE / RMSE
+        err = xs - E_xs                              # (N, q)
+        mse_per_comp = np.mean(err ** 2, axis=0)     # (q,)
+        mse_global   = float(mse_per_comp.mean())
+        rmse_global  = float(np.sqrt(mse_global))
+
+        self._mse_global_label.setText(f"MSE  = {mse_global:.5g}")
+        self._rmse_label.setText(f"RMSE = {rmse_global:.5g}")
+
+        # Color the frame: green if RMSE is small relative to signal std
+        sig_std = float(xs.std()) if xs.std() > 0 else 1.0
+        ratio   = rmse_global / sig_std          # 0 = perfect, 1 = as bad as noise
+        if ratio < 0.20:
+            bg = "#d4edda"   # green
+        elif ratio < 0.50:
+            bg = "#fff3cd"   # amber
+        else:
+            bg = "#f8d7da"   # red
+        self._mse_frame.setStyleSheet(
+            f"QFrame {{ background-color: {bg}; border-radius: 4px; }}"
+        )
+
+        # Per-component rows (rebuild if q changed)
+        mse_vbox = self._mse_frame.layout()
+        for lbl in self._mse_comp_labels:
+            mse_vbox.removeWidget(lbl)
+            lbl.deleteLater()
+        self._mse_comp_labels.clear()
+
+        if self._q > 1:
+            for i, v in enumerate(mse_per_comp):
+                lbl = QLabel(f"  MSE(X^{i}) = {v:.5g}")
+                lbl.setStyleSheet("font-size: 9px;")
+                mse_vbox.addWidget(lbl)
+                self._mse_comp_labels.append(lbl)
+
+        self._mse_frame.setVisible(True)
 
         self._btn_filter.setEnabled(True)
 

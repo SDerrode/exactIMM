@@ -66,22 +66,29 @@ class _StateTab(QWidget):
             default_value=0.0,
         )
 
-        # Default b(k): zero drift bias (q+s components)
-        self._b_widget = VectorWidget(
-            q + s,
-            title=f"b({k})",
+        # Drift bias b(k) split into X part (q) and Y part (s)
+        self._bx_widget = VectorWidget(
+            q,
+            title=f"b_X({k})",
+            default_value=0.0,
+        )
+        self._by_widget = VectorWidget(
+            s,
+            title=f"b_Y({k})",
             default_value=0.0,
         )
 
         layout.addWidget(self._f_widget)
         layout.addWidget(self._sigma_widget)
         layout.addWidget(self._mu_widget)
-        layout.addWidget(self._b_widget)
+        layout.addWidget(self._bx_widget)
+        layout.addWidget(self._by_widget)
 
         self._f_widget.validity_changed.connect(self._on_child_validity)
         self._sigma_widget.validity_changed.connect(self._on_child_validity)
         self._mu_widget.validity_changed.connect(self._on_child_validity)
-        self._b_widget.validity_changed.connect(self._on_child_validity)
+        self._bx_widget.validity_changed.connect(self._on_child_validity)
+        self._by_widget.validity_changed.connect(self._on_child_validity)
 
     # ------------------------------------------------------------------
     # Public
@@ -97,7 +104,12 @@ class _StateTab(QWidget):
         return self._mu_widget.get_vector()
 
     def get_b(self) -> np.ndarray | None:
-        return self._b_widget.get_vector()
+        """Return full bias vector (q+s, 1) = [b_X; b_Y], or None if invalid."""
+        bx = self._bx_widget.get_vector()   # (q, 1)
+        by = self._by_widget.get_vector()   # (s, 1)
+        if bx is None or by is None:
+            return None
+        return np.vstack([bx, by])
 
     def set_F(self, mat: np.ndarray) -> None:
         self._f_widget.set_matrix(mat)
@@ -109,14 +121,18 @@ class _StateTab(QWidget):
         self._mu_widget.set_vector(vec)
 
     def set_b(self, vec: np.ndarray) -> None:
-        self._b_widget.set_vector(vec)
+        """Accept full (q+s, 1) vector and split into b_X / b_Y."""
+        flat = np.asarray(vec).ravel()
+        self._bx_widget.set_vector(flat[:self._q])
+        self._by_widget.set_vector(flat[self._q:])
 
     def is_valid(self) -> bool:
         return (
             self._f_widget.is_valid()
             and self._sigma_widget.is_valid()
             and self._mu_widget.is_valid()
-            and self._b_widget.is_valid()
+            and self._bx_widget.is_valid()
+            and self._by_widget.is_valid()
         )
 
     # ------------------------------------------------------------------

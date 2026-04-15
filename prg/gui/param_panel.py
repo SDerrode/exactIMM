@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QScrollArea,
 )
 
-from prg.gui.matrix_widget import MatrixTableWidget
+from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +59,20 @@ class _StateTab(QWidget):
             default_value=0.1,
         )
 
+        # Default μ_z0(k): zero vector (q+s components)
+        self._mu_widget = VectorWidget(
+            q + s,
+            title=f"μ_z0({k})",
+            default_value=0.0,
+        )
+
         layout.addWidget(self._f_widget)
         layout.addWidget(self._sigma_widget)
+        layout.addWidget(self._mu_widget)
 
         self._f_widget.validity_changed.connect(self._on_child_validity)
         self._sigma_widget.validity_changed.connect(self._on_child_validity)
+        self._mu_widget.validity_changed.connect(self._on_child_validity)
 
     # ------------------------------------------------------------------
     # Public
@@ -75,14 +84,24 @@ class _StateTab(QWidget):
     def get_Sigma_W(self) -> np.ndarray | None:
         return self._sigma_widget.get_matrix()
 
+    def get_mu_z0(self) -> np.ndarray | None:
+        return self._mu_widget.get_vector()
+
     def set_F(self, mat: np.ndarray) -> None:
         self._f_widget.set_matrix(mat)
 
     def set_Sigma_W(self, mat: np.ndarray) -> None:
         self._sigma_widget.set_matrix(mat)
 
+    def set_mu_z0(self, vec: np.ndarray) -> None:
+        self._mu_widget.set_vector(vec)
+
     def is_valid(self) -> bool:
-        return self._f_widget.is_valid() and self._sigma_widget.is_valid()
+        return (
+            self._f_widget.is_valid()
+            and self._sigma_widget.is_valid()
+            and self._mu_widget.is_valid()
+        )
 
     # ------------------------------------------------------------------
     # Internal
@@ -118,9 +137,9 @@ class ParamPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         info = QLabel(
-            f"K = {K} états,  q = {q} (caché),  s = {s} (observé)"
+            f"K = {K} states,  q = {q} (hidden),  s = {s} (observed)"
         )
-        info.setStyleSheet("color: #444; font-size: 11px; padding: 2px 4px;")
+        info.setStyleSheet("font-size: 11px; padding: 2px 4px;")
         layout.addWidget(info)
 
         self._tabs = QTabWidget()
@@ -134,7 +153,7 @@ class ParamPanel(QWidget):
             scroll = QScrollArea()
             scroll.setWidget(tab)
             scroll.setWidgetResizable(True)
-            self._tabs.addTab(scroll, f"État {k}")
+            self._tabs.addTab(scroll, f"State {k}")
             self._state_tabs.append(tab)
 
     # ------------------------------------------------------------------
@@ -161,10 +180,28 @@ class ParamPanel(QWidget):
             result.append(mat)
         return result
 
-    def set_state_params(self, k: int, F: np.ndarray, Sigma_W: np.ndarray) -> None:
-        """Load pre-built matrices into tab k."""
+    def get_mu_z0_list(self) -> list[np.ndarray] | None:
+        """Return list of K μ_z0(k) column vectors (q+s,1), or None if any invalid."""
+        result = []
+        for tab in self._state_tabs:
+            vec = tab.get_mu_z0()
+            if vec is None:
+                return None
+            result.append(vec)
+        return result
+
+    def set_state_params(
+        self,
+        k: int,
+        F: np.ndarray,
+        Sigma_W: np.ndarray,
+        mu_z0: np.ndarray | None = None,
+    ) -> None:
+        """Load pre-built matrices/vector into tab k."""
         self._state_tabs[k].set_F(F)
         self._state_tabs[k].set_Sigma_W(Sigma_W)
+        if mu_z0 is not None:
+            self._state_tabs[k].set_mu_z0(mu_z0)
 
     def is_valid(self) -> bool:
         return all(tab.is_valid() for tab in self._state_tabs)

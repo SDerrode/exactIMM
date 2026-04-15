@@ -48,8 +48,7 @@ class ModelGss_K2_q1_s1(BaseGSSModel):
     s: int = 1
 
     # --- Markov chain ---
-    P: np.ndarray = np.array([[0.9, 0.1],
-                               [0.2, 0.8]])
+    P: np.ndarray = np.array([[0.97, 0.03], [0.02, 0.98]])
 
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
     A_list: list[np.ndarray] = [np.array([[0.8]]), np.array([[0.5]])]
@@ -59,19 +58,19 @@ class ModelGss_K2_q1_s1(BaseGSSModel):
 
     # --- Noise covariances: Sigma_W(k) = [[Sigma_U, Delta], [Delta^T, Sigma_V]] ---
     Sigma_U_list: list[np.ndarray] = [np.array([[0.10]]), np.array([[0.20]])]
-    Delta_list:   list[np.ndarray] = [np.array([[0.05]]), np.array([[0.02]])]
+    Delta_list: list[np.ndarray] = [np.array([[0.05]]), np.array([[0.02]])]
     Sigma_V_list: list[np.ndarray] = [np.array([[0.10]]), np.array([[0.15]])]
 
     # --- Initial conditions ---
-    pi0: np.ndarray | None = None   # None → stationary distribution
+    pi0: np.ndarray | None = None  # None → stationary distribution
 
     mu_z0_list: list[np.ndarray] = [
-        np.zeros((2, 1)),   # k=0
-        np.zeros((2, 1)),   # k=1
+        np.zeros((2, 1)),  # k=0
+        np.zeros((2, 1)),  # k=1
     ]
     Sigma_z0_list: list[np.ndarray] = [
-        np.eye(2),          # k=0
-        np.eye(2),          # k=1
+        np.eye(2),  # k=0
+        np.eye(2),  # k=1
     ]
 
     # ------------------------------------------------------------------
@@ -88,9 +87,9 @@ class ModelGss_K2_q1_s1(BaseGSSModel):
             "C_list": self.C_list,
             "D_list": self.D_list,
             "Sigma_U_list": self.Sigma_U_list,
-            "Delta_list":   self.Delta_list,
+            "Delta_list": self.Delta_list,
             "Sigma_V_list": self.Sigma_V_list,
-            "pi0":           self.pi0,
-            "mu_z0_list":    self.mu_z0_list,
+            "pi0": self.pi0,
+            "mu_z0_list": self.mu_z0_list,
             "Sigma_z0_list": self.Sigma_z0_list,
         }

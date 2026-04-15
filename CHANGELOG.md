@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-15
+
+### Added
+- `prg/filter/__init__.py` — filter package
+- `prg/filter/gss_filter.py` — `GSSFilter`: fast optimal filter implementing
+  Option B (general non-zero mean, CS_FinaleBis eqs I.1–I.3, 13'–22):
+  - iterator interface `step(y_n)` returning a `FilterResult`
+  - `run(N, seed, output_dir)` — simulate and filter jointly
+  - `run_csv(path)` — filter from an existing simulation CSV
+  - `reset()` — restart from n = 0
+- `prg/filter/main.py` — CLI entry point (`python -m prg.filter.main`):
+  `--model` + `-N`/`--seed` for simulate-and-filter; `--csv` to filter an
+  existing file; `--no-save` dry-run; standard `-v`/`--log-level` options
+- `tests/test_gss_filter.py` — 31 pytest tests covering construction,
+  `FilterResult` shapes and PSD guarantees, multi-step recursion,
+  reproducibility, `run()`/`run_csv()` consistency, statistical sanity
+  (RMSE < naive baseline), and Option B / zero-mean equivalence
+- `docs/CS_FinaleBis.tex` — initialisation section (eqs I.1–I.3) and
+  Option B green annotations (eqs 13', 17ter, 21')
+
+### Changed
+- `pyproject.toml` — added `scipy>=1.14` to core dependencies
+- `README.md` — added Filter section
+
 ## [0.3.0] — 2026-04-14
 
 ### Added

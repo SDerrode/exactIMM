@@ -61,13 +61,13 @@ class PlotPanel(QWidget):
         # --- R_n step plot ---
         ax_r = self._axes[0]
         ax_r.step(ns_arr, rs, where="post", color="#555555", linewidth=1.2)
-        ax_r.set_ylabel("R_n", fontsize=9)
+        ax_r.set_ylabel(r"$R_n$", fontsize=10)
         ax_r.set_yticks(range(K))
         ax_r.set_ylim(-0.5, K - 0.5)
         ax_r.grid(True, linestyle=":", alpha=0.5)
-        ax_r.set_title("Simulation GSS", fontsize=10)
+        ax_r.set_title("GSS Simulation", fontsize=10)
 
-        # --- X_i components ---
+        # --- X^i components ---
         colours_x = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
         for i in range(self._q):
             ax = self._axes[1 + i]
@@ -75,12 +75,12 @@ class PlotPanel(QWidget):
                 ns_arr, xs[:, i],
                 color=colours_x[i % len(colours_x)],
                 linewidth=0.9,
-                label=f"X_{i}",
+                label=rf"$X^{i}$",
             )
-            ax.set_ylabel(f"X_{i}", fontsize=9)
+            ax.set_ylabel(rf"$X^{i}$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.5)
 
-        # --- Y_i components ---
+        # --- Y^i components ---
         colours_y = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
         for i in range(self._s):
             ax = self._axes[1 + self._q + i]
@@ -88,12 +88,62 @@ class PlotPanel(QWidget):
                 ns_arr, ys[:, i],
                 color=colours_y[i % len(colours_y)],
                 linewidth=0.9,
-                label=f"Y_{i}",
+                label=rf"$Y^{i}$",
             )
-            ax.set_ylabel(f"Y_{i}", fontsize=9)
+            ax.set_ylabel(rf"$Y^{i}$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.5)
 
-        self._axes[-1].set_xlabel("n", fontsize=9)
+        self._axes[-1].set_xlabel(r"$n$", fontsize=10)
+        self._canvas.draw_idle()
+
+    def add_filter_overlay(
+        self,
+        ns: list[int],
+        E_xs: np.ndarray,    # (N, q)
+        Var_xs: np.ndarray,  # (N, q)
+    ) -> None:
+        """Overlay filtered estimates on X_i subplots (dashed + ±2σ band)."""
+        self.clear_filter_overlay()
+        ns_arr = np.asarray(ns)
+        colour_filt = "#d62728"   # red
+
+        self._filter_artists: list = []
+        for i in range(self._q):
+            ax = self._axes[1 + i]
+            mu = E_xs[:, i]
+            sigma = np.sqrt(np.maximum(Var_xs[:, i], 0.0))
+
+            line, = ax.plot(
+                ns_arr, mu,
+                color=colour_filt, linewidth=1.2,
+                linestyle="--", label=rf"$\mathbb{{E}}[X^{i}\mid y]$",
+                zorder=3,
+            )
+            fill = ax.fill_between(
+                ns_arr, mu - 2 * sigma, mu + 2 * sigma,
+                color=colour_filt, alpha=0.15,
+                label=r"$\pm 2\sigma$",
+                zorder=2,
+            )
+            ax.legend(fontsize=7, loc="upper right")
+            self._filter_artists.extend([line, fill])
+
+        self._canvas.draw_idle()
+
+    def clear_filter_overlay(self) -> None:
+        """Remove previously drawn filter overlay artists."""
+        artists = getattr(self, "_filter_artists", [])
+        for a in artists:
+            try:
+                a.remove()
+            except ValueError:
+                pass
+        self._filter_artists = []
+        # Also clear legends that may reference removed artists
+        for i in range(self._q):
+            leg = self._axes[1 + i].get_legend()
+            if leg is not None:
+                leg.remove()
         self._canvas.draw_idle()
 
     # ------------------------------------------------------------------
@@ -105,10 +155,9 @@ class PlotPanel(QWidget):
             ax.set_visible(True)
             ax.text(
                 0.5, 0.5,
-                "Appuyer sur [Simuler] pour lancer une simulation",
+                "Press [Simulate] to run a simulation",
                 ha="center", va="center",
                 transform=ax.transAxes,
-                color="#aaaaaa",
                 fontsize=9,
             )
             ax.set_xticks([])

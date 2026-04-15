@@ -35,10 +35,15 @@ fofgss/
 │   │   ├── NoiseCovariance.py  # Block noise covariance Sigma_W(k)
 │   │   ├── GSSParams.py        # Aggregates all model parameters
 │   │   └── GSSSimulator.py     # Iterator-based simulator
-│   └── simulate.py             # CLI entry point
-├── tests/                      # 71 pytest tests
+│   ├── filter/
+│   │   ├── gss_filter.py       # GSSFilter — fast optimal filter (Option B)
+│   │   └── main.py             # CLI entry point for the filter
+│   ├── simulate.py             # CLI entry point for the simulator
+│   └── gui/                    # Optional PyQt6 graphical interface
+├── tests/                      # 106 pytest tests
 ├── data/
 │   └── simulated/              # Generated CSV files
+├── docs/                       # LaTeX source (CS_FinaleBis.tex, macros.tex)
 ├── logs/                       # Execution logs (one file per run)
 ├── config.toml                 # Runtime configuration
 └── pyproject.toml
@@ -94,6 +99,67 @@ Log files are written automatically to `logs/`.
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip CSV writing (dry run) |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
+
+---
+
+## Running the filter
+
+The filter computes $\mathbb{E}[X_n \mid Y_{1:n}]$, $\mathbb{E}[X_nX_n^T \mid Y_{1:n}]$, and $p(R_n \mid Y_{1:n})$ recursively.
+
+```bash
+# Simulate 1 000 steps and filter in one command
+python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42
+
+# Filter from an existing simulation CSV
+python -m prg.filter.main --model model_gss_K2_q1_s1 \
+    --csv data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
+
+# Dry run (no CSV written)
+python -m prg.filter.main --model model_gss_K2_q1_s1 -N 500 --no-save -v 2
+```
+
+Output CSV columns: `n, E_x_0, …, E_x_{q-1}, V_x_0, …, V_x_{q-1}, p_r_0, …, p_r_{K-1}, sq_err`
+
+| Column | Description |
+|---|---|
+| `E_x_i` | $\mathbb{E}[X_{n,i} \mid Y_{1:n}]$ — filtered mean |
+| `V_x_i` | $\mathrm{Var}(X_{n,i} \mid Y_{1:n})$ — posterior variance (diagonal) |
+| `p_r_k` | $p(R_n = k \mid Y_{1:n})$ — regime probability |
+| `sq_err` | $\|X_n - \mathbb{E}[X_n \mid Y_{1:n}]\|^2$ — squared error (requires true X) |
+
+### CLI options
+
+| Option | Default | Description |
+|---|---|---|
+| `--model` | — | Model name in `prg/models/` (required) |
+| `--csv` | `None` | Path to an existing simulation CSV |
+| `-N` | — | Steps to simulate (required without `--csv`) |
+| `--seed` | `None` | Random seed for simulation |
+| `--output` | auto | Output CSV filename for filter results |
+| `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
+| `--no-save` | `False` | Skip all CSV writing (dry run) |
+| `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
+
+### Python API
+
+```python
+from prg.classes.GSSParams import GSSParams
+from prg.models.model_gss_K2_q1_s1 import ModelGss_K2_q1_s1
+from prg.filter import GSSFilter
+
+params = GSSParams.from_model(ModelGss_K2_q1_s1())
+filt   = GSSFilter(params)
+
+# Step by step
+for y in observations:          # y shape (s,) or (s, 1)
+    res = filt.step(y)
+    print(res.E_x)              # E[X_n | y_{1:n}]  shape (q, 1)
+    print(res.Var_x)            # Var[X_n | y_{1:n}] shape (q, q)
+    print(res.pi)               # p(r_n | y_{1:n})   shape (K,)
+
+# Or in one call
+sim_path, df = filt.run(N=1000, seed=42, output_dir="data/simulated")
+```
 
 ---
 
@@ -169,8 +235,8 @@ source .venv/bin/activate
 pytest
 ```
 
-71 tests covering matrix diagnostics, parameter validation, iterator protocol,
-reproducibility, CSV output, and statistical sanity checks.
+102 tests covering matrix diagnostics, parameter validation, iterator protocol,
+reproducibility, CSV output, statistical sanity, and filter correctness.
 
 ---
 

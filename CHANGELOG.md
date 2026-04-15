@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-15
+
+### Added
+- **Regime-dependent drift bias `b(k)`** — extends the state equation to
+  `Z_{n+1} = F(r_{n+1}) Z_n + b(r_{n+1}) + W_{n+1}` (eq. 7bis, magenta)
+- `GSSParams` — new optional parameter `b_list` (list of K vectors shape
+  `(q+s, 1)`); new accessor `b(k)`; `from_model()` reads `b_list` from dict;
+  `summary()` prints bias values; backward-compatible (defaults to zero)
+- `GSSSimulator` — uses `params.b(r_n)` in the transition step
+- `GSSFilter` — mean propagation (17ter) adds `+ b(r_{n+1})`; conditional
+  mean of Y_{n+1} in (13') adds `+ b_Y(r_{n+1})`; second-moment recursion
+  corrected to `P_{n+1} = F w_P F^T + F w_µ b^T + b w_µ^T F^T + b b^T + Σ_W`
+  (ensures centred covariance `Σ = P − µµ^T` stays PSD for any bias magnitude)
+- All five model files — `b_list` attribute (zero by default); exported in
+  `get_params()`
+- `ParamPanel` / `_StateTab` — `VectorWidget` editable for each `b(k)`;
+  `get_b_list()`, `set_state_params(..., b=)` in `ParamPanel`
+- `GSSMainWindow` — passes `b_list` to `GSSParams`; exports `b_list` in
+  generated model file; loads `b_list` from model via `_load_model()`
+- `docs/CS_FinaleBis.tex` — equations (7), (7bis), (17ter), (13') updated
+  with `b_{r_{n+1}}` terms in **magenta**; definition block after (7ter)
+
+### Fixed
+- `GSSFilter._update_step` — second-moment propagation was incorrect when
+  `b ≠ 0` (missing cross-terms `F w_µ b^T + b w_µ^T F^T + b b^T`), causing
+  the centred covariance to go indefinite and the filter to diverge; now
+  MSE/variance ≈ 0.16 for a strong-bias test case (was ≫ 1 before the fix)
+
 ## [0.4.0] — 2026-04-15
 
 ### Added

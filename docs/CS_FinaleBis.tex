@@ -1,0 +1,510 @@
+%% Transcription LaTeX du document « CS Finale bis »
+%% On fast optimal filtering in Gaussian switching systems — version corrigée et augmentée
+\documentclass[12pt, a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{bm}          % \bm{} pour le gras mathématique (section 4)
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\usepackage{geometry}
+\geometry{top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm}
+\usepackage{microtype}
+
+\input{macros}   % \Ek, \pk, \Covk, \Vark, \VarInvk, \Nc, \tp, \inv, \rnn, …
+
+%% Espérance sous le modèle M_j : \EMj{j}{expression}
+\newcommand{\EMj}[2]{E_{\mathrm{M}_{#1}}\!\left[#2\right]}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt plus 1pt}
+
+\begin{document}
+
+\noindent\hfill\textit{15 avril 26}
+
+\begin{center}
+  {\large\bfseries On fast optimal filtering in Gaussian switching systems.}\\[6pt]
+  Stéphane Derrode \quad Clément Fernandes \quad Frédéric Lehmann \quad Wojciech Pieczynski
+\end{center}
+
+\medskip
+
+Pour $N \geq 3$, soient $X_{1:N} = (X_1, \ldots, X_N)$, $Y_{1:N} = (Y_1, \ldots, Y_N)$, et
+$R_{1:N} = (R_1, \ldots, R_N)$, trois processus stochastiques.
+$X_{1:N}$ et $Y_{1:N}$ sont à valeurs, respectivement, dans $\mathbb{R}^q$, $\mathbb{R}^s$, et
+$R_{1:N}$ est à valeurs dans $\Omega = \{1, \ldots, K\}$.
+Le problème est de calculer $\Ek{X_n}{\yN}$, pour tout $n = 1, \ldots, N$.
+
+On sait faire du filtrage et du lissage si
+\begin{align}
+  \text{(H1)} \quad & (\XN, \RN, \YN)
+    \text{ est de Markov et homogène;} \tag{1} \\
+  \text{(H2)} \quad & \pk{x_{1:N}, y_{1:N}}{r_{1:N}}
+    \text{ est gaussien ;} \tag{2} \\
+  \text{(H3)} \quad & \pk{r_{n+1}}{x_n, r_n, y_n} = \pk{r_{n+1}}{r_n}
+    \ \text{et}\ \pk{x_{n+1}, y_{n+1}}{r_n, r_{n+1}} = \pk{x_{n+1}, y_{n+1}}{r_{n+1}}
+    \tag{3} \\
+  \text{(H4)} \quad & \pk{r_{n+1}, y_{n+1}}{x_n, r_n, y_n} = \pk{r_{n+1}, y_{n+1}}{r_n, y_n}
+    \tag{4}
+\end{align}
+
+Notons qu'en posant $Z_n = [X_n\tp, Y_n\tp]\tp$, la chaîne $(\RN, Z_{1:N})$ est la très classique
+HMC à bruit corrélé.
+
+Rappelons que (H4) implique markovianité de $(\RN, \YN)$, qui implique la markovianité de
+$\pk{r_{1:N}}{y_{1:N}}$, à l'origine de la possibilité de filtrage optimal rapide..
+
+En fait chacune de ces hypothèses peut probablement être affaiblie, ce qui fait autant d'axes
+de recherche possibles. Ici on s'intéresse à (H4). (H1)--(H4) implique que les transitions
+sont de la forme
+\begin{equation}
+  \begin{bmatrix} X_{n+1} \\ Y_{n+1} \end{bmatrix}
+  = \begin{bmatrix} A_{r_{n+1}} & B_{r_{n+1}} \\ \mathbf{0} & D_{r_{n+1}} \end{bmatrix}
+    \begin{bmatrix} X_n \\ Y_n \end{bmatrix}
+  + \begin{bmatrix} U_{n+1} \\ V_{n+1} \end{bmatrix}, \tag{5}
+\end{equation}
+et l'existence de ce zéro pose problème dans les filtrages avec les modèles à sauts.
+
+Il s'agit donc de trouver une hypothèse différente de (H4), exploitable, qui supprimerait le
+zéro en question en gardant la possibilité de filtrage et lissage exacts.
+
+Considérons (H5) (équivalente à (H) de la proposition générale, qui est
+$\bm{p(r_n, y_n \mid x_{n+1}, r_{n+1}, y_{n+1}) = p(r_n, y_n|r_{n+1}, y_{n+1})}$) suivante :
+\begin{equation}
+  \text{(H5)} \quad
+  \pk{x_{n+1}}{r_{n+1}, y_{n+1}, r_n, y_n} = \pk{x_{n+1}}{r_{n+1}, y_{n+1}},
+  \tag{6}
+\end{equation}
+équivalent à
+\begin{equation}
+  \pk{r_n, y_n}{r_{n+1}, y_{n+1}, x_{n+1}} = \pk{r_n, y_n}{r_{n+1}, y_{n+1}}
+  \tag{6bis}
+\end{equation}
+
+Avec (H1)--(H3) et (H5) le modèle vérifie
+\begin{equation}
+  \underbrace{\begin{bmatrix} X_{n+1} \\ Y_{n+1} \end{bmatrix}}_{Z_{n+1}}
+  = \underbrace{\begin{bmatrix} A_{r_{n+1}} & B_{r_{n+1}} \\
+                                C_{r_{n+1}} & D_{r_{n+1}} \end{bmatrix}}_{F(r_{n+1})}
+    \underbrace{\begin{bmatrix} X_n \\ Y_n \end{bmatrix}}_{Z_n}
+  + {\color{magenta}\underbrace{\begin{bmatrix} b_{X,r_{n+1}} \\ b_{Y,r_{n+1}} \end{bmatrix}}_{b_{r_{n+1}}}}
+  + \underbrace{\begin{bmatrix} U_{n+1} \\ V_{n+1} \end{bmatrix}}_{W_{n+1}},
+  \tag{7}
+\end{equation}
+ou encore
+\begin{equation}
+  Z_{n+1} = F_{(r_{n+1})}\,Z_n + {\color{magenta}b_{r_{n+1}}} + W_{n+1}, \tag{7bis}
+\end{equation}
+avec
+\begin{equation}
+  \Vark{W_{n+1}}{r_{n+1}}
+  = \begin{bmatrix}
+      \Sigma_{U,r_{n+1}} & \Delta_{r_{n+1}} \\
+      \Delta_{r_{n+1}}\tp & \Sigma_{V,r_{n+1}}
+    \end{bmatrix} \tag{7ter}
+\end{equation}
+{\color{magenta}et $b_{r_{n+1}} = \bigl[b_{X,r_{n+1}}\tp,\, b_{Y,r_{n+1}}\tp\bigr]\tp \in \mathbb{R}^{q+s}$
+le vecteur de biais de dérive dépendant du régime ($b_{r_{n+1}} = 0$ redonne le modèle sans biais).}
+
+\noindent\textbf{Rappel} Dans le cas de mélange gaussien multidimensionnel
+$\pu{x, k, y} = \pu{k}\,\pk{x, y}{k}$ on a
+$\Ek{X}{y} = \sum_k \pk{k}{y}\,\Ek{X}{k, y}$ et
+$\Ek{X_n X_n\tp}{y} = \sum_k \pk{k}{y}\,\Ek{X_n X_n\tp}{k, y}$.
+On peut donc calculer $\Ek{X}{y}$ et $\Ek{X_n X_n\tp}{y}$ si on a les $\pk{k}{y}$,
+les $\Ek{X}{k, y}$, les $\Ek{X_n X_n\tp}{k, y}$, et on sait calculer les sommes.
+Dans le cas qui nous occupe $X = X_n$, $k = r_{1:n} = (r_1, \ldots, r_n)$,
+et $y = \yn = (y_1, \ldots, y_n)$. Le filtrage optimal sera « rapide » si on calcule
+$\Ek{X_{n+1}}{\ynp}$ et $\Vark{X_{n+1}}{\ynp}$ à partir de $\Ek{X_n}{\yn}$,
+$\Vark{X_n}{\yn}$, et $y_{n+1}$ en un nombre fini, indépendant de $n$, d'opérations.
+L'étonnant, dû à la markovianité, est que l'on puisse le calculer pour $n$ grand alors même
+que, pour $m$ valeurs possibles de $r_n$, $k = m^n$.
+
+Sachant que
+\begin{align}
+  \Ek{X_{n+1}}{\ynp}
+    &= \sum_{r_{n+1}} \pk{r_{n+1}}{\ynp}\,\Ek{X_{n+1}}{r_{n+1}, \ynp} \tag{8} \\[4pt]
+  \Vark{X_{n+1}}{\ynp}
+    &= \sum_{r_{n+1}} \pk{r_{n+1}}{\ynp}\,\Vark{X_{n+1}}{r_{n+1}, \ynp} \tag{9}
+\end{align}
+Il suffit de donner le calcul de $\pk{r_{n+1}}{\ynp}$, $\Ek{X_{n+1}}{r_{n+1}, \ynp}$,
+et $\Vark{X_{n+1}}{r_{n+1}, \ynp}$ à partir de $\pk{r_n}{\yn}$, $\Ek{X_n}{r_n, \yn}$,
+$\Vark{X_n}{y}$, et $y_{n+1}$ en un nombre fini, indépendant de $n$, d'opérations.
+
+\medskip
+\noindent\textbf{Remarque.} (H4) et (H5) impliquent que les lois marginales
+$\pu{x_n, r_n, y_n}$ de $(\XN, \RN, \YN)$ sont de la forme
+$\pu{x_n, r_n, y_n} = \pu{r_n}\,\pk{x_n, y_n}{r_n}$, avec $\pk{x_n, y_n}{r_n}$
+gaussiennes, on dira que $(\XN, \RN, \YN)$ est « stationnaire en forme des marginales ».
+
+\bigskip
+\noindent\textbf{1. Calcul de $\bm{p(r_{n+1}, y_{n+1}|r_n, y_n)}$ et
+  $\bm{p(r_{n+1}|y_{1:n+1})}$}
+
+\medskip
+On sait, de par la proposition générale, que $(\RN, \YN)$ est markovien.
+Par ailleurs, (H2) et (H3) impliquent que
+\begin{equation}
+  \pu{x_n, r_n, y_n, x_{n+1}, r_{n+1}, y_{n+1}}
+  = \pu{r_n, r_{n+1}}\,\pk{x_n, y_n, x_{n+1}, y_{n+1}}{r_n, r_{n+1}}
+  \tag{10}
+\end{equation}
+avec $\pk{x_n, y_n, x_{n+1}, y_{n+1}}{r_n, r_{n+1}}$ gaussienne. Il en résulte que
+\begin{equation}
+  \pu{r_n, y_n, r_{n+1}, y_{n+1}}
+  = \pu{r_n, r_{n+1}}\,\pk{y_n, y_{n+1}}{r_n, r_{n+1}},
+  \tag{11}
+\end{equation}
+avec $\pk{x_n, y_n, x_{n+1}, y_{n+1}}{r_n, r_{n+1}}$ gaussienne. Il s'ensuit :
+\begin{equation}
+  \pk{r_{n+1}, y_{n+1}}{r_n, y_n}
+  = \pk{r_{n+1}}{r_n}\,\pk{y_{n+1}}{y_n, r_n, r_{n+1}},
+  \tag{12}
+\end{equation}
+avec $\pk{y_{n+1}}{y_n, r_n, r_{n+1}} \sim \Nc(M_{\rnn}\,y_n,\,\Gamma_{\rnn})$
+\hfill(13)
+\begin{align}
+  M_{\rnn} &= \Covk{Y_{n+1}}{Y_n}{\rnn}\,\VarInvk{Y_n}{r_n}
+    \tag{14} \\[4pt]
+  \Gamma_{\rnn} &= \Vark{Y_{n+1}}{r_{n+1}}
+    - \Covk{Y_{n+1}}{Y_n}{\rnn}\,\VarInvk{Y_n}{r_n}\,\Covk{Y_n}{Y_{n+1}}{\rnn}
+    \tag{15}
+\end{align}
+
+Les matrices de covariances $\Vark{Y_n}{r_n}$, $\Covk{Y_{n+1}}{Y_n}{\rnn}$, et
+$\Vark{Y_{n+1}}{r_{n+1}}$ dans (13)--(14) sont extraites des matrices
+$\Covk{Z_{n+1}}{Z_n}{\rnn}$ et $\Vark{Z_{n+1}}{r_{n+1}}$
+--- on pose $Z_n = [X_n\tp, Y_n\tp]\tp$, voir (7bis) --- calculées récursivement par
+\begin{equation}
+  \Covk{Z_{n+1}}{Z_n}{\rnn} = F_{r_{n+1}}\,\Vark{Z_n}{r_n}; \tag{16}
+\end{equation}
+\begin{equation}
+  \Vark{Z_{n+1}}{r_{n+1}}
+  = \sum_{r_n} \pk{r_n}{r_{n+1}}\,F_{r_{n+1}}\,\Vark{Z_n}{r_n}\,F_{r_{n+1}}\tp
+    + \Vark{W_{n+1}}{r_{n+1}}, \tag{17}
+\end{equation}
+avec
+\begin{equation}
+  \pk{r_n}{r_{n+1}} = \frac{\pu{r_n}\,\pk{r_{n+1}}{r_n}}%
+    {\displaystyle\sum_{r_n} \pu{r_n}\,\pk{r_{n+1}}{r_n}}
+  \tag{17bis}
+\end{equation}
+et les marginales $\pu{r_n}$ calculées classiquement.
+
+{\color{green!60!black}
+\smallskip
+\noindent\textbf{Option B — moyenne non nulle.}
+Si $\mu_n(r) := \Ek{Z_n}{r_n=r} \neq 0$, les seconds moments $\Vark{Z_n}{r_n}$
+seront notés $P_n(r_n)$ et les covariances \emph{centrées} $\Sigma_n(r_n) := P_n(r_n) - \mu_n(r_n)\,\mu_n(r_n)\tp$
+remplacent les seconds moments dans toutes les formules de conditionnement.
+Les moyennes marginales se propagent en parallèle des seconds moments (17) :
+\begin{equation}
+  \mu_{n+1}(r_{n+1}) \;=\; F_{r_{n+1}}\!\sum_{r_n} \pk{r_n}{r_{n+1}}\,\mu_n(r_n)
+  {\color{magenta}\;+\; b_{r_{n+1}}}.
+  \tag{17ter}
+\end{equation}
+En particulier, l'équation (13) se corrige en
+\begin{equation}
+  \pk{y_{n+1}}{y_n,\,\rnn}
+  \;\sim\; \Nc\!\left(
+    \mu_{Y,n+1}(\rnn)
+    + \widetilde{M}_{\rnn}\,\bigl(y_n - \mu_{Y,n}(r_n)\bigr),\;
+    \widetilde{\Gamma}_{\rnn}
+  \right),
+  \tag{13'}
+\end{equation}
+où $\mu_{Y,n+1}(\rnn) := \bigl[C_{r_{n+1}},\,D_{r_{n+1}}\bigr]\,\mu_n(r_n)
+{\color{magenta}\;+\; b_{Y,r_{n+1}}}$
+est la moyenne de $Y_{n+1}$ sachant $\rnn$, et $\widetilde{M}_{\rnn}$, $\widetilde{\Gamma}_{\rnn}$
+sont définis par (14)--(15) en substituant les blocs de $\Sigma_n(\cdot)$ aux blocs de $P_n(\cdot)$.
+}
+
+Cela termine le calcul de $\pk{r_{n+1}, y_{n+1}}{r_n, y_n}$ ; $\pk{r_{n+1}}{\ynp}$ est
+donné classiquement par :
+\begin{equation}
+  \pk{r_{n+1}}{\ynp}
+  = \frac{\displaystyle\sum_{r_n} \pu{r_n, \yn}\,\pk{r_{n+1}, y_{n+1}}{r_n, y_n}}
+         {\displaystyle\sum_{r_n, r_{n+1}} \pu{r_n, \yn}\,\pk{r_{n+1}, y_{n+1}}{r_n, y_n}}
+  \tag{18}
+\end{equation}
+En effet :
+\begin{align*}
+  \pk{r_{n+1}}{\ynp}
+  &= \sum_{r_n} \pk{r_n, r_{n+1}}{\ynp} \\
+  &= \frac{\displaystyle\sum_{r_n} \pu{r_n, r_{n+1}, \ynp}}
+          {\displaystyle\sum_{r_n, r_{n+1}} \pu{r_n, r_{n+1}, \ynp}}
+   = \frac{\displaystyle\sum_{r_n} \pu{r_n, \yn}\,\pk{r_{n+1}, y_{n+1}}{r_n, y_n}}
+          {\displaystyle\sum_{r_n, r_{n+1}} \pu{r_n, \yn}\,\pk{r_{n+1}, y_{n+1}}{r_n, y_n}}
+\end{align*}
+
+\bigskip
+\noindent\textbf{2. Calcul de $\bm{E[X_{n+1}|r_{n+1}, y_{1:n+1}]}$ et
+  $\bm{E[X_{n+1}X_{n+1}^T|r_{n+1}, y_{1:n+1}]}$}
+
+\medskip
+Le calcul de $\Ek{X_{n+1}}{r_{n+1}, \ynp}$ est immédiat à partir des identités suivantes,
+justifiée (en bleu) juste après le point~3 :
+\begin{align}
+  \Ek{X_{n+1}}{r_{n+1}, \ynp} &= \Ek{X_{n+1}}{r_{n+1}, y_{n+1}} \tag{19} \\[4pt]
+  \Vark{X_{n+1}}{r_{n+1}, \ynp} &= \Vark{X_{n+1}}{r_{n+1}, y_{n+1}} \tag{20}
+\end{align}
+En effet, $\Ek{X_{n+1}}{r_{n+1}, y_{n+1}}$ et $\Vark{X_{n+1}}{r_{n+1}, \ynp}$ sont
+calculées simplement à partir de $\Vark{Z_{n+1}}{r_{n+1}}$, donnée séquentiellement par
+(16) et (17) :
+\[
+  \pk{x_{n+1}}{y_{n+1}, r_{n+1}}
+  \sim \Nc\!\left(M_{r_{n+1}}\,y_{n+1},\,\Gamma_{r_{n+1}}\right),
+\]
+avec
+\begin{align}
+  M_{r_{n+1}} &= \Covk{X_{n+1}}{Y_{n+1}}{r_{n+1}}\,\VarInvk{Y_{n+1}}{r_{n+1}}
+    \tag{21} \\[4pt]
+  \Gamma_{\rnn} &= \Vark{X_{n+1}}{r_{n+1}}
+    - \Covk{X_{n+1}}{Y_{n+1}}{r_{n+1}}\,\VarInvk{Y_{n+1}}{r_{n+1}}\,\Covk{Y_{n+1}}{X_{n+1}}{r_{n+1}}
+    \tag{22}
+\end{align}
+
+{\color{green!60!black}
+\smallskip
+\noindent\textbf{Option B.}
+La distribution $\pk{x_{n+1}}{r_{n+1}, y_{n+1}} \sim \Nc(M_{r_{n+1}}\,y_{n+1},\,\Gamma_{r_{n+1}})$
+ci-dessus suppose $\mu_{n+1}(r_{n+1}) = 0$.
+Dans le cas général, le gain de Kalman (21) utilise les blocs de la covariance centrée
+$\Sigma_{n+1}(r_{n+1}) = P_{n+1}(r_{n+1}) - \mu_{n+1}(r_{n+1})\,\mu_{n+1}(r_{n+1})\tp$,
+et la moyenne conditionnelle se corrige en
+\begin{equation}
+  \Ek{X_{n+1}}{r_{n+1},\,y_{n+1}}
+  \;=\; \mu_{X,n+1}(r_{n+1})
+        + K_{r_{n+1}}\,\bigl(y_{n+1} - \mu_{Y,n+1}(r_{n+1})\bigr),
+  \tag{21'}
+\end{equation}
+où $K_{r_{n+1}} = \Sigma_{XY,n+1}(r_{n+1})\,\Sigma_{YY,n+1}(r_{n+1})\inv$,
+et $\mu_{X,n+1}(r_{n+1})$, $\mu_{Y,n+1}(r_{n+1})$ sont les blocs $X$ et $Y$
+de $\mu_{n+1}(r_{n+1})$ calculé par (17ter).
+La formule (22) pour $\Gamma_{r_{n+1}}$ reste inchangée en substituant $\Sigma_{n+1}$ à $P_{n+1}$.
+}
+
+\bigskip
+\noindent\textbf{3. Calcul de $\bm{E[X_{n+1}|y_{1:n+1}]}$ et
+  $\bm{E[X_{n+1}X_{n+1}^T|y_{1:n+1}]}$ par (8)--(9) et (21)--(22)}
+
+\medskip
+{\color{blue}
+Pour justifier (19), (20) on reprend la démonstration de la proposition~1.
+En posant $w_n = (r_n, y_n)$ pour tout $n$, on a, après l'inversion du temps
+(on prend $N = n + 1$) :
+\begin{align*}
+  \pu{x_{1:n+1}, w_{1:n+1}} = {}
+  &\bigl[\pk{w_1}{w_2}\,\pk{w_2}{w_3}\cdots\pk{w_{n-1}}{w_n}\,\pk{w_n}{w_{n+1}}\,\pu{w_{n+1}}\bigr] \\
+  &\bigl[\pk{x_1}{w_1, w_2, x_2}\,\pk{x_2}{w_2, w_3, x_3}\cdots \\
+  &\quad (x_{n-1}|w_{n-1}, w_n, x_n)\,\pk{x_n}{w_n, w_{n+1}, x_{n+1}}\,\pk{x_{n+1}}{w_{n+1}}\bigr].
+\end{align*}
+En intégrant par rapport à $x_1, x_2, \ldots, x_n$, cela donne
+\[
+  \pu{x_{n+1}, w_{1:n+1}}
+  = \pk{w_1}{w_2}\,\pk{w_2}{w_3}\cdots\pk{w_{n-1}}{w_n}\,\pk{w_n}{w_{n+1}}\,\pu{w_{n+1}}\,
+    \pk{x_{n+1}}{w_{n+1}},
+\]
+qui implique $\pk{x_{n+1}}{w_{1:n+1}} = \pk{x_{n+1}}{w_{n+1}}$, d'où (19) et (20).
+}% fin {\color{blue}}
+
+\bigskip
+\noindent\textbf{En résumé, le filtrage est le suivant :}
+
+\medskip
+Soient $\pk{r_n}{\yn}$, $\Ek{Z_n}{r_n, \yn}$,
+$\Vark{Z_n}{\yn} = \Vark{Z_n}{y_n}$ données
+(qui donnent donc également $\Ek{X_n}{r_n, y_n}$ et $\Vark{X_n}{\yn}$).
+{\color{green!60!black}En option B, l'état inclut aussi $\mu_n(r_n) = \Ek{Z_n}{r_n}$ pour chaque $r_n$.}
+
+\begin{itemize}
+  \item[(i)] calcul de $\Covk{Z_{n+1}}{Z_n}{\rnn}$ et $\Vark{Z_{n+1}}{r_{n+1}}$
+    avec (16)--(17), ensuite $\pk{r_{n+1}, y_{n+1}}{r_n, y_n}$ avec (12)--(15), et
+    $\pk{r_{n+1}}{\ynp}$ avec (18) ;
+    {\color{green!60!black}[option B : calculer aussi $\mu_{n+1}(r_{n+1})$ par (17ter) {\color{magenta}(avec biais $b_{r_{n+1}}$)} et utiliser (13') à la place de (13)]}
+  \item[(ii)] calcul de $\Ek{X_{n+1}}{r_{n+1}, \ynp}$
+    (qui est égal à $\Ek{X_{n+1}}{r_{n+1}, y_{n+1}}$) et
+    $\Vark{X_{n+1}}{r_{n+1}, \ynp}$
+    (qui est égal à $\Vark{X_{n+1}}{r_{n+1}, y_{n+1}}$) avec (19)--(22) ;
+    {\color{green!60!black}[option B : utiliser (21') à la place de $M_{r_{n+1}} y_{n+1}$]}
+  \item[(iii)] calcul de $\Ek{X_{n+1}}{\ynp}$ et $\Vark{X_{n+1}}{\ynp}$ par (8)--(9).
+\end{itemize}
+
+\bigskip
+
+% -----------------------------------------------------------------------
+% Figure 1 — Calcul récursif du filtre optimal
+% -----------------------------------------------------------------------
+\begin{figure}[h!]
+\centering
+\begin{tikzpicture}[
+  box/.style  = {draw, rounded corners=3pt, minimum width=6.0cm,
+                 minimum height=1.4cm, align=center, font=\small},
+  lbox/.style = {draw, rounded corners=3pt, minimum width=5.2cm,
+                 minimum height=1.4cm, align=center, font=\small},
+  arr/.style  = {-{Stealth[length=7pt, width=5pt]}, thick},
+  node distance = 1.0cm and 2.0cm
+]
+
+%% Boîte gauche (unique)
+\node[lbox] (L) {%
+  $\Ek{Z_n}{r_n,\,\yn}$,\quad $\Vark{Z_n}{\yn}$};
+
+%% Colonne droite (3 boîtes)
+\node[box, right=of L] (R1) {%
+  $\Ek{Z_{n+1}}{r_{n+1}}$,\quad $\Covk{Z_{n+1}}{Z_n}{\rnn}$,\\[2pt]
+  $\Vark{Z_{n+1}}{r_{n+1}}$};
+
+\node[box, below=of R1] (R2) {%
+  $\pk{r_{n+1}, y_{n+1}}{r_n, y_n}$,\quad $\pk{r_{n+1}}{\ynp}$};
+
+\node[box, below=of R2] (R3) {%
+  $\Ek{X_{n+1}}{\ynp}$,\quad $\Vark{X_{n+1}}{\ynp}$};
+
+%% Flèche horizontale
+\draw[arr] (L) -- (R1);
+
+%% Flèches verticales (colonne droite)
+\draw[arr] (R1) -- (R2);
+\draw[arr] (R2) -- (R3);
+
+\end{tikzpicture}
+\caption{Calcul récursif du filtre optimal et de son erreur quadratique}
+\end{figure}
+
+Finalement, l'important est les récursions (16) et (17), qui permettent de calculer les lois
+des marginales $(X_n, R_n, Y_n)$ et la loi de $(\RN, \YN)$.
+Ensuite (19) et (20) permettent de conclure.
+
+% -----------------------------------------------------------------------
+% Section 0 — Initialisation du filtre (n = 1)
+% -----------------------------------------------------------------------
+\bigskip
+\noindent\textbf{0.\ Initialisation du filtre ($n = 1$)}
+
+\medskip
+La récursion (i)--(iii) démarre à $n = 1$ après réception de $y_1$.
+Le modèle fournit, pour chaque régime $r \in \{1, \ldots, K\}$ :
+\begin{itemize}
+  \item[$-$] $\pi_0(r) = p(r_1 = r)$ : distribution stationnaire de $P$ ;
+  \item[$-$] $\mu_{z_0}(r) = \Ek{Z_1}{r_1=r} \in \mathbb{R}^{q+s}$ ;
+  \item[$-$] $\Sigma_{z_0}(r) = \mathrm{Var}(Z_1 \mid r_1=r) \in \mathbb{S}_{++}^{q+s}$.
+\end{itemize}
+On note les blocs de taille $q$ et $s$ :
+\[
+  \mu_{z_0}(r) = \begin{bmatrix}\mu_{X,0}(r)\\\mu_{Y,0}(r)\end{bmatrix}, \qquad
+  \Sigma_{z_0}(r) = \begin{bmatrix}\Sigma_{XX,0}(r) & \Sigma_{XY,0}(r) \\
+    \Sigma_{XY,0}(r)\tp & \Sigma_{YY,0}(r)\end{bmatrix}.
+\]
+Le second moment initial --- nécessaire pour les équations (16)--(17) --- est :
+\begin{equation}
+  P_{z_0}(r) \;:=\; \Ek{Z_1 Z_1\tp}{r_1=r}
+  \;=\; \Sigma_{z_0}(r) + \mu_{z_0}(r)\,\mu_{z_0}(r)\tp
+  \;=\; \begin{bmatrix}P_{XX,0}(r) & P_{XY,0}(r)\\P_{XY,0}(r)\tp & P_{YY,0}(r)\end{bmatrix}.
+  \tag{I.1}
+\end{equation}
+
+\noindent\textbf{Traitement de la première observation $y_1$.}
+La loi marginale de $Y_1$ sachant $r_1 = r$ est
+$\pk{y_1}{r_1=r} = \Nc\!\left(y_1;\,\mu_{Y,0}(r),\,\Sigma_{YY,0}(r)\right)$, d'où
+\begin{equation}
+  \pk{r_1=r}{y_1} = \frac{\pi_0(r)\;\Nc\!\left(y_1;\,\mu_{Y,0}(r),\,\Sigma_{YY,0}(r)\right)}%
+    {\displaystyle\sum_{r'=1}^{K}\pi_0(r')\;\Nc\!\left(y_1;\,\mu_{Y,0}(r'),\,\Sigma_{YY,0}(r')\right)}.
+  \tag{I.2}
+\end{equation}
+Le gain de Kalman initial et la moyenne conditionnelle de $Z_1$ sachant $(r_1=r,\,y_1)$ sont :
+\begin{equation}
+  M_r = \Sigma_{XY,0}(r)\,\Sigma_{YY,0}(r)\inv, \qquad
+  \Ek{Z_1}{r_1=r,\,y_1}
+  = \begin{bmatrix}
+      \mu_{X,0}(r) + M_r\bigl(y_1 - \mu_{Y,0}(r)\bigr)\\[3pt] y_1
+    \end{bmatrix}.
+  \tag{I.3}
+\end{equation}
+Les grandeurs $\pk{r_1}{y_1}$, $\Ek{Z_1}{r_1,\,y_1}$ et $P_{z_0}(r)$ constituent l'état initial
+de la récursion (i)--(iii).
+{\color{green!60!black}En option B, $\mu_1(r) := \mu_{z_0}(r)$ est la valeur initiale de la récursion (17ter) ;
+la formule (I.3) est déjà la formule générale avec correction de moyenne.}
+
+% -----------------------------------------------------------------------
+% Section 4 — Simulations (en rouge : rédaction préliminaire)
+% -----------------------------------------------------------------------
+\bigskip
+{\color{red}
+\noindent\textbf{4. Simulations}
+
+\medskip
+Attention, c'est plus une idée générale qu'une rédaction rigoureuse.
+
+Considérons trois modèles triplets $T_{1:\mathrm{N}} = (\mathbf{X_{1:N}}, \mathbf{R_{1:N}},
+\mathbf{Y_{1:N}})$, notés $\mathrm{M}_1$, $\mathrm{M}_2$, $\mathrm{M}_3$, vérifiant
+(H1)--(H3). Leurs lois sont définies par les lois $\pk{r_1, r_2}{}$%
+\footnote{On utilise ici la notation par paires $(r_1,r_2)$, $(z_1,z_2)$ pour la présentation
+  à deux pas de temps.}
+et $\pk{z_1, z_2}{r_1, r_2}$. En effet, on peut, à partir de ces lois données, déterminer la
+présentation (7)--(7ter).
+
+On prend les $\pu{r_1, r_2}$, $\pk{z_1}{r_1}$, et $\pk{z_2}{r_2}$ communes aux trois modèles,
+ainsi que les covariances $\Covk{X_2}{X_1}{r_1, r_2}$, et $\Covk{Y_2}{Y_1}{r_1, r_2}$.
+La différence entre $\mathrm{M}_1$ et $\mathrm{M}_2$ (qui sera de type « $C=0$ ») est au
+niveau de $\Covk{Y_2}{X_1}{r_2, r_1}$, et la différence entre $\mathrm{M}_1$ et $\mathrm{M}_3$
+(qui sera le nouveau modèle proposé) est au niveau de $\Covk{Y_1}{X_2}{r_1, r_2}$.
+L'idée est donc de considérer $\mathrm{M}_2$ et $\mathrm{M}_3$ comme des
+« approximations » de $\mathrm{M}_1$, et comparer leurs qualités en tant que telles.
+
+La loi de $\mathrm{M}_1$ est donc donnée par $\pu{r_1, r_2}$, $\pk{z_1}{r_1}$, et
+$\pk{z_2}{r_2}$, et
+\begin{equation}
+  \EMj{1}{Z_2 Z_1\tp \mid r_1, r_2}
+  = \begin{bmatrix}
+      \Covk{X_2}{X_1}{r_2, r_1} & \Covk{X_2}{Y_1}{r_2, r_1} \\[4pt]
+      \Covk{Y_2}{X_1}{r_2, r_1} & \Covk{Y_2}{Y_1}{r_2, r_1}
+    \end{bmatrix}
+  \tag{4.1}
+\end{equation}
+
+La loi de $\mathrm{M}_2$ est obtenue à partir de (4.1) en remplaçant
+$\Covk{Y_2}{X_1}{r_2, r_1}$ par
+$\Covk{Y_2}{Y_1}{r_2, r_1}\,\mathbf{E}^{-1}[\mathbf{Y_1 Y_1\tp}\,|\,r_1]\,\mathbf{E}[\mathbf{Y_1 X_1\tp}\,|\,\mathbf{r_1}]$ :
+\begin{equation}
+  \EMj{2}{Z_2 Z_1\tp \mid r_1, r_2}
+  = \begin{bmatrix}
+      \Covk{X_2}{X_1}{r_2, r_1} & \Covk{X_2}{Y_1}{r_2, r_1} \\[4pt]
+      \Covk{Y_2}{Y_1}{r_2, r_1}\,\mathbf{E}^{-1}[\mathbf{Y_1 Y_1\tp}\,|\,r_1]\,\mathbf{E}[\mathbf{Y_1 X_1\tp}\,|\,\mathbf{r_1}]
+        & \Covk{Y_2}{Y_1}{r_2, r_1}
+    \end{bmatrix}
+  \tag{4.2}
+\end{equation}
+
+Et la loi de $\mathrm{M}_3$, obtenue à partir de $\mathrm{M}_1$ en remplaçant l'espérance
+$\Covk{Y_1}{X_2}{r_1, r_2}$ par
+$\Covk{Y_1}{Y_2}{r_1, r_2}\,\mathbf{E}^{-1}[\mathbf{Y_2 Y_2\tp}\,|\,r_2]\,\mathbf{E}[\mathbf{Y_2 X_2\tp}\,|\,\mathbf{r_2}]$,
+ce qui revient à remplacer dans (4.1) $\Covk{X_2}{Y_1}{r_2, r_1}$ par
+$\Covk{X_2}{Y_2}{r_2}\,E\inv[\Covk{Y_2}{Y_2}{r_2}]\,\Covk{Y_2}{Y_1}{r_2, r_1}$ :
+\begin{equation}
+  \EMj{3}{Z_2 Z_1\tp \mid r_1, r_2}
+  = \begin{bmatrix}
+      \Covk{X_2}{X_1}{r_2, r_1}
+        & \Covk{X_2}{Y_2}{r_2}\,\VarInvk{Y_2}{r_2}\,\Covk{Y_2}{Y_1}{r_2, r_1} \\[4pt]
+      \Covk{Y_2}{X_1}{r_2, r_1} & \Covk{Y_2}{Y_1}{r_2, r_1}
+    \end{bmatrix}
+  \tag{4.3}
+\end{equation}
+
+Ainsi, en considérant le modèle « $C=0$ » et le nouveau proposé comme deux approximations
+de $\mathrm{M}_1$, on pourrait évaluer laquelle est meilleure (en veillant que les deux
+approximations soient du « même ordre »).
+
+Notons que (4.3) donne $F_{(r_{n+1})}$ de $\mathrm{M}_3$ :
+\begin{equation*}
+  \mathbf{F}_{\mathrm{M}_3,\, r_{n+1}}
+  = \EMj{3}{Z_2 Z_1\tp \mid r_1, r_2}\,\VarInvk{Y_1}{r_1}
+\end{equation*}
+On devrait donc pouvoir simuler selon $\mathrm{M}_3$ et filtrer selon $\mathrm{M}_3$, et
+réciproquement. Ce type d'étude pourrait servir --- par ailleurs --- aux études du lissage.
+
+}% fin {\color{red}}
+
+\end{document}

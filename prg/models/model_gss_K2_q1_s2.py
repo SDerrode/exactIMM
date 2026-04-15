@@ -94,6 +94,12 @@ class ModelGss_K2_q1_s2(BaseGSSModel):
         np.eye(3),           # k=1
     ]
 
+    # --- Drift bias b(k) — zero by default ---
+    b_list: list[np.ndarray] = [
+        np.zeros((3, 1)),   # k=0
+        np.zeros((3, 1)),   # k=1
+    ]
+
     # ------------------------------------------------------------------
 
     def get_params(self) -> dict:
@@ -107,4 +113,5 @@ class ModelGss_K2_q1_s2(BaseGSSModel):
             "pi0": self.pi0,
             "mu_z0_list": self.mu_z0_list,
             "Sigma_z0_list": self.Sigma_z0_list,
+            "b_list": self.b_list,
         }

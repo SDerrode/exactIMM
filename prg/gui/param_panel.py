@@ -66,13 +66,22 @@ class _StateTab(QWidget):
             default_value=0.0,
         )
 
+        # Default b(k): zero drift bias (q+s components)
+        self._b_widget = VectorWidget(
+            q + s,
+            title=f"b({k})",
+            default_value=0.0,
+        )
+
         layout.addWidget(self._f_widget)
         layout.addWidget(self._sigma_widget)
         layout.addWidget(self._mu_widget)
+        layout.addWidget(self._b_widget)
 
         self._f_widget.validity_changed.connect(self._on_child_validity)
         self._sigma_widget.validity_changed.connect(self._on_child_validity)
         self._mu_widget.validity_changed.connect(self._on_child_validity)
+        self._b_widget.validity_changed.connect(self._on_child_validity)
 
     # ------------------------------------------------------------------
     # Public
@@ -87,6 +96,9 @@ class _StateTab(QWidget):
     def get_mu_z0(self) -> np.ndarray | None:
         return self._mu_widget.get_vector()
 
+    def get_b(self) -> np.ndarray | None:
+        return self._b_widget.get_vector()
+
     def set_F(self, mat: np.ndarray) -> None:
         self._f_widget.set_matrix(mat)
 
@@ -96,11 +108,15 @@ class _StateTab(QWidget):
     def set_mu_z0(self, vec: np.ndarray) -> None:
         self._mu_widget.set_vector(vec)
 
+    def set_b(self, vec: np.ndarray) -> None:
+        self._b_widget.set_vector(vec)
+
     def is_valid(self) -> bool:
         return (
             self._f_widget.is_valid()
             and self._sigma_widget.is_valid()
             and self._mu_widget.is_valid()
+            and self._b_widget.is_valid()
         )
 
     # ------------------------------------------------------------------
@@ -190,18 +206,31 @@ class ParamPanel(QWidget):
             result.append(vec)
         return result
 
+    def get_b_list(self) -> list[np.ndarray] | None:
+        """Return list of K b(k) drift bias vectors (q+s,1), or None if any invalid."""
+        result = []
+        for tab in self._state_tabs:
+            vec = tab.get_b()
+            if vec is None:
+                return None
+            result.append(vec)
+        return result
+
     def set_state_params(
         self,
         k: int,
         F: np.ndarray,
         Sigma_W: np.ndarray,
         mu_z0: np.ndarray | None = None,
+        b: np.ndarray | None = None,
     ) -> None:
         """Load pre-built matrices/vector into tab k."""
         self._state_tabs[k].set_F(F)
         self._state_tabs[k].set_Sigma_W(Sigma_W)
         if mu_z0 is not None:
             self._state_tabs[k].set_mu_z0(mu_z0)
+        if b is not None:
+            self._state_tabs[k].set_b(b)
 
     def is_valid(self) -> bool:
         return all(tab.is_valid() for tab in self._state_tabs)

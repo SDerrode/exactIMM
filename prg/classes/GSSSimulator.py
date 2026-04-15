@@ -142,7 +142,7 @@ class GSSSimulator:
             F = params.f_matrix.F(r_n)        # (dim_z, dim_z)
             L = params.noise_cov.chol_W(r_n)  # (dim_z, dim_z)
             noise = self._rng.standard_normal((params.dim_z, 1))
-            z_n = F @ self._z_prev + L @ noise
+            z_n = F @ self._z_prev + params.b(r_n) + L @ noise
 
         if __debug__:
             if not np.all(np.isfinite(z_n)):

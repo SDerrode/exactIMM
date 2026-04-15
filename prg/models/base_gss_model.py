@@ -56,6 +56,11 @@ class BaseGSSModel(ABC):
     Delta_list   : list[(q, s)]  — cross-covariance
     Sigma_V_list : list[(s, s)]  — cov of noise on Y
 
+    Drift bias (optional — defaults to zero)
+    -----------------------------------------
+    b_list : list[(q+s, 1)]  — regime-dependent bias b(k) in eq (7bis).
+                               If absent or None, b(k) = 0 for all k.
+
     Initial conditions
     ------------------
     pi0           : ndarray (K,) or None

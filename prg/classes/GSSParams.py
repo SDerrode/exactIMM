@@ -5,6 +5,10 @@ prg/classes/GSSParams.py
 ========================
 Aggregates all parameters of the GSS model (equations 7, 7bis, 7ter).
 
+The model equation is:
+  Z_{n+1} = F(r_{n+1}) Z_n + b(r_{n+1}) + W_{n+1}
+where b(k) is the regime-dependent drift bias (zero by default).
+
 GSSParams is the single source of truth passed to GSSSimulator (and
 later to filters/smoothers).  It validates every parameter at
 construction time so that downstream code can assume correctness.
@@ -48,6 +52,10 @@ class GSSParams:
         Initial mean of Z_0 given R_0 = k.
     Sigma_z0_list : list of K ndarrays, each shape (q+s, q+s)
         Initial covariance of Z_0 given R_0 = k.
+    b_list : list of K ndarrays, each shape (q+s, 1), optional
+        Regime-dependent drift bias b(k) in the transition equation
+        Z_{n+1} = F(k) Z_n + b(k) + W_{n+1}.
+        If None or omitted, b(k) = 0 for all k.
 
     Raises
     ------
@@ -74,6 +82,7 @@ class GSSParams:
         pi0: np.ndarray | None,
         mu_z0_list: list[np.ndarray],
         Sigma_z0_list: list[np.ndarray],
+        b_list: list[np.ndarray] | None = None,
     ) -> None:
         if __debug__:
             self._validate_scalars(K, q, s)
@@ -99,6 +108,13 @@ class GSSParams:
 
         self._mu_z0 = [np.array(m, dtype=float) for m in mu_z0_list]
         self._Sigma_z0 = [np.array(S, dtype=float) for S in Sigma_z0_list]
+
+        # Drift bias b(k): None → zero vector for all k
+        zero = np.zeros((q + s, 1), dtype=float)
+        if b_list is None:
+            self._b = [zero.copy() for _ in range(K)]
+        else:
+            self._b = [np.array(b, dtype=float).reshape(q + s, 1) for b in b_list]
 
         # Cache Cholesky factors of Sigma_z0 for efficient sampling
         self._chol_z0: list[np.ndarray] = []
@@ -149,6 +165,7 @@ class GSSParams:
             pi0=p["pi0"],
             mu_z0_list=p["mu_z0_list"],
             Sigma_z0_list=p["Sigma_z0_list"],
+            b_list=p.get("b_list", None),
         )
 
     # ------------------------------------------------------------------
@@ -305,6 +322,10 @@ class GSSParams:
     def noise_cov(self) -> GSSNoiseCovariance:
         return self._noise_cov
 
+    def b(self, k: int) -> np.ndarray:
+        """Drift bias for regime k, shape (q+s, 1).  Zero if not set."""
+        return self._b[k]
+
     def mu_z0(self, k: int) -> np.ndarray:
         """Initial mean of Z_0 given R_0 = k, shape (q+s, 1)."""
         return self._mu_z0[k]
@@ -341,6 +362,9 @@ class GSSParams:
         for k in range(self._K):
             print(f"  k={k}  mu_z0: {self._mu_z0[k].ravel()}"
                   f"   Sigma_z0:\n{fmt(self._Sigma_z0[k])}")
+        print("\nDrift bias b(k):")
+        for k in range(self._K):
+            print(f"  k={k}  b: {self._b[k].ravel()}")
         print("=" * 50)
 
     def __repr__(self) -> str:

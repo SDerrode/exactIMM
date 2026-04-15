@@ -243,19 +243,34 @@ class GSSFilter:
         safe_marg  = np.where(marg_rnp1 > 0, marg_rnp1, 1.0)
         p_rn_rnp1  = joint / safe_marg[None, :]        # (K, K): [rn, rnp1]
 
-        # ---- (17ter)  Mean propagation ------------------------------------
+        # ---- (17ter) + (17)  Mean and second-moment propagation -----------
+        #
+        # With bias b(r_{n+1}) the second-moment recursion becomes:
+        #   P_{n+1}(r) = F w_P F^T + F w_µ b^T + b w_µ^T F^T + b b^T + Σ_W
+        # which ensures that the centred covariance
+        #   Σ_{n+1}(r) = P_{n+1}(r) − µ_{n+1}(r) µ_{n+1}(r)^T
+        #              = F (w_P − w_µ w_µ^T) F^T + Σ_W  ≥ 0
+        # is always positive semi-definite regardless of b.
+        # When b = 0 the formula reduces to the original (17).
         mu_np1: list[np.ndarray] = []
+        P_np1:  list[np.ndarray] = []
         for rnp1 in range(K):
-            F     = p.f_matrix.F(rnp1)
-            w_mu  = sum(p_rn_rnp1[rn, rnp1] * self._mu[rn] for rn in range(K))
-            mu_np1.append(F @ w_mu)
+            F    = p.f_matrix.F(rnp1)
+            b    = p.b(rnp1)                                      # (q+s, 1)
+            w_mu = sum(p_rn_rnp1[rn, rnp1] * self._mu[rn] for rn in range(K))
+            w_P  = sum(p_rn_rnp1[rn, rnp1] * self._P_z[rn] for rn in range(K))
 
-        # ---- (17)  Second moment propagation ------------------------------
-        P_np1: list[np.ndarray] = []
-        for rnp1 in range(K):
-            F   = p.f_matrix.F(rnp1)
-            w_P = sum(p_rn_rnp1[rn, rnp1] * self._P_z[rn] for rn in range(K))
-            P_np1.append(_sym(F @ w_P @ F.T + p.noise_cov.Sigma_W(rnp1)))
+            # (17ter)  µ_{n+1}(r) = F w_µ + b
+            Fw_mu = F @ w_mu
+            mu_np1.append(Fw_mu + b)
+
+            # (17) corrected for non-zero bias
+            P_np1.append(_sym(
+                F @ w_P @ F.T
+                + Fw_mu @ b.T + b @ Fw_mu.T
+                + b @ b.T
+                + p.noise_cov.Sigma_W(rnp1)
+            ))
 
         # ---- (13'),(14),(15),(18)  Transition density → π_{n+1} ----------
         log_alpha = np.full(K, -np.inf)
@@ -289,8 +304,8 @@ class GSSFilter:
                 # catastrophic cancellation (near-unit-root systems).
                 Gamma = _psd_floor(_sym(S_YY_np1 - M_t @ Cov_Ynp1_Yn.T))
 
-                # Conditional mean of Y_{n+1}  (eq 13')
-                mu_Ynp1 = F[q:, :] @ self._mu[rn]             # (s, 1)
+                # Conditional mean of Y_{n+1}  (eq 13')  µ_{Y,n+1} = [C,D] µ_n + b_Y
+                mu_Ynp1 = F[q:, :] @ self._mu[rn] + p.b(rnp1)[q:]   # (s, 1)
                 mean_c  = mu_Ynp1 + M_t @ (y_prev - mu_Y_n)
 
                 log_lik = multivariate_normal.logpdf(

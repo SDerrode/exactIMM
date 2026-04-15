@@ -479,8 +479,9 @@ class GSSMainWindow(QMainWindow):
         F_list = self._param_panel.get_F_list()
         Sigma_W_list = self._param_panel.get_Sigma_W_list()
         mu_z0_list = self._param_panel.get_mu_z0_list()
+        b_list = self._param_panel.get_b_list()
         P = self._p_widget.get_matrix()
-        if F_list is None or Sigma_W_list is None or mu_z0_list is None or P is None:
+        if F_list is None or Sigma_W_list is None or mu_z0_list is None or b_list is None or P is None:
             self._status_bar.setText("Invalid parameter(s).")
             return None
 
@@ -509,6 +510,7 @@ class GSSMainWindow(QMainWindow):
                 pi0=None,               # stationary
                 mu_z0_list=mu_z0_list,  # from GUI
                 Sigma_z0_list=Sigma_z0_list,
+                b_list=b_list,          # from GUI
             )
         except Exception as exc:  # noqa: BLE001
             self._status_bar.setText(f"Parameter error: {exc}")
@@ -535,6 +537,7 @@ class GSSMainWindow(QMainWindow):
         F_list        = self._param_panel.get_F_list()
         Sigma_W_list  = self._param_panel.get_Sigma_W_list()
         mu_z0_list    = self._param_panel.get_mu_z0_list()
+        b_list        = self._param_panel.get_b_list()
         P             = self._p_widget.get_matrix()
 
         # Decompose blocks
@@ -621,6 +624,7 @@ class GSSMainWindow(QMainWindow):
             "",
             f"    mu_z0_list: list[np.ndarray] = {_fmt_list(mu_z0_list)}",
             f"    Sigma_z0_list: list[np.ndarray] = {_fmt_list([np.eye(q + s)] * K)}",
+            f"    b_list: list[np.ndarray] = {_fmt_list(b_list)}",
             "",
             "    # ------------------------------------------------------------------",
             "",
@@ -635,6 +639,7 @@ class GSSMainWindow(QMainWindow):
             '            "pi0": self.pi0,',
             '            "mu_z0_list": self.mu_z0_list,',
             '            "Sigma_z0_list": self.Sigma_z0_list,',
+            '            "b_list": self.b_list,',
             "        }",
             "",
         ]
@@ -653,9 +658,11 @@ class GSSMainWindow(QMainWindow):
         fm = _FM(K, q, s, p["A_list"], p["B_list"], p["C_list"], p["D_list"])
 
         mu_list = p.get("mu_z0_list")
+        b_list  = p.get("b_list")
         for k in range(K):
             mu = np.asarray(mu_list[k]) if mu_list is not None else None
-            self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu)
+            b  = np.asarray(b_list[k])  if b_list  is not None else None
+            self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu, b)
 
         if p.get("P") is not None:
             self._P = np.asarray(p["P"])

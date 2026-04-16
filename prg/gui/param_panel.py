@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
+from prg.utils.h5_constraint import compute_B_from_h5
 
 
 # ---------------------------------------------------------------------------
@@ -229,44 +230,15 @@ class _StateTab(QWidget):
     def _compute_B_from_constraint(
         self, F: np.ndarray, Sw: np.ndarray
     ) -> np.ndarray | None:
-        """
-        Solve for B given A, C, D, Σ_U, Δ, Σ_V via constraint (4.7).
-
-        Formula (linear system in Bᵀ):
-            L Bᵀ = rhs
-        with
-            P      = Δᵀ Cᵀ + Σ_V Dᵀ          (s×s)
-            Q      = C Σ_U + D Δᵀ             (s×q)
-            R      = C Δ + D Σ_V              (s×s)
-            M      = Q Cᵀ + R Dᵀ + Σ_V       (s×s)
-            L      = Σ_V − P M⁻¹ R            (s×s)
-            rhs    = P M⁻¹ (Q Aᵀ + Δᵀ) − Δᵀ A (s×q)
-
-        Returns B (q×s) or None if M or L is singular.
-        """
-        q, s = self._q, self._s
-        A  = F[:q, :q]      # q×q
-        C  = F[q:, :q]      # s×q
-        D  = F[q:, q:]      # s×s
-        SU = Sw[:q, :q]     # q×q  (Σ_U)
-        Dt = Sw[:q, q:]     # q×s  (Δ)
-        SV = Sw[q:, q:]     # s×s  (Σ_V)
-
-        P = Dt.T @ C.T + SV @ D.T          # s×s
-        Q = C @ SU + D @ Dt.T              # s×q
-        R = C @ Dt + D @ SV                # s×s
-        M = Q @ C.T + R @ D.T + SV        # s×s
-
+        """Return B (q×s) from the H5 constraint, or None if the system is singular."""
+        q = self._q
         try:
-            M_inv  = np.linalg.inv(M)
-            PM_inv = P @ M_inv
-            L      = SV - PM_inv @ R
-            rhs    = PM_inv @ (Q @ A.T + Dt.T) - Dt.T @ A   # s×q
-            B_T    = np.linalg.solve(L, rhs)                 # s×q
-        except np.linalg.LinAlgError:
+            return compute_B_from_h5(
+                A=F[:q, :q], C=F[q:, :q], D=F[q:, q:],
+                SU=Sw[:q, :q], Dt=Sw[:q, q:], SV=Sw[q:, q:],
+            )
+        except ValueError:
             return None
-
-        return B_T.T if np.isfinite(B_T).all() else None   # q×s
 
     # ------------------------------------------------------------------
     # Internal

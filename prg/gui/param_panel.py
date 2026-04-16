@@ -9,6 +9,19 @@ Each tab (_StateTab) exposes:
   - F(k)     : MatrixTableWidget (no SPD check)
   - Σ_W(k)   : MatrixTableWidget (SPD check enabled)
 
+Constraint checkbox (4.7)
+--------------------------
+Each tab has an optional checkbox "Calculer B(k) automatiquement".
+When checked, the B block of F(k) is recomputed in real-time from the
+constraint (4.7) — i.e. B is the unique solution of:
+
+    (Σ_V − P M⁻¹ R) Bᵀ = P M⁻¹ (Q Aᵀ + Δᵀ) − Δᵀ A
+
+with  P = Δᵀ Cᵀ + Σ_V Dᵀ,  Q = C Σ_U + D Δᵀ,
+      R = C Δ + D Σ_V,       M = Q Cᵀ + R Dᵀ + Σ_V.
+
+The B cells are then rendered read-only (light-blue tint).
+
 ParamPanel aggregates validity across all tabs and propagates a
 validity_changed signal.
 """
@@ -17,6 +30,7 @@ import numpy as np
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QScrollArea,
+    QCheckBox,
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
@@ -27,7 +41,8 @@ from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
 # ---------------------------------------------------------------------------
 
 class _StateTab(QWidget):
-    """One tab: F(k) and Σ_W(k) side by side."""
+    """One tab: F(k), Σ_W(k), μ_z0(k), b_X(k), b_Y(k) side by side,
+    plus an optional H5-constraint checkbox that auto-computes B(k)."""
 
     validity_changed = pyqtSignal(bool)
 
@@ -36,19 +51,39 @@ class _StateTab(QWidget):
         self._k = k
         self._q = q
         self._s = s
+        self._updating_B = False   # re-entrancy guard for _recompute_B
 
-        layout = QHBoxLayout(self)
+        # ── Main layout: checkbox row on top, matrix widgets below ──────
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(16)
+        layout.setSpacing(8)
 
-        # Default F(k): identity (stable system)
+        # -- Constraint checkbox row --
+        # Styled in B-block green (#d5f5e3 / #1a7a3a) to recall the B column
+        chk_row = QHBoxLayout()
+        chk_row.setSpacing(12)
+        self._constraint_check = QCheckBox(f"Constraint on F({k})")
+        self._constraint_check.setStyleSheet(
+            "QCheckBox { color: #1a7a3a; font-weight: bold; font-size: 11px; }"
+            "QCheckBox::indicator:checked   { border: 2px solid #1a7a3a;"
+            "                                 background-color: #27ae60; }"
+            "QCheckBox::indicator:unchecked { border: 2px solid #1a7a3a; }"
+        )
+        chk_row.addWidget(self._constraint_check)
+        chk_row.addStretch()
+        layout.addLayout(chk_row)
+
+        # -- Matrix/vector widgets row --
+        widgets_row = QHBoxLayout()
+        widgets_row.setSpacing(16)
+
+        # Default F(k): 0.5 * I (stable system)
         self._f_widget = MatrixTableWidget(
             q, s,
             is_covariance=False,
             title=f"F({k})",
             default_value=0.0,
         )
-        # Set default to 0.5 * I so the simulator stays bounded
         self._f_widget.set_matrix(np.eye(q + s) * 0.5)
 
         # Default Σ_W(k): 0.1 * I (SPD)
@@ -78,17 +113,26 @@ class _StateTab(QWidget):
             default_value=0.0,
         )
 
-        layout.addWidget(self._f_widget)
-        layout.addWidget(self._sigma_widget)
-        layout.addWidget(self._mu_widget)
-        layout.addWidget(self._bx_widget)
-        layout.addWidget(self._by_widget)
+        widgets_row.addWidget(self._f_widget)
+        widgets_row.addWidget(self._sigma_widget)
+        widgets_row.addWidget(self._mu_widget)
+        widgets_row.addWidget(self._bx_widget)
+        widgets_row.addWidget(self._by_widget)
+        layout.addLayout(widgets_row)
 
+        # ── Signal connections ──────────────────────────────────────────
         self._f_widget.validity_changed.connect(self._on_child_validity)
         self._sigma_widget.validity_changed.connect(self._on_child_validity)
         self._mu_widget.validity_changed.connect(self._on_child_validity)
         self._bx_widget.validity_changed.connect(self._on_child_validity)
         self._by_widget.validity_changed.connect(self._on_child_validity)
+
+        # Real-time B recomputation on any value change
+        self._f_widget.value_changed.connect(self._recompute_B)
+        self._sigma_widget.value_changed.connect(self._recompute_B)
+
+        # Toggle checkbox
+        self._constraint_check.toggled.connect(self._on_constraint_toggled)
 
     # ------------------------------------------------------------------
     # Public
@@ -134,6 +178,95 @@ class _StateTab(QWidget):
             and self._bx_widget.is_valid()
             and self._by_widget.is_valid()
         )
+
+    # ------------------------------------------------------------------
+    # Constraint (4.7) — auto-compute B
+    # ------------------------------------------------------------------
+
+    def _on_constraint_toggled(self, checked: bool) -> None:
+        """Enable / disable the H5 constraint mode."""
+        if checked:
+            self._recompute_B()
+        else:
+            # Restore B block to fully editable and hide status label
+            q, s = self._q, self._s
+            self._f_widget.set_block_editable(0, q, q, q + s, True)
+            self._f_widget.set_constraint_status("")
+
+    def _recompute_B(self) -> None:
+        """Solve for B(k) in real-time and overwrite it in F(k)."""
+        if not self._constraint_check.isChecked() or self._updating_B:
+            return
+        F  = self._f_widget.get_matrix()
+        Sw = self._sigma_widget.get_matrix()
+        if F is None or Sw is None:
+            return
+
+        B_new = self._compute_B_from_constraint(F, Sw)
+
+        if B_new is None:
+            self._f_widget.set_constraint_status(
+                "✗  B — singular system",
+                "color: #cc0000; font-size: 10px;",
+            )
+            return
+
+        q, s = self._q, self._s
+        new_F = F.copy()
+        new_F[:q, q:] = B_new
+
+        self._updating_B = True
+        self._f_widget.set_matrix(new_F)
+        # Re-apply computed tint on the B block (set_matrix resets all cells)
+        self._f_widget.set_block_editable(0, q, q, q + s, False)
+        self._updating_B = False
+
+        self._f_widget.set_constraint_status(
+            "✓  B satisfies constraint (4.7)",
+            "color: #1a7a3a; font-size: 10px;",
+        )
+
+    def _compute_B_from_constraint(
+        self, F: np.ndarray, Sw: np.ndarray
+    ) -> np.ndarray | None:
+        """
+        Solve for B given A, C, D, Σ_U, Δ, Σ_V via constraint (4.7).
+
+        Formula (linear system in Bᵀ):
+            L Bᵀ = rhs
+        with
+            P      = Δᵀ Cᵀ + Σ_V Dᵀ          (s×s)
+            Q      = C Σ_U + D Δᵀ             (s×q)
+            R      = C Δ + D Σ_V              (s×s)
+            M      = Q Cᵀ + R Dᵀ + Σ_V       (s×s)
+            L      = Σ_V − P M⁻¹ R            (s×s)
+            rhs    = P M⁻¹ (Q Aᵀ + Δᵀ) − Δᵀ A (s×q)
+
+        Returns B (q×s) or None if M or L is singular.
+        """
+        q, s = self._q, self._s
+        A  = F[:q, :q]      # q×q
+        C  = F[q:, :q]      # s×q
+        D  = F[q:, q:]      # s×s
+        SU = Sw[:q, :q]     # q×q  (Σ_U)
+        Dt = Sw[:q, q:]     # q×s  (Δ)
+        SV = Sw[q:, q:]     # s×s  (Σ_V)
+
+        P = Dt.T @ C.T + SV @ D.T          # s×s
+        Q = C @ SU + D @ Dt.T              # s×q
+        R = C @ Dt + D @ SV                # s×s
+        M = Q @ C.T + R @ D.T + SV        # s×s
+
+        try:
+            M_inv  = np.linalg.inv(M)
+            PM_inv = P @ M_inv
+            L      = SV - PM_inv @ R
+            rhs    = PM_inv @ (Q @ A.T + Dt.T) - Dt.T @ A   # s×q
+            B_T    = np.linalg.solve(L, rhs)                 # s×q
+        except np.linalg.LinAlgError:
+            return None
+
+        return B_T.T if np.isfinite(B_T).all() else None   # q×s
 
     # ------------------------------------------------------------------
     # Internal

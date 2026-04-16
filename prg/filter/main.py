@@ -42,6 +42,7 @@ from prg.classes.GSSParams import GSSParams
 from prg.filter.gss_filter import GSSFilter
 from prg.models.base_gss_model import BaseGSSModel
 from prg.utils.exceptions import GSSError
+from prg.utils.h5_constraint import apply_h5_constraint
 
 # ---------------------------------------------------------------------------
 _CONFIG_FILENAME  = "config.toml"
@@ -161,6 +162,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not write any CSV (dry run).",
     )
     parser.add_argument(
+        "--constraint", action="store_true",
+        help="Enforce the H5 constraint (eq. 4.8): recompute every B(k) "
+             "from A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k) before filtering.",
+    )
+    parser.add_argument(
         "-v", "--verbose", type=int, default=1, choices=[0, 1, 2], metavar="LEVEL",
         help="Console verbosity: 0=silent  1=normal  2=debug.",
     )
@@ -206,6 +212,20 @@ def main() -> None:
 
     if args.verbose >= 2:
         params.summary()
+
+    # --- Apply H5 constraint on B (optional) ---
+    if args.constraint:
+        log.info("--constraint: applying H5 constraint to recompute B(k) …")
+        try:
+            params = apply_h5_constraint(params, logger=log)
+        except ValueError as exc:
+            log.error("H5 constraint failed: %s", exc)
+            sys.exit(1)
+        log.info("H5 constraint applied — B(k) updated for all %d regimes.", params.K)
+        if args.verbose >= 2:
+            log.info("Updated parameters:")
+            params.summary()
+
     log.info("GSSParams OK: K=%d  q=%d  s=%d", params.K, params.q, params.s)
 
     # --- Build filter ---

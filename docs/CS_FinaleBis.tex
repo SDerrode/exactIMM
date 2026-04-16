@@ -505,6 +505,76 @@ Notons que (4.3) donne $F_{(r_{n+1})}$ de $\mathrm{M}_3$ :
 On devrait donc pouvoir simuler selon $\mathrm{M}_3$ et filtrer selon $\mathrm{M}_3$, et
 réciproquement. Ce type d'étude pourrait servir --- par ailleurs --- aux études du lissage.
 
+\bigskip
+\noindent\textbf{Contrainte H5 sur les paramètres — déduction de $B$.}
+
+\smallskip
+La condition (H5) impose une relation algébrique entre les 7 matrices du modèle
+($A$, $B$, $C$, $D$, $\Sigma_U$, $\Sigma_V$, $\Delta$, toutes indexées par le régime courant).
+En omettant provisoirement le subscript $r_{n+1}$, elle s'écrit :
+\begin{equation}
+  \Delta^T A + \Sigma_V B^T
+  = (\Delta^T C^T + \Sigma_V D^T)
+    \bigl[(C\Sigma_U + D\Delta^T)C^T + (C\Delta + D\Sigma_V)D^T + \Sigma_V\bigr]^{-1}
+    \bigl[(C\Sigma_U + D\Delta^T)A^T + (C\Delta + D\Sigma_V)B^T + \Delta^T\bigr].
+  \tag{4.4}
+\end{equation}
+En réintroduisant le subscript $r_{n+1}$ sur chacune des 7 matrices, on obtient la forme
+complète :
+\begin{align}
+  \Delta_{r_{n+1}}^T A_{r_{n+1}} + \Sigma_{V,r_{n+1}} B_{r_{n+1}}^T
+  &= \bigl(\Delta_{r_{n+1}}^T C_{r_{n+1}}^T + \Sigma_{V,r_{n+1}} D_{r_{n+1}}^T\bigr)
+  \notag\\
+  &\quad\times
+    \bigl[
+      (C_{r_{n+1}}\Sigma_{U,r_{n+1}} + D_{r_{n+1}}\Delta_{r_{n+1}}^T)\,C_{r_{n+1}}^T
+     +(C_{r_{n+1}}\Delta_{r_{n+1}} + D_{r_{n+1}}\Sigma_{V,r_{n+1}})\,D_{r_{n+1}}^T
+     + \Sigma_{V,r_{n+1}}
+    \bigr]^{-1}
+  \notag\\
+  &\quad\times
+    \bigl[
+      (C_{r_{n+1}}\Sigma_{U,r_{n+1}} + D_{r_{n+1}}\Delta_{r_{n+1}}^T)\,A_{r_{n+1}}^T
+     +(C_{r_{n+1}}\Delta_{r_{n+1}} + D_{r_{n+1}}\Sigma_{V,r_{n+1}})\,B_{r_{n+1}}^T
+     + \Delta_{r_{n+1}}^T
+    \bigr].
+  \tag{4.5}
+\end{align}
+
+\medskip
+\noindent\textbf{Déduction de $B$ — système linéaire.}
+L'équation (4.4) est \emph{linéaire} en $B^T$ : elle apparaît des deux membres, mais avec des
+coefficients matriciels connus dès que les 6 autres matrices sont fixées. On introduit les
+notations compactes (subscript $r$ omis) :
+\begin{equation}
+  P = \Delta^T C^T + \Sigma_V D^T, \qquad
+  Q = C\Sigma_U + D\Delta^T,       \qquad
+  R = C\Delta + D\Sigma_V,         \qquad
+  M = QC^T + RD^T + \Sigma_V.
+  \tag{4.6}
+\end{equation}
+\textit{Remarque.} $R = P^T$ ($\Sigma_V$ symétrique) et $M = M^T \succ 0$ dès que
+$\Sigma_U, \Sigma_V \succ 0$.
+
+\noindent L'équation (4.4) se réécrit $\Delta^T A + \Sigma_V B^T = PM^{-1}(QA^T + RB^T +
+\Delta^T)$. En regroupant les termes en $B^T$ dans le membre gauche :
+\begin{equation}
+  \underbrace{\bigl(\Sigma_V - PM^{-1}R\bigr)}_{\displaystyle L}\; B^T
+  \;=\; PM^{-1}(QA^T + \Delta^T) - \Delta^T A.
+  \tag{4.7}
+\end{equation}
+La matrice $L = \Sigma_V - PM^{-1}R = \Sigma_V - PM^{-1}P^T$ est le
+\emph{complément de Schur} de $M$ dans la matrice-bloc symétrique
+$\begin{bmatrix} M & P^T \\ P & \Sigma_V \end{bmatrix}$.
+Si $M \succ 0$, alors $L \succ 0$ et l'unique solution est :
+\begin{equation}
+  \boxed{B^T \;=\; L^{-1}\!\bigl(PM^{-1}(QA^T + \Delta^T) - \Delta^T A\bigr).}
+  \tag{4.8}
+\end{equation}
+Ainsi, dès que $A$, $C$, $D$, $\Sigma_U$, $\Sigma_V$, $\Delta$ sont fixées, la matrice $B$ est
+\emph{entièrement déterminée} par (4.8) : la contrainte (H5) lève le degré de liberté
+correspondant.
+
 }% fin {\color{red}}
 
 \end{document}

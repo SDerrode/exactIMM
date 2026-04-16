@@ -26,7 +26,8 @@ fofgss/
 ├── prg/
 │   ├── utils/
 │   │   ├── exceptions.py       # GSSError hierarchy
-│   │   └── matrix_checks.py    # CovarianceMatrix, StochasticMatrix diagnostics
+│   │   ├── matrix_checks.py    # CovarianceMatrix, StochasticMatrix diagnostics
+│   │   └── h5_constraint.py    # H5 constraint: compute B(k) from A,C,D,Σ_U,Δ,Σ_V
 │   ├── models/
 │   │   ├── base_gss_model.py   # BaseGSSModel (abstract)
 │   │   └── model_gss_K2_q1_s1.py  # Example: K=2, q=1, s=1
@@ -40,7 +41,7 @@ fofgss/
 │   │   └── main.py             # CLI entry point for the filter
 │   ├── simulate.py             # CLI entry point for the simulator
 │   └── gui/                    # Optional PyQt6 graphical interface
-├── tests/                      # 106 pytest tests
+├── tests/                      # 113 pytest tests
 ├── data/
 │   └── simulated/              # Generated CSV files
 ├── docs/                       # LaTeX source (CS_FinaleBis.tex, macros.tex)
@@ -81,6 +82,9 @@ python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42
 # Dry run (no CSV written), full debug output
 python -m prg.simulate --model model_gss_K2_q1_s1 -N 500 --no-save --log-level DEBUG -v 2
 
+# Enforce H5 constraint: recompute B(k) before simulating
+python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42 --constraint
+
 # Custom output directory
 python -m prg.simulate --model model_gss_K2_q1_s1 -N 2000 --seed 0 --output my_run.csv
 ```
@@ -98,6 +102,7 @@ Log files are written automatically to `logs/`.
 | `--output` | auto | Output CSV filename |
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip CSV writing (dry run) |
+| `--constraint` | `False` | Enforce H5 constraint (eq. 4.8): recompute B(k) before run |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
 
 ---
@@ -113,6 +118,9 @@ python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42
 # Filter from an existing simulation CSV
 python -m prg.filter.main --model model_gss_K2_q1_s1 \
     --csv data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
+
+# Enforce H5 constraint before filtering
+python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42 --constraint
 
 # Dry run (no CSV written)
 python -m prg.filter.main --model model_gss_K2_q1_s1 -N 500 --no-save -v 2
@@ -138,6 +146,7 @@ Output CSV columns: `n, E_x_0, …, E_x_{q-1}, V_x_0, …, V_x_{q-1}, p_r_0, …
 | `--output` | auto | Output CSV filename for filter results |
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip all CSV writing (dry run) |
+| `--constraint` | `False` | Enforce H5 constraint (eq. 4.8): recompute B(k) before run |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
 
 ### Python API
@@ -161,6 +170,18 @@ for y in observations:          # y shape (s,) or (s, 1)
 sim_path, df = filt.run(N=1000, seed=42, output_dir="data/simulated")
 ```
 
+### H5 constraint API
+
+```python
+from prg.utils.h5_constraint import apply_h5_constraint, compute_B_from_h5
+
+# Apply to all regimes at once
+constrained_params = apply_h5_constraint(params)
+
+# Or compute B for a single regime
+B = compute_B_from_h5(A, C, D, SU, Delta, SV)   # returns (q, s) array
+```
+
 ---
 
 ## Graphical interface
@@ -179,7 +200,8 @@ python -m prg.gui.main --model model_gss_K2_q1_s1
 
 | Panel | Description |
 |---|---|
-| Parameter tabs | One tab per Markov state; editable F(k) and Σ_W(k) tables with block colour coding |
+| Parameter tabs | One tab per Markov state; editable F(k) and Σ_W(k) tables with block colour coding (A=blue, B=green, C=yellow, D=pink) |
+| H5 constraint | "Constraint on F(k)" checkbox per tab — when checked, B(k) is auto-computed in real-time; B cells become read-only (saturated green) |
 | Validation | [Simuler] disabled + red text when any matrix is invalid (non-float entry or non-SPD Σ_W) |
 | Simulation | Runs in a background thread; modal wait dialog prevents interaction |
 | Plot | 1 + q + s subplots: R_n (step), X_i (lines), Y_i (lines); full matplotlib toolbar |
@@ -235,8 +257,9 @@ source .venv/bin/activate
 pytest
 ```
 
-102 tests covering matrix diagnostics, parameter validation, iterator protocol,
-reproducibility, CSV output, statistical sanity, and filter correctness.
+113 tests covering matrix diagnostics, parameter validation, iterator protocol,
+reproducibility, CSV output, statistical sanity, filter correctness, and H5
+constraint computation.
 
 ---
 

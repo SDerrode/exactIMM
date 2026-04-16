@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-16
+
+### Added
+- **H5 constraint (eq. 4.8)** — given A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k), the
+  B(k) block is uniquely determined by solving the linear system `L Bᵀ = rhs` where
+  L = Σ_V − PM⁻¹R is the Schur complement of M (see `docs/CS_FinaleBis.tex` eqs 4.4–4.8)
+- `prg/utils/h5_constraint.py` — new module: `compute_B_from_h5()` (core formula) and
+  `apply_h5_constraint(params, *, logger)` returning a new `GSSParams` with corrected
+  B(k) blocks; raises `ValueError` on singular or ill-conditioned systems (cond > 1e12)
+- `--constraint` CLI flag — added to both `prg/simulate.py` and `prg/filter/main.py`;
+  when set, B(k) is recomputed from the other 6 matrices before simulation/filtering
+- **GUI constraint checkbox** (`prg/gui/param_panel.py`) — each `_StateTab` now has a
+  green "Constraint on F(k)" checkbox; when checked, B(k) is auto-computed in real-time
+  from the current A, C, D, Σ_U, Δ, Σ_V values, B cells become read-only (saturated
+  green tint), and a status label "✓ B satisfies constraint (4.7)" appears; unchecking
+  restores full editability
+- **Block colour coding in F(k)** (`prg/gui/matrix_widget.py`) — matrix cells are now
+  coloured by block: A=blue (#d6eaf8), B=green (#d5f5e3), C=yellow (#fef9e7),
+  D=pink (#fde8e8); computed/locked cells use saturated versions
+- `MatrixTableWidget.value_changed` signal — new `pyqtSignal()` that fires on every
+  cell edit (complements the existing `validity_changed` which only fires on transitions)
+- `tests/test_h5_constraint.py` — 11 new tests: output shape, constraint satisfaction
+  (atol=1e-10), singular-M error, idempotency, preservation of A/C/D/noise/bias,
+  and `apply_h5_constraint` roundtrip
+- `docs/CS_FinaleBis.tex` — derivation section (eqs 4.4–4.8, red): general form,
+  fully subscripted form, P/Q/R/M definitions, linear system in Bᵀ, and boxed solution
+
+### Fixed
+- **Filter quality label visibility** (`prg/gui/main_window.py`) — the status frame
+  (green/amber/red) now uses Bootstrap-style dark foreground colours (#155724, #856404,
+  #721c24) so text is readable in both light and dark OS themes
+
 ## [0.5.0] — 2026-04-15
 
 ### Added

@@ -44,6 +44,7 @@ class MatrixTableWidget(QWidget):
     """
 
     validity_changed = pyqtSignal(bool)
+    value_changed    = pyqtSignal()   # fired on every cell edit (valid or not)
 
     def __init__(
         self,
@@ -89,6 +90,12 @@ class MatrixTableWidget(QWidget):
         else:
             self._status_label = None
 
+        # Constraint feedback label (shown below the table when B is auto-computed)
+        self._constraint_label = QLabel("")
+        self._constraint_label.setStyleSheet("font-size: 10px;")
+        self._constraint_label.setVisible(False)
+        layout.addWidget(self._constraint_label)
+
         self._populate(default_value)
         self._table.itemChanged.connect(self._on_item_changed)
 
@@ -120,7 +127,7 @@ class MatrixTableWidget(QWidget):
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
                     )
-                    item.setBackground(QBrush(QColor("white")))
+                    item.setBackground(QBrush(QColor(self._cell_bg(r, c))))
                     item.setForeground(QBrush(QColor("black")))
                     self._table.setItem(r, c, item)
         finally:
@@ -130,9 +137,78 @@ class MatrixTableWidget(QWidget):
     def is_valid(self) -> bool:
         return self._valid
 
+    def set_block_editable(
+        self,
+        row_start: int, row_end: int,
+        col_start: int, col_end: int,
+        editable: bool,
+    ) -> None:
+        """Make a rectangular block of cells editable (True) or read-only (False).
+
+        Read-only cells receive a saturated version of their block colour to
+        signal that the value is auto-computed.
+        """
+        for r in range(row_start, row_end):
+            for c in range(col_start, col_end):
+                item = self._table.item(r, c)
+                if item is None:
+                    continue
+                flags = item.flags()
+                if editable:
+                    item.setFlags(flags | Qt.ItemFlag.ItemIsEditable)
+                    item.setBackground(QBrush(QColor(self._cell_bg(r, c))))
+                else:
+                    item.setFlags(flags & ~Qt.ItemFlag.ItemIsEditable)
+                    item.setBackground(QBrush(QColor(self._cell_computed_bg(r, c))))
+
+    def set_constraint_status(self, text: str, style: str = "") -> None:
+        """Show or hide the constraint feedback label below the table.
+
+        Pass an empty string to hide it.
+        """
+        if text:
+            self._constraint_label.setText(text)
+            if style:
+                self._constraint_label.setStyleSheet(style)
+            self._constraint_label.setVisible(True)
+        else:
+            self._constraint_label.setVisible(False)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    #  F(k) block layout:          Σ_W(k) block layout:
+    #  ┌──────────┬──────────┐     ┌──────────┬──────────┐
+    #  │  A  blue │  B green │     │  Σ_U blue│  Δ green │
+    #  ├──────────┼──────────┤     ├──────────┼──────────┤
+    #  │  C  yell │  D  pink │     │  Δᵀ yell │  Σ_V pink│
+    #  └──────────┴──────────┘     └──────────┴──────────┘
+    _BLOCK_BG: dict[tuple[bool, bool], str] = {
+        (True,  True):  "#d6eaf8",   # top-left  — blue
+        (True,  False): "#d5f5e3",   # top-right — green  (B / Δ)
+        (False, True):  "#fef9e7",   # bot-left  — yellow (C / Δᵀ)
+        (False, False): "#fde8e8",   # bot-right — pink   (D / Σ_V)
+    }
+    # Saturated version: cell is auto-computed (read-only)
+    _BLOCK_COMPUTED_BG: dict[tuple[bool, bool], str] = {
+        (True,  True):  "#aed6f1",   # blue  — computed
+        (True,  False): "#a9dfbf",   # green — computed B
+        (False, True):  "#f9e79f",   # yellow — computed
+        (False, False): "#f1948a",   # pink  — computed
+    }
+
+    def _cell_bg(self, r: int, c: int) -> str:
+        """Normal background colour for cell (r, c)."""
+        if self._is_covariance:
+            return "white"
+        return self._BLOCK_BG[(r < self._q, c < self._q)]
+
+    def _cell_computed_bg(self, r: int, c: int) -> str:
+        """Saturated background colour for a locked / auto-computed cell."""
+        if self._is_covariance:
+            return "#ddeeff"
+        return self._BLOCK_COMPUTED_BG[(r < self._q, c < self._q)]
 
     def _populate(self, default_value: float) -> None:
         """Initial fill: identity×default_value for covariance, else default_value."""
@@ -147,13 +223,16 @@ class MatrixTableWidget(QWidget):
             return
         self._validate_cell(item)
         self._validate_all()
+        self.value_changed.emit()
 
     def _validate_cell(self, item: QTableWidgetItem) -> bool:
         """Colour the cell red if the text is not a valid float. Return success."""
         r, c = item.row(), item.column()
         try:
             float(item.text())
-            item.setBackground(QBrush(QColor("white")))
+            # Restore block colour only when not locked (editable flag present)
+            if item.flags() & Qt.ItemFlag.ItemIsEditable:
+                item.setBackground(QBrush(QColor(self._cell_bg(r, c))))
             item.setForeground(QBrush(QColor("black")))
             return True
         except ValueError:

@@ -257,24 +257,18 @@ class GSSMainWindow(QMainWindow):
         self._mse_frame.setVisible(False)
         mse_layout = QVBoxLayout(self._mse_frame)
         mse_layout.setContentsMargins(8, 6, 8, 6)
-        mse_layout.setSpacing(2)
+        mse_layout.setSpacing(3)
 
-        mse_title = QLabel("Filter quality")
-        mse_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        mse_title.setStyleSheet(
-            "font-weight: bold; font-size: 11px; "
-            "border-bottom: 1px solid palette(mid); padding-bottom: 3px;"
-        )
-        mse_layout.addWidget(mse_title)
+        self._mse_title = QLabel("Filter quality")
+        self._mse_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mse_layout.addWidget(self._mse_title)
 
         self._mse_global_label = QLabel("")
         self._mse_global_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._mse_global_label.setStyleSheet("font-size: 11px; font-weight: bold;")
         mse_layout.addWidget(self._mse_global_label)
 
         self._rmse_label = QLabel("")
         self._rmse_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._rmse_label.setStyleSheet("font-size: 10px;")
         mse_layout.addWidget(self._rmse_label)
 
         # Per-component labels (created dynamically in _on_filter_finished)
@@ -413,14 +407,21 @@ class GSSMainWindow(QMainWindow):
         sig_std = float(xs.std()) if xs.std() > 0 else 1.0
         ratio   = rmse_global / sig_std          # 0 = perfect, 1 = as bad as noise
         if ratio < 0.20:
-            bg = "#d4edda"   # green
+            bg, fg, border = "#d4edda", "#155724", "#c3e6cb"   # green
         elif ratio < 0.50:
-            bg = "#fff3cd"   # amber
+            bg, fg, border = "#fff3cd", "#856404", "#ffc107"   # amber
         else:
-            bg = "#f8d7da"   # red
+            bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"   # red
+
         self._mse_frame.setStyleSheet(
-            f"QFrame {{ background-color: {bg}; border-radius: 4px; }}"
+            f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
+            f" border-radius: 4px; }}"
         )
+        title_style  = f"font-weight: bold; font-size: 11px; color: {fg};"
+        value_style  = f"font-size: 10px; color: {fg};"
+        self._mse_title.setStyleSheet(title_style)
+        self._mse_global_label.setStyleSheet(value_style)
+        self._rmse_label.setStyleSheet(value_style)
 
         # Per-component rows (rebuild if q changed)
         mse_vbox = self._mse_frame.layout()
@@ -432,7 +433,7 @@ class GSSMainWindow(QMainWindow):
         if self._q > 1:
             for i, v in enumerate(mse_per_comp):
                 lbl = QLabel(f"  MSE(X^{i}) = {v:.5g}")
-                lbl.setStyleSheet("font-size: 9px;")
+                lbl.setStyleSheet(f"font-size: 9px; color: {fg};")
                 mse_vbox.addWidget(lbl)
                 self._mse_comp_labels.append(lbl)
 

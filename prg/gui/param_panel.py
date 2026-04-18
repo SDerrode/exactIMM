@@ -124,8 +124,10 @@ class _StateTab(QWidget):
         # Stability badges live in a sub-column directly below _f_widget
         self._stab_A_badge = QLabel()
         self._stab_A_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._stab_A_badge.setFixedHeight(16)
         self._stab_D_badge = QLabel()
         self._stab_D_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._stab_D_badge.setFixedHeight(16)
 
         f_col = QVBoxLayout()
         f_col.setSpacing(2)
@@ -147,7 +149,9 @@ class _StateTab(QWidget):
         for w in (self._sigma_widget,
                   self._mu_widget, self._bx_widget, self._by_widget):
             widgets_row.addWidget(w)
+        widgets_row.addStretch()          # prevent horizontal expansion
         layout.addLayout(widgets_row)
+        layout.addStretch()               # push everything to the top
 
         # ── Signal connections ──────────────────────────────────────────
         for w in (self._f_widget, self._sigma_widget,

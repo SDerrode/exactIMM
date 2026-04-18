@@ -22,6 +22,12 @@ from prg.utils.matrix_checks import CovarianceMatrix
 
 _COLOUR_BAD = QColor("#ff8888")  # invalid cell
 
+# Shared pill-badge styles (used by all status labels)
+_PILL_OK  = ("font-size: 10px; padding: 1px 6px; border-radius: 3px;"
+             "background: #d4edda; color: #155724; border: 1px solid #c3e6cb;")
+_PILL_ERR = ("font-size: 10px; padding: 1px 6px; border-radius: 3px;"
+             "background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;")
+
 
 # ---------------------------------------------------------------------------
 # MatrixTableWidget
@@ -84,16 +90,20 @@ class MatrixTableWidget(QWidget):
             self._table.setRowHeight(row, 24)
         layout.addWidget(self._table)
 
+        # Constrain the whole widget width to the table width
+        self.setMaximumWidth(self._n * 58 + 12)
+
         if is_covariance:
             self._status_label = QLabel()
+            self._status_label.setFixedHeight(16)
             layout.addWidget(self._status_label)
         else:
             self._status_label = None
 
-        # Constraint feedback label (shown below the table when B is auto-computed)
+        # Constraint feedback label — always present (fixed height) so that
+        # showing/hiding it does not cause a layout shift in the parent.
         self._constraint_label = QLabel("")
-        self._constraint_label.setStyleSheet("font-size: 10px;")
-        self._constraint_label.setVisible(False)
+        self._constraint_label.setFixedHeight(16)
         layout.addWidget(self._constraint_label)
 
         self._populate(default_value)
@@ -166,17 +176,15 @@ class MatrixTableWidget(QWidget):
             self._table.blockSignals(False)
 
     def set_constraint_status(self, text: str, style: str = "") -> None:
-        """Show or hide the constraint feedback label below the table.
+        """Update the constraint feedback label below the table.
 
-        Pass an empty string to hide it.
+        Pass an empty string to clear it.  The label always occupies its
+        fixed height so that callers cannot cause a layout shift.
         """
-        if text:
-            self._constraint_label.setText(text)
-            if style:
-                self._constraint_label.setStyleSheet(style)
-            self._constraint_label.setVisible(True)
-        else:
-            self._constraint_label.setVisible(False)
+        self._constraint_label.setText(text)
+        self._constraint_label.setStyleSheet(
+            style if (text and style) else "font-size: 10px;"
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -293,13 +301,11 @@ class MatrixTableWidget(QWidget):
         if self._status_label is not None:
             if valid:
                 self._status_label.setText("✓ Positive definite")
-                self._status_label.setStyleSheet("color: #007700; font-size: 10px;")
-            elif reason:
-                self._status_label.setText(f"✗ {reason}")
-                self._status_label.setStyleSheet("color: #cc0000; font-size: 10px;")
+                self._status_label.setStyleSheet(_PILL_OK)
             else:
-                self._status_label.setText("✗ Invalid value(s)")
-                self._status_label.setStyleSheet("color: #cc0000; font-size: 10px;")
+                msg = reason if reason else "Invalid value(s)"
+                self._status_label.setText(f"✗ {msg}")
+                self._status_label.setStyleSheet(_PILL_ERR)
 
         if valid != self._valid:
             self._valid = valid
@@ -456,10 +462,11 @@ class StochasticMatrixWidget(QWidget):
     def _set_valid(self, valid: bool, reason: str) -> None:
         if valid:
             self._status_label.setText("✓ Row-stochastic")
-            self._status_label.setStyleSheet("color: #007700; font-size: 10px;")
+            self._status_label.setStyleSheet(_PILL_OK)
         else:
-            self._status_label.setText(f"✗ {reason}" if reason else "✗ Not row-stochastic")
-            self._status_label.setStyleSheet("color: #cc0000; font-size: 10px;")
+            msg = reason if reason else "Not row-stochastic"
+            self._status_label.setText(f"✗ {msg}")
+            self._status_label.setStyleSheet(_PILL_ERR)
         if valid != self._valid:
             self._valid = valid
             self.validity_changed.emit(valid)
@@ -520,6 +527,7 @@ class VectorWidget(QWidget):
         for row in range(n):
             self._table.setRowHeight(row, 24)
         layout.addWidget(self._table)
+        self.setMaximumWidth(82)  # match table width + margins
 
         self._populate(default_value)
         self._table.itemChanged.connect(self._on_item_changed)

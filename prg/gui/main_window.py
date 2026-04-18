@@ -207,6 +207,7 @@ class GSSMainWindow(QMainWindow):
         self._n_spin.setRange(1, 1_000_000)
         self._n_spin.setValue(1000)
         self._n_spin.setSingleStep(100)
+        self._n_spin.valueChanged.connect(self._on_sim_params_changed)
         n_row.addWidget(self._n_spin)
         left_layout.addLayout(n_row)
 
@@ -216,6 +217,7 @@ class GSSMainWindow(QMainWindow):
         self._seed_edit = QLineEdit()
         self._seed_edit.setPlaceholderText("empty = random")
         self._seed_edit.setMaximumWidth(120)
+        self._seed_edit.textChanged.connect(self._on_sim_params_changed)
         seed_row.addWidget(self._seed_edit)
         left_layout.addLayout(seed_row)
 
@@ -307,6 +309,18 @@ class GSSMainWindow(QMainWindow):
 
     def _on_validity_changed(self, _: bool) -> None:
         self._refresh_simulate_button()
+
+    def _on_sim_params_changed(self) -> None:
+        """Called when N or Seed changes: invalidate current results."""
+        if self._last_data is None:
+            return
+        self._last_data = None
+        self._current_params = None
+        self._btn_filter.setEnabled(False)
+        self._btn_save.setEnabled(False)
+        self._mse_frame.setVisible(False)
+        self._status_bar.setText("")
+        self._plot_panel.clear()
 
     def _on_simulate(self) -> None:
         params = self._build_gss_params()

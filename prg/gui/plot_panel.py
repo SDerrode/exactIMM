@@ -130,6 +130,13 @@ class PlotPanel(QWidget):
 
         self._canvas.draw_idle()
 
+    def clear(self) -> None:
+        """Clear all plots and restore the empty-state message."""
+        self.clear_filter_overlay()
+        for ax in self._axes:
+            ax.cla()
+        self._draw_empty()
+
     def clear_filter_overlay(self) -> None:
         """Remove previously drawn filter overlay artists."""
         artists = getattr(self, "_filter_artists", [])

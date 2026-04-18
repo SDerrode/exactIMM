@@ -13,19 +13,23 @@ Constraint checkboxes (eq. 4.8)
 ---------------------------------
 Each tab has four mutually exclusive checkboxes — at most one can be
 active at a time.  When checked, the corresponding block is auto-computed
-(or projected) in real-time and rendered read-only.
+in real-time and rendered read-only.
 Unchecking restores the value that was present before the constraint was
 activated.
 
   □ Constraint on A(k)   — A determined by B, C, D, Σ_U, Δ, Σ_V  (eq. 4.8)
   □ Constraint on B(k)   — B determined by A, C, D, Σ_U, Δ, Σ_V  (eq. 4.8)
   □ Constraint on Σ_U(k) — Σ_U determined by A, B, C, D, Δ, Σ_V  (eq. 4.8)
-  □ Stability on A(k)    — A projected so that ρ(A) < 1 (scale to ρ = 0.99)
+  □ Δ = 0(k)             — off-diagonal block of Σ_W forced to zero
 
-Stability indicator
--------------------
-A colour-coded badge (ρ(A(k)) = …) is always visible in the checkbox row
-and updates in real-time as the user edits the F(k) table.
+Stability indicators
+--------------------
+Two colour-coded badges are always visible in the checkbox row and update
+in real-time as the user edits F(k):
+  • ρ(A(k)) — spectral radius of the hidden-to-hidden block A
+  • ρ(D(k)) — spectral radius of the observation-to-observation block D
+
+Colour coding:  green ρ < 0.90 ✓  |  amber 0.90 ≤ ρ < 1.00 ~  |  red ρ ≥ 1.00 ✗
 
 ParamPanel aggregates validity across all tabs and propagates a
 validity_changed signal.
@@ -66,10 +70,10 @@ class _StateTab(QWidget):
                "QCheckBox::indicator:checked   { border: 2px solid #6c3483;"
                "                                 background-color: #8e44ad; }"
                "QCheckBox::indicator:unchecked { border: 2px solid #6c3483; }"),
-        "stab": ("QCheckBox { color: #7d4e00; font-weight: bold; font-size: 11px; }"
-                 "QCheckBox::indicator:checked   { border: 2px solid #7d4e00;"
-                 "                                 background-color: #e67e22; }"
-                 "QCheckBox::indicator:unchecked { border: 2px solid #7d4e00; }"),
+        "delta": ("QCheckBox { color: #0e6655; font-weight: bold; font-size: 11px; }"
+                  "QCheckBox::indicator:checked   { border: 2px solid #0e6655;"
+                  "                                 background-color: #1abc9c; }"
+                  "QCheckBox::indicator:unchecked { border: 2px solid #0e6655; }"),
     }
 
     def __init__(self, k: int, q: int, s: int, parent=None):
@@ -79,10 +83,10 @@ class _StateTab(QWidget):
         self._s = s
         self._updating = False              # re-entrancy guard
 
-        self._saved_A:      np.ndarray | None = None  # for H5 constraint on A
-        self._saved_B:      np.ndarray | None = None  # for H5 constraint on B
-        self._saved_SU:     np.ndarray | None = None  # for H5 constraint on Σ_U
-        self._saved_A_stab: np.ndarray | None = None  # for stability constraint
+        self._saved_A:     np.ndarray | None = None  # for H5 constraint on A
+        self._saved_B:     np.ndarray | None = None  # for H5 constraint on B
+        self._saved_SU:    np.ndarray | None = None  # for H5 constraint on Σ_U
+        self._saved_Delta: np.ndarray | None = None  # for Δ = 0 constraint
 
         # ── Main layout: checkbox row on top, matrix widgets below ──────
         layout = QVBoxLayout(self)
@@ -93,27 +97,28 @@ class _StateTab(QWidget):
         chk_row = QHBoxLayout()
         chk_row.setSpacing(16)
 
-        self._constraint_A_check    = QCheckBox(f"Constraint on A({k})")
-        self._constraint_B_check    = QCheckBox(f"Constraint on B({k})")
-        self._constraint_SU_check   = QCheckBox(f"Constraint on Σ_U({k})")
-        self._constraint_stab_check = QCheckBox(f"Stability on A({k})")
+        self._constraint_A_check     = QCheckBox(f"Constraint on A({k})")
+        self._constraint_B_check     = QCheckBox(f"Constraint on B({k})")
+        self._constraint_SU_check    = QCheckBox(f"Constraint on Σ_U({k})")
+        self._constraint_delta_check = QCheckBox(f"Δ = 0 ({k})")
 
-        for key, chk in [("A",    self._constraint_A_check),
-                          ("B",    self._constraint_B_check),
-                          ("SU",   self._constraint_SU_check),
-                          ("stab", self._constraint_stab_check)]:
+        for key, chk in [("A",     self._constraint_A_check),
+                          ("B",     self._constraint_B_check),
+                          ("SU",    self._constraint_SU_check),
+                          ("delta", self._constraint_delta_check)]:
             chk.setStyleSheet(self._CHK_STYLES[key])
             chk_row.addWidget(chk)
 
-        # Stability badge — always visible, pushed to the right
+        # Stability badges — always visible, pushed to the right
         chk_row.addStretch()
-        self._stab_badge = QLabel()
-        self._stab_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._stab_badge.setMinimumWidth(160)
-        self._stab_badge.setStyleSheet(
-            "font-size: 10px; padding: 2px 8px; border-radius: 3px;"
-        )
-        chk_row.addWidget(self._stab_badge)
+        self._stab_A_badge = QLabel()
+        self._stab_A_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._stab_A_badge.setMinimumWidth(148)
+        self._stab_D_badge = QLabel()
+        self._stab_D_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._stab_D_badge.setMinimumWidth(148)
+        chk_row.addWidget(self._stab_A_badge)
+        chk_row.addWidget(self._stab_D_badge)
 
         layout.addLayout(chk_row)
 
@@ -150,10 +155,10 @@ class _StateTab(QWidget):
         self._constraint_A_check.toggled.connect(self._on_A_toggled)
         self._constraint_B_check.toggled.connect(self._on_B_toggled)
         self._constraint_SU_check.toggled.connect(self._on_SU_toggled)
-        self._constraint_stab_check.toggled.connect(self._on_stab_toggled)
+        self._constraint_delta_check.toggled.connect(self._on_delta_toggled)
 
-        # Initialise the badge with the default matrix
-        self._update_stability_badge()
+        # Initialise the badges with the default matrix
+        self._update_stability_badges()
 
     # ------------------------------------------------------------------
     # Public
@@ -234,31 +239,30 @@ class _StateTab(QWidget):
         else:
             self._restore_SU()
 
-    def _on_stab_toggled(self, checked: bool) -> None:
+    def _on_delta_toggled(self, checked: bool) -> None:
         if checked:
-            self._uncheck_others(self._constraint_stab_check)
-            F = self._f_widget.get_matrix()
-            if F is not None:
-                self._saved_A_stab = F[:self._q, :self._q].copy()
-            self._recompute_stab()
+            self._uncheck_others(self._constraint_delta_check)
+            Sw = self._sigma_widget.get_matrix()
+            if Sw is not None:
+                self._saved_Delta = Sw[:self._q, self._q:].copy()
+            self._recompute_delta()
         else:
-            self._restore_stab()
+            self._restore_delta()
 
     # ------------------------------------------------------------------
     # Recompute methods (fire on every value_changed)
     # ------------------------------------------------------------------
 
     def _on_value_changed(self) -> None:
-        """Dispatch to the active constraint recomputation; always refresh badge."""
+        """Dispatch to the active constraint recomputation; always refresh badges."""
         if self._constraint_A_check.isChecked():
             self._recompute_A()
         elif self._constraint_B_check.isChecked():
             self._recompute_B()
         elif self._constraint_SU_check.isChecked():
             self._recompute_SU()
-        # Note: stability toggle locks A, so no re-projection needed on value_changed.
-        # The badge still refreshes (reflects current A in all cases).
-        self._update_stability_badge()
+        # Δ = 0 locks the off-diagonal, so no re-projection needed on value_changed.
+        self._update_stability_badges()
 
     def _recompute_A(self) -> None:
         if not self._constraint_A_check.isChecked() or self._updating:
@@ -339,44 +343,26 @@ class _StateTab(QWidget):
         self._sigma_widget.set_constraint_status(
             "✓  Σ_U satisfies constraint (4.8)", "color: #6c3483; font-size: 10px;")
 
-    def _recompute_stab(self) -> None:
-        """Project A(k) into the open unit disk (ρ → 0.99) and lock the block."""
-        if not self._constraint_stab_check.isChecked() or self._updating:
+    def _recompute_delta(self) -> None:
+        """Set Δ(k) = 0 and lock both off-diagonal blocks of Σ_W."""
+        if not self._constraint_delta_check.isChecked() or self._updating:
             return
-        F = self._f_widget.get_matrix()
-        if F is None:
-            return
-
-        q = self._q
-        A = F[:q, :q]
-        try:
-            rho = float(np.max(np.abs(np.linalg.eigvals(A))))
-        except np.linalg.LinAlgError:
-            self._f_widget.set_constraint_status(
-                "✗  Stability — eigenvalue computation failed",
-                "color: #cc0000; font-size: 10px;")
+        Sw = self._sigma_widget.get_matrix()
+        if Sw is None:
             return
 
-        _TARGET_RHO = 0.99
-        if rho >= 1.0:
-            A_new = A * (_TARGET_RHO / rho)
-            rho_new = _TARGET_RHO
-            note = f"projected  {rho:.4f} → {rho_new:.4f}"
-        else:
-            A_new = A          # already stable — just lock the block
-            rho_new = rho
-            note = f"already stable"
-
-        new_F = F.copy()
-        new_F[:q, :q] = A_new
+        q, s = self._q, self._s
+        new_Sw = Sw.copy()
+        new_Sw[:q, q:] = 0.0   # Δ  = 0
+        new_Sw[q:, :q] = 0.0   # Δᵀ = 0
         self._updating = True
-        self._f_widget.set_matrix(new_F)
-        self._f_widget.set_block_editable(0, q, 0, q, False)
+        self._sigma_widget.set_matrix(new_Sw)
+        # Lock both off-diagonal blocks (top-right and bottom-left)
+        self._sigma_widget.set_block_editable(0, q, q, q + s, False)
+        self._sigma_widget.set_block_editable(q, q + s, 0, q, False)
         self._updating = False
-        self._f_widget.set_constraint_status(
-            f"✓  ρ(A) = {rho_new:.4f}  ({note})",
-            "color: #7d4e00; font-size: 10px;")
-        self._update_stability_badge()
+        self._sigma_widget.set_constraint_status(
+            "✓  Δ = 0  (noise independence)", "color: #0e6655; font-size: 10px;")
 
     # ------------------------------------------------------------------
     # Restore methods (called when a checkbox is unchecked)
@@ -395,7 +381,7 @@ class _StateTab(QWidget):
                 self._f_widget.set_matrix(restored)
                 self._updating = False
             self._saved_A = None
-        self._update_stability_badge()
+        self._update_stability_badges()
 
     def _restore_B(self) -> None:
         q, s = self._q, self._s
@@ -425,54 +411,69 @@ class _StateTab(QWidget):
                 self._updating = False
             self._saved_SU = None
 
-    def _restore_stab(self) -> None:
-        q = self._q
-        self._f_widget.set_block_editable(0, q, 0, q, True)
-        self._f_widget.set_constraint_status("")
-        if self._saved_A_stab is not None:
-            F = self._f_widget.get_matrix()
-            if F is not None:
-                restored = F.copy()
-                restored[:q, :q] = self._saved_A_stab
+    def _restore_delta(self) -> None:
+        q, s = self._q, self._s
+        # Unlock both off-diagonal blocks
+        self._sigma_widget.set_block_editable(0, q, q, q + s, True)
+        self._sigma_widget.set_block_editable(q, q + s, 0, q, True)
+        self._sigma_widget.set_constraint_status("")
+        if self._saved_Delta is not None:
+            Sw = self._sigma_widget.get_matrix()
+            if Sw is not None:
+                restored = Sw.copy()
+                restored[:q, q:] = self._saved_Delta
+                restored[q:, :q] = self._saved_Delta.T
                 self._updating = True
-                self._f_widget.set_matrix(restored)
+                self._sigma_widget.set_matrix(restored)
                 self._updating = False
-            self._saved_A_stab = None
-        self._update_stability_badge()
+            self._saved_Delta = None
 
     # ------------------------------------------------------------------
-    # Stability badge
+    # Stability badges  (read-only display, no correction)
     # ------------------------------------------------------------------
 
-    def _update_stability_badge(self) -> None:
-        """Recompute ρ(A(k)) and update the colour-coded badge label."""
+    def _update_stability_badges(self) -> None:
+        """Recompute ρ(A(k)) and ρ(D(k)); refresh both colour-coded badges."""
         F = self._f_widget.get_matrix()
-        if F is None:
-            self._stab_badge.setText("ρ(A) = ?")
-            self._stab_badge.setStyleSheet(
-                "font-size: 10px; padding: 2px 8px; border-radius: 3px;"
-                "background: #e9ecef; color: #6c757d; border: 1px solid #adb5bd;"
-            )
-            return
+        self._set_badge(self._stab_A_badge, "ρ(A)", F, 0, self._q, 0, self._q)
+        self._set_badge(self._stab_D_badge, "ρ(D)", F,
+                        self._q, self._q + self._s,
+                        self._q, self._q + self._s)
 
+    @staticmethod
+    def _set_badge(
+        badge: QLabel,
+        label: str,
+        F: np.ndarray | None,
+        r0: int, r1: int,
+        c0: int, c1: int,
+    ) -> None:
+        """Extract block F[r0:r1, c0:c1], compute its spectral radius, style *badge*."""
+        _GREY = ("font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+                 "background: #e9ecef; color: #6c757d; border: 1px solid #adb5bd;")
+        if F is None:
+            badge.setText(f"{label} = ?")
+            badge.setStyleSheet(_GREY)
+            return
         try:
-            rho = float(np.max(np.abs(np.linalg.eigvals(F[:self._q, :self._q]))))
+            rho = float(np.max(np.abs(np.linalg.eigvals(F[r0:r1, c0:c1]))))
         except np.linalg.LinAlgError:
-            self._stab_badge.setText("ρ(A) = ?")
+            badge.setText(f"{label} = ?")
+            badge.setStyleSheet(_GREY)
             return
 
         if rho < 0.90:
-            bg, fg, border = "#d4edda", "#155724", "#c3e6cb"   # green — stable
+            bg, fg, border = "#d4edda", "#155724", "#c3e6cb"
             icon = "✓"
         elif rho < 1.00:
-            bg, fg, border = "#fff3cd", "#856404", "#ffc107"   # amber — marginal
+            bg, fg, border = "#fff3cd", "#856404", "#ffc107"
             icon = "~"
         else:
-            bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"   # red — unstable
+            bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"
             icon = "✗"
 
-        self._stab_badge.setText(f"ρ(A) = {rho:.4f}  {icon}")
-        self._stab_badge.setStyleSheet(
+        badge.setText(f"{label} = {rho:.4f} {icon}")
+        badge.setStyleSheet(
             f"font-size: 10px; padding: 2px 8px; border-radius: 3px;"
             f"background: {bg}; color: {fg}; border: 1px solid {border};"
         )
@@ -484,10 +485,10 @@ class _StateTab(QWidget):
     def _uncheck_others(self, keep: QCheckBox) -> None:
         """Silently uncheck every constraint checkbox except *keep*."""
         for chk, restore in [
-            (self._constraint_A_check,    self._restore_A),
-            (self._constraint_B_check,    self._restore_B),
-            (self._constraint_SU_check,   self._restore_SU),
-            (self._constraint_stab_check, self._restore_stab),
+            (self._constraint_A_check,     self._restore_A),
+            (self._constraint_B_check,     self._restore_B),
+            (self._constraint_SU_check,    self._restore_SU),
+            (self._constraint_delta_check, self._restore_delta),
         ]:
             if chk is not keep and chk.isChecked():
                 chk.blockSignals(True)

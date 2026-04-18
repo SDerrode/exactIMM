@@ -158,15 +158,24 @@ class PlotPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _draw_empty(self) -> None:
-        for ax in self._axes:
-            ax.set_visible(True)
-            ax.text(
-                0.5, 0.5,
-                "Press [Simulate] to run a simulation",
-                ha="center", va="center",
-                transform=ax.transAxes,
-                fontsize=9,
-            )
-            ax.set_xticks([])
+        """Show labelled empty axes (no data, no message)."""
+        ax_r = self._axes[0]
+        ax_r.set_ylabel(r"$R_n$", fontsize=10)
+        ax_r.set_yticks([])
+        ax_r.grid(True, linestyle=":", alpha=0.4)
+        ax_r.set_title("GSS Simulation", fontsize=10)
+
+        for i in range(self._q):
+            ax = self._axes[1 + i]
+            ax.set_ylabel(rf"$X^{i}$", fontsize=10)
             ax.set_yticks([])
+            ax.grid(True, linestyle=":", alpha=0.4)
+
+        for i in range(self._s):
+            ax = self._axes[1 + self._q + i]
+            ax.set_ylabel(rf"$Y^{i}$", fontsize=10)
+            ax.set_yticks([])
+            ax.grid(True, linestyle=":", alpha=0.4)
+
+        self._axes[-1].set_xlabel(r"$n$", fontsize=10)
         self._canvas.draw_idle()

@@ -148,7 +148,12 @@ class _StateTab(QWidget):
 
         for w in (self._sigma_widget,
                   self._mu_widget, self._bx_widget, self._by_widget):
-            widgets_row.addWidget(w)
+            _col = QVBoxLayout()
+            _col.setContentsMargins(0, 0, 0, 0)
+            _col.setSpacing(2)
+            _col.addWidget(w)
+            _col.addStretch()
+            widgets_row.addLayout(_col)
         widgets_row.addStretch()          # prevent horizontal expansion
         layout.addLayout(widgets_row)
         layout.addStretch()               # push everything to the top

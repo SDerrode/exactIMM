@@ -13,7 +13,7 @@ import numpy as np
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor, QBrush
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
+    QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QSizePolicy,
 )
 
 
@@ -90,8 +90,9 @@ class MatrixTableWidget(QWidget):
             self._table.setRowHeight(row, 24)
         layout.addWidget(self._table)
 
-        # Constrain the whole widget width to the table width
+        # Constrain width and prevent vertical expansion beyond content
         self.setMaximumWidth(self._n * 58 + 12)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         if is_covariance:
             self._status_label = QLabel()
@@ -369,9 +370,8 @@ class StochasticMatrixWidget(QWidget):
         self._status_label.setFixedHeight(16)
         layout.addWidget(self._status_label)
 
-        # Ne pas s'étirer verticalement au-delà du contenu
-        from PyQt6.QtWidgets import QSizePolicy as _SP
-        self.setSizePolicy(_SP.Policy.Preferred, _SP.Policy.Fixed)
+        self.setMaximumWidth(K * 64 + 12)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         # Default: uniform 1/K
         self.set_matrix(np.full((K, K), 1.0 / K))
@@ -527,7 +527,8 @@ class VectorWidget(QWidget):
         for row in range(n):
             self._table.setRowHeight(row, 24)
         layout.addWidget(self._table)
-        self.setMaximumWidth(82)  # match table width + margins
+        self.setMaximumWidth(82)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         self._populate(default_value)
         self._table.itemChanged.connect(self._on_item_changed)

@@ -12,7 +12,7 @@ import pytest
 from prg.classes.FMatrix import FMatrix
 from prg.classes.GSSParams import GSSParams
 from prg.classes.NoiseCovariance import GSSNoiseCovariance
-from prg.models.model_gss_K2_q1_s1 import ModelGss_K2_q1_s1
+from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
 from prg.utils.exceptions import CovarianceError, ParamError
 
 
@@ -67,7 +67,7 @@ class TestGSSParamsConstruction:
 
     def test_from_model(self):
         """GSSParams.from_model must build cleanly from the toy model."""
-        model = ModelGss_K2_q1_s1()
+        model = ModelGssK2Q1S1()
         params = GSSParams.from_model(model)
         assert params.K == 2
         assert params.q == 1

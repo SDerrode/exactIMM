@@ -15,7 +15,7 @@ import pytest
 
 from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
-from prg.models.model_gss_K2_q1_s1 import ModelGss_K2_q1_s1
+from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
 from prg.utils.exceptions import ParamError
 
 
@@ -27,7 +27,7 @@ from prg.utils.exceptions import ParamError
 @pytest.fixture(scope="module")
 def params_K2_q1_s1() -> GSSParams:
     """Pre-built GSSParams for the toy model (K=2, q=1, s=1)."""
-    return GSSParams.from_model(ModelGss_K2_q1_s1())
+    return GSSParams.from_model(ModelGssK2Q1S1())
 
 
 @pytest.fixture

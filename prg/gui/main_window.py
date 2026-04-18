@@ -222,8 +222,9 @@ class GSSMainWindow(QMainWindow):
         left_layout.addLayout(seed_row)
 
         # Buttons — grille 2×2
-        #   [Simuler]          [Filtrer]
-        #   [Enregistrer CSV]  [Exporter modèle…]
+        #   [Simulate]        [Filter]
+        #   [Save CSV]        [Export model…]
+        #   [Reset ——————————————————————————]
         btn_grid = QGridLayout()
         btn_grid.setSpacing(6)
 
@@ -246,10 +247,21 @@ class GSSMainWindow(QMainWindow):
         self._btn_export.setEnabled(False)
         self._btn_export.clicked.connect(self._on_export_model)
 
+        self._btn_reset = QPushButton("⟳  Reset")
+        self._btn_reset.setFixedHeight(30)
+        self._btn_reset.setStyleSheet(
+            "QPushButton { color: #856404; border: 1px solid #ffc107;"
+            " border-radius: 3px; background: #fff8e6; }"
+            "QPushButton:hover { background: #fff3cd; }"
+            "QPushButton:pressed { background: #ffc107; color: #000; }"
+        )
+        self._btn_reset.clicked.connect(self._on_reset)
+
         btn_grid.addWidget(self._btn_simulate, 0, 0)
         btn_grid.addWidget(self._btn_filter,   0, 1)
         btn_grid.addWidget(self._btn_save,     1, 0)
         btn_grid.addWidget(self._btn_export,   1, 1)
+        btn_grid.addWidget(self._btn_reset,    2, 0, 1, 2)   # spans both columns
 
         left_layout.addLayout(btn_grid)
 
@@ -314,6 +326,10 @@ class GSSMainWindow(QMainWindow):
         """Called when N or Seed changes: invalidate current results."""
         if self._last_data is None:
             return
+        self._on_reset()
+
+    def _on_reset(self) -> None:
+        """Clear all simulation / filter results and reset the interface."""
         self._last_data = None
         self._current_params = None
         self._btn_filter.setEnabled(False)

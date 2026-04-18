@@ -29,7 +29,7 @@ import pytest
 
 from prg.classes.GSSParams import GSSParams
 from prg.filter.gss_filter import FilterResult, GSSFilter
-from prg.models.model_gss_K2_q1_s1 import ModelGss_K2_q1_s1
+from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ from prg.models.model_gss_K2_q1_s1 import ModelGss_K2_q1_s1
 @pytest.fixture(scope="module")
 def params() -> GSSParams:
     """Shared GSSParams for the toy model (K=2, q=1, s=1)."""
-    return GSSParams.from_model(ModelGss_K2_q1_s1())
+    return GSSParams.from_model(ModelGssK2Q1S1())
 
 
 @pytest.fixture

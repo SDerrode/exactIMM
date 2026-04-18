@@ -100,7 +100,7 @@ class _StateTab(QWidget):
         self._constraint_A_check     = QCheckBox(f"Constraint on A({k})")
         self._constraint_B_check     = QCheckBox(f"Constraint on B({k})")
         self._constraint_SU_check    = QCheckBox(f"Constraint on Σ_U({k})")
-        self._constraint_delta_check = QCheckBox(f"Δ = 0 ({k})")
+        self._constraint_delta_check = QCheckBox("Δ = 0")
 
         for key, chk in [("A",     self._constraint_A_check),
                           ("B",     self._constraint_B_check),
@@ -109,17 +109,7 @@ class _StateTab(QWidget):
             chk.setStyleSheet(self._CHK_STYLES[key])
             chk_row.addWidget(chk)
 
-        # Stability badges — always visible, pushed to the right
         chk_row.addStretch()
-        self._stab_A_badge = QLabel()
-        self._stab_A_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._stab_A_badge.setMinimumWidth(148)
-        self._stab_D_badge = QLabel()
-        self._stab_D_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._stab_D_badge.setMinimumWidth(148)
-        chk_row.addWidget(self._stab_A_badge)
-        chk_row.addWidget(self._stab_D_badge)
-
         layout.addLayout(chk_row)
 
         # -- Matrix/vector widgets row --
@@ -131,6 +121,21 @@ class _StateTab(QWidget):
         )
         self._f_widget.set_matrix(np.eye(q + s) * 0.5)
 
+        # Stability badges live in a sub-column directly below _f_widget
+        self._stab_A_badge = QLabel()
+        self._stab_A_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._stab_D_badge = QLabel()
+        self._stab_D_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        f_col = QVBoxLayout()
+        f_col.setSpacing(2)
+        f_col.setContentsMargins(0, 0, 0, 0)
+        f_col.addWidget(self._f_widget)
+        f_col.addWidget(self._stab_A_badge)
+        f_col.addWidget(self._stab_D_badge)
+        f_col.addStretch()
+        widgets_row.addLayout(f_col)
+
         self._sigma_widget = MatrixTableWidget(
             q, s, is_covariance=True, title=f"Σ_W({k})", default_value=0.1,
         )
@@ -139,7 +144,7 @@ class _StateTab(QWidget):
         self._bx_widget = VectorWidget(q,     title=f"b_X({k})",  default_value=0.0)
         self._by_widget = VectorWidget(s,     title=f"b_Y({k})",  default_value=0.0)
 
-        for w in (self._f_widget, self._sigma_widget,
+        for w in (self._sigma_widget,
                   self._mu_widget, self._bx_widget, self._by_widget):
             widgets_row.addWidget(w)
         layout.addLayout(widgets_row)

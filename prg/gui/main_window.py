@@ -179,7 +179,7 @@ class GSSMainWindow(QMainWindow):
 
         # ── left panel ───────────────────────────────────────────────
         left = QWidget()
-        left.setMinimumWidth(340)
+        left.setMinimumWidth(540)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
@@ -305,7 +305,7 @@ class GSSMainWindow(QMainWindow):
         splitter.addWidget(self._plot_panel)
 
         # Left panel takes ~420px initially, right panel takes the rest
-        splitter.setSizes([420, 800])
+        splitter.setSizes([540, 800])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 

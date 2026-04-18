@@ -52,7 +52,8 @@ class _StateTab(QWidget):
         self._k = k
         self._q = q
         self._s = s
-        self._updating_B = False   # re-entrancy guard for _recompute_B
+        self._updating_B = False        # re-entrancy guard for _recompute_B
+        self._saved_B:    np.ndarray | None = None  # B saved when constraint is enabled
 
         # ── Main layout: checkbox row on top, matrix widgets below ──────
         layout = QVBoxLayout(self)
@@ -187,12 +188,26 @@ class _StateTab(QWidget):
     def _on_constraint_toggled(self, checked: bool) -> None:
         """Enable / disable the H5 constraint mode."""
         if checked:
+            # Save current B before overwriting it with the constrained value
+            F = self._f_widget.get_matrix()
+            if F is not None:
+                q = self._q
+                self._saved_B = F[:q, q:].copy()
             self._recompute_B()
         else:
-            # Restore B block to fully editable and hide status label
+            # Restore B to its pre-constraint value and make the block editable again
             q, s = self._q, self._s
             self._f_widget.set_block_editable(0, q, q, q + s, True)
             self._f_widget.set_constraint_status("")
+            if self._saved_B is not None:
+                F = self._f_widget.get_matrix()
+                if F is not None:
+                    restored_F = F.copy()
+                    restored_F[:q, q:] = self._saved_B
+                    self._updating_B = True
+                    self._f_widget.set_matrix(restored_F)
+                    self._updating_B = False
+                self._saved_B = None
 
     def _recompute_B(self) -> None:
         """Solve for B(k) in real-time and overwrite it in F(k)."""

@@ -148,18 +148,22 @@ class MatrixTableWidget(QWidget):
         Read-only cells receive a saturated version of their block colour to
         signal that the value is auto-computed.
         """
-        for r in range(row_start, row_end):
-            for c in range(col_start, col_end):
-                item = self._table.item(r, c)
-                if item is None:
-                    continue
-                flags = item.flags()
-                if editable:
-                    item.setFlags(flags | Qt.ItemFlag.ItemIsEditable)
-                    item.setBackground(QBrush(QColor(self._cell_bg(r, c))))
-                else:
-                    item.setFlags(flags & ~Qt.ItemFlag.ItemIsEditable)
-                    item.setBackground(QBrush(QColor(self._cell_computed_bg(r, c))))
+        self._table.blockSignals(True)
+        try:
+            for r in range(row_start, row_end):
+                for c in range(col_start, col_end):
+                    item = self._table.item(r, c)
+                    if item is None:
+                        continue
+                    flags = item.flags()
+                    if editable:
+                        item.setFlags(flags | Qt.ItemFlag.ItemIsEditable)
+                        item.setBackground(QBrush(QColor(self._cell_bg(r, c))))
+                    else:
+                        item.setFlags(flags & ~Qt.ItemFlag.ItemIsEditable)
+                        item.setBackground(QBrush(QColor(self._cell_computed_bg(r, c))))
+        finally:
+            self._table.blockSignals(False)
 
     def set_constraint_status(self, text: str, style: str = "") -> None:
         """Show or hide the constraint feedback label below the table.
@@ -230,14 +234,26 @@ class MatrixTableWidget(QWidget):
         r, c = item.row(), item.column()
         try:
             float(item.text())
-            # Restore block colour only when not locked (editable flag present)
-            if item.flags() & Qt.ItemFlag.ItemIsEditable:
-                item.setBackground(QBrush(QColor(self._cell_bg(r, c))))
-            item.setForeground(QBrush(QColor("black")))
-            return True
+            ok = True
         except ValueError:
-            item.setBackground(QBrush(_COLOUR_BAD))
-            return False
+            ok = False
+
+        # Block table signals while updating colours: setBackground / setForeground
+        # emit itemChanged synchronously, which would re-enter _on_item_changed and
+        # could trigger set_matrix (via the constraint pipeline), deleting this item
+        # before the current call stack returns.
+        self._table.blockSignals(True)
+        try:
+            if ok:
+                if item.flags() & Qt.ItemFlag.ItemIsEditable:
+                    item.setBackground(QBrush(QColor(self._cell_bg(r, c))))
+                item.setForeground(QBrush(QColor("black")))
+            else:
+                item.setBackground(QBrush(_COLOUR_BAD))
+        finally:
+            self._table.blockSignals(False)
+
+        return ok
 
     def _validate_all(self) -> None:
         """Re-check all cells; if covariance, also check SPD. Emit if changed."""

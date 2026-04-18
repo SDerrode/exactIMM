@@ -34,7 +34,7 @@ import numpy as np
 if TYPE_CHECKING:
     from prg.classes.GSSParams import GSSParams
 
-__all__ = ["apply_h5_constraint", "compute_B_from_h5"]
+__all__ = ["apply_h5_constraint", "compute_B_from_h5", "compute_A_from_h5", "compute_SU_from_h5"]
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +98,139 @@ def compute_B_from_h5(
         raise ValueError("B_T contains non-finite values after solving.")
 
     return B_T.T   # q × s
+
+
+def compute_A_from_h5(
+    B:  np.ndarray,   # (q, s)
+    C:  np.ndarray,   # (s, q)
+    D:  np.ndarray,   # (s, s)
+    SU: np.ndarray,   # (q, q)  Σ_U
+    Dt: np.ndarray,   # (q, s)  Δ
+    SV: np.ndarray,   # (s, s)  Σ_V
+) -> np.ndarray:
+    """
+    Compute A (q × q) from the H5 constraint with B fixed (eq. 4.8).
+
+    Rearranging the constraint for A gives the linear system:
+        G Aᵀ = rhs_A
+    with  G = PM⁻¹Q − Δᵀ  (s × q)
+          rhs_A = L Bᵀ − PM⁻¹Δᵀ  (s × q)
+
+    Returns
+    -------
+    ndarray of shape (q, q)
+
+    Raises
+    ------
+    ValueError
+        If M or L is ill-conditioned, or A is not uniquely determined.
+    """
+    P = Dt.T @ C.T + SV @ D.T
+    Q = C @ SU + D @ Dt.T
+    R = C @ Dt + D @ SV
+    M = Q @ C.T + R @ D.T + SV
+
+    cond_M = np.linalg.cond(M)
+    if cond_M > 1e12:
+        raise ValueError(
+            f"M is ill-conditioned (cond = {cond_M:.3e}); "
+            "cannot reliably solve for A."
+        )
+
+    try:
+        PM_inv = np.linalg.solve(M.T, P.T).T
+    except np.linalg.LinAlgError as exc:
+        raise ValueError(f"M is singular: {exc}") from exc
+
+    L = SV - PM_inv @ R
+
+    cond_L = np.linalg.cond(L)
+    if cond_L > 1e12:
+        raise ValueError(
+            f"L is ill-conditioned (cond = {cond_L:.3e}); "
+            "cannot reliably solve for A."
+        )
+
+    G     = PM_inv @ Q - Dt.T          # s × q
+    rhs_A = L @ B.T - PM_inv @ Dt.T   # s × q
+
+    # Solve G @ A^T = rhs_A (lstsq handles s ≠ q)
+    A_T, _, rank, _ = np.linalg.lstsq(G, rhs_A, rcond=None)
+
+    if rank < min(G.shape):
+        raise ValueError(
+            f"G is rank-deficient (rank={rank}); A is not uniquely determined."
+        )
+
+    if not np.isfinite(A_T).all():
+        raise ValueError("A contains non-finite values after solving.")
+
+    return A_T.T   # q × q
+
+
+def compute_SU_from_h5(
+    A:  np.ndarray,   # (q, q)
+    B:  np.ndarray,   # (q, s)
+    C:  np.ndarray,   # (s, q)
+    D:  np.ndarray,   # (s, s)
+    Dt: np.ndarray,   # (q, s)  Δ
+    SV: np.ndarray,   # (s, s)  Σ_V
+) -> np.ndarray:
+    """
+    Compute Σ_U (q × q) from the H5 constraint with A, B, C, D, Δ, Σ_V fixed.
+
+    Multiplying the constraint through by M eliminates M⁻¹ and yields
+    a linear equation in Σ_U:
+        C Σ_U E − (PC) Σ_U Aᵀ = RHS
+    where  E = CᵀZ,  Z = Σ_V Bᵀ + ΔᵀA,  PC = P C.
+
+    Vectorising with vec(XYZ) = (Zᵀ⊗X) vec(Y) gives the (qs × q²) system:
+        [(Eᵀ⊗C) − (A⊗PC)] vec(Σ_U) = vec(RHS)
+
+    Returns
+    -------
+    ndarray of shape (q, q), symmetric positive definite
+
+    Raises
+    ------
+    ValueError
+        If the system is rank-deficient or Σ_U is not positive definite.
+    """
+    P  = Dt.T @ C.T + SV @ D.T        # s × s
+    Q0 = D @ Dt.T                      # s × q  (Q = C Σ_U + Q0)
+    R  = C @ Dt + D @ SV               # s × s
+    M0 = Q0 @ C.T + R @ D.T + SV      # s × s  (M = C Σ_U Cᵀ + M0)
+
+    Z   = SV @ B.T + Dt.T @ A         # s × q
+    W   = Q0 @ A.T + R @ B.T + Dt.T   # s × q
+    RHS = P @ W - M0 @ Z              # s × q
+
+    E       = C.T @ Z                  # q × q
+    PC      = P @ C                    # s × q
+    KronMat = np.kron(E.T, C) - np.kron(A, PC)   # (qs × q²)
+    rhs_vec = RHS.ravel(order="F")                # (qs,)
+
+    SU_vec, _, rank, _ = np.linalg.lstsq(KronMat, rhs_vec, rcond=None)
+
+    q = A.shape[0]
+    if rank < q * q:
+        raise ValueError(
+            f"Kronecker system is rank-deficient (rank={rank} < {q*q}); "
+            "Σ_U is not uniquely determined."
+        )
+
+    SU = SU_vec.reshape(q, q, order="F")
+    SU = (SU + SU.T) / 2              # enforce symmetry
+
+    if not np.isfinite(SU).all():
+        raise ValueError("Σ_U contains non-finite values after solving.")
+
+    try:
+        np.linalg.cholesky(SU)
+    except np.linalg.LinAlgError:
+        raise ValueError("Computed Σ_U is not positive definite.")
+
+    return SU
 
 
 # ---------------------------------------------------------------------------

@@ -9,18 +9,17 @@ Each tab (_StateTab) exposes:
   - F(k)     : MatrixTableWidget (no SPD check)
   - Σ_W(k)   : MatrixTableWidget (SPD check enabled)
 
-Constraint checkbox (4.7)
---------------------------
-Each tab has an optional checkbox "Calculer B(k) automatiquement".
-When checked, the B block of F(k) is recomputed in real-time from the
-constraint (4.7) — i.e. B is the unique solution of:
+Constraint checkboxes (eq. 4.8)
+---------------------------------
+Each tab has three mutually exclusive checkboxes — at most one can be
+active at a time.  When checked, the corresponding block is auto-computed
+in real-time from the other six matrices and rendered read-only.
+Unchecking restores the value that was present before the constraint was
+activated.
 
-    (Σ_V − P M⁻¹ R) Bᵀ = P M⁻¹ (Q Aᵀ + Δᵀ) − Δᵀ A
-
-with  P = Δᵀ Cᵀ + Σ_V Dᵀ,  Q = C Σ_U + D Δᵀ,
-      R = C Δ + D Σ_V,       M = Q Cᵀ + R Dᵀ + Σ_V.
-
-The B cells are then rendered read-only (light-blue tint).
+  □ Constraint on A(k)   — A determined by B, C, D, Σ_U, Δ, Σ_V
+  □ Constraint on B(k)   — B determined by A, C, D, Σ_U, Δ, Σ_V
+  □ Constraint on Σ_U(k) — Σ_U determined by A, B, C, D, Δ, Σ_V
 
 ParamPanel aggregates validity across all tabs and propagates a
 validity_changed signal.
@@ -34,7 +33,7 @@ from PyQt6.QtWidgets import (
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
-from prg.utils.h5_constraint import compute_B_from_h5
+from prg.utils.h5_constraint import compute_A_from_h5, compute_B_from_h5, compute_SU_from_h5
 
 
 # ---------------------------------------------------------------------------
@@ -43,35 +42,56 @@ from prg.utils.h5_constraint import compute_B_from_h5
 
 class _StateTab(QWidget):
     """One tab: F(k), Σ_W(k), μ_z0(k), b_X(k), b_Y(k) side by side,
-    plus an optional H5-constraint checkbox that auto-computes B(k)."""
+    plus three mutually exclusive H5-constraint checkboxes."""
 
     validity_changed = pyqtSignal(bool)
+
+    # Checkbox colour palette  (text, checked-fill, border)
+    _CHK_STYLES = {
+        "A":  ("QCheckBox { color: #155399; font-weight: bold; font-size: 11px; }"
+               "QCheckBox::indicator:checked   { border: 2px solid #155399;"
+               "                                 background-color: #2980b9; }"
+               "QCheckBox::indicator:unchecked { border: 2px solid #155399; }"),
+        "B":  ("QCheckBox { color: #1a7a3a; font-weight: bold; font-size: 11px; }"
+               "QCheckBox::indicator:checked   { border: 2px solid #1a7a3a;"
+               "                                 background-color: #27ae60; }"
+               "QCheckBox::indicator:unchecked { border: 2px solid #1a7a3a; }"),
+        "SU": ("QCheckBox { color: #6c3483; font-weight: bold; font-size: 11px; }"
+               "QCheckBox::indicator:checked   { border: 2px solid #6c3483;"
+               "                                 background-color: #8e44ad; }"
+               "QCheckBox::indicator:unchecked { border: 2px solid #6c3483; }"),
+    }
 
     def __init__(self, k: int, q: int, s: int, parent=None):
         super().__init__(parent)
         self._k = k
         self._q = q
         self._s = s
-        self._updating_B = False        # re-entrancy guard for _recompute_B
-        self._saved_B:    np.ndarray | None = None  # B saved when constraint is enabled
+        self._updating = False              # re-entrancy guard
+
+        self._saved_A:  np.ndarray | None = None
+        self._saved_B:  np.ndarray | None = None
+        self._saved_SU: np.ndarray | None = None
 
         # ── Main layout: checkbox row on top, matrix widgets below ──────
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        # -- Constraint checkbox row --
-        # Styled in B-block green (#d5f5e3 / #1a7a3a) to recall the B column
+        # -- Constraint checkbox row (mutually exclusive) --
         chk_row = QHBoxLayout()
-        chk_row.setSpacing(12)
-        self._constraint_check = QCheckBox(f"Constraint on F({k})")
-        self._constraint_check.setStyleSheet(
-            "QCheckBox { color: #1a7a3a; font-weight: bold; font-size: 11px; }"
-            "QCheckBox::indicator:checked   { border: 2px solid #1a7a3a;"
-            "                                 background-color: #27ae60; }"
-            "QCheckBox::indicator:unchecked { border: 2px solid #1a7a3a; }"
-        )
-        chk_row.addWidget(self._constraint_check)
+        chk_row.setSpacing(20)
+
+        self._constraint_A_check  = QCheckBox(f"Constraint on A({k})")
+        self._constraint_B_check  = QCheckBox(f"Constraint on B({k})")
+        self._constraint_SU_check = QCheckBox(f"Constraint on Σ_U({k})")
+
+        for key, chk in [("A", self._constraint_A_check),
+                          ("B", self._constraint_B_check),
+                          ("SU", self._constraint_SU_check)]:
+            chk.setStyleSheet(self._CHK_STYLES[key])
+            chk_row.addWidget(chk)
+
         chk_row.addStretch()
         layout.addLayout(chk_row)
 
@@ -79,62 +99,36 @@ class _StateTab(QWidget):
         widgets_row = QHBoxLayout()
         widgets_row.setSpacing(16)
 
-        # Default F(k): 0.5 * I (stable system)
         self._f_widget = MatrixTableWidget(
-            q, s,
-            is_covariance=False,
-            title=f"F({k})",
-            default_value=0.0,
+            q, s, is_covariance=False, title=f"F({k})", default_value=0.0,
         )
         self._f_widget.set_matrix(np.eye(q + s) * 0.5)
 
-        # Default Σ_W(k): 0.1 * I (SPD)
         self._sigma_widget = MatrixTableWidget(
-            q, s,
-            is_covariance=True,
-            title=f"Σ_W({k})",
-            default_value=0.1,
+            q, s, is_covariance=True, title=f"Σ_W({k})", default_value=0.1,
         )
 
-        # Default μ_z0(k): zero vector (q+s components)
-        self._mu_widget = VectorWidget(
-            q + s,
-            title=f"μ_z0({k})",
-            default_value=0.0,
-        )
+        self._mu_widget = VectorWidget(q + s, title=f"μ_z0({k})", default_value=0.0)
 
-        # Drift bias b(k) split into X part (q) and Y part (s)
-        self._bx_widget = VectorWidget(
-            q,
-            title=f"b_X({k})",
-            default_value=0.0,
-        )
-        self._by_widget = VectorWidget(
-            s,
-            title=f"b_Y({k})",
-            default_value=0.0,
-        )
+        self._bx_widget = VectorWidget(q, title=f"b_X({k})", default_value=0.0)
+        self._by_widget = VectorWidget(s, title=f"b_Y({k})", default_value=0.0)
 
-        widgets_row.addWidget(self._f_widget)
-        widgets_row.addWidget(self._sigma_widget)
-        widgets_row.addWidget(self._mu_widget)
-        widgets_row.addWidget(self._bx_widget)
-        widgets_row.addWidget(self._by_widget)
+        for w in (self._f_widget, self._sigma_widget,
+                  self._mu_widget, self._bx_widget, self._by_widget):
+            widgets_row.addWidget(w)
         layout.addLayout(widgets_row)
 
         # ── Signal connections ──────────────────────────────────────────
-        self._f_widget.validity_changed.connect(self._on_child_validity)
-        self._sigma_widget.validity_changed.connect(self._on_child_validity)
-        self._mu_widget.validity_changed.connect(self._on_child_validity)
-        self._bx_widget.validity_changed.connect(self._on_child_validity)
-        self._by_widget.validity_changed.connect(self._on_child_validity)
+        for w in (self._f_widget, self._sigma_widget,
+                  self._mu_widget, self._bx_widget, self._by_widget):
+            w.validity_changed.connect(self._on_child_validity)
 
-        # Real-time B recomputation on any value change
-        self._f_widget.value_changed.connect(self._recompute_B)
-        self._sigma_widget.value_changed.connect(self._recompute_B)
+        self._f_widget.value_changed.connect(self._on_value_changed)
+        self._sigma_widget.value_changed.connect(self._on_value_changed)
 
-        # Toggle checkbox
-        self._constraint_check.toggled.connect(self._on_constraint_toggled)
+        self._constraint_A_check.toggled.connect(self._on_A_toggled)
+        self._constraint_B_check.toggled.connect(self._on_B_toggled)
+        self._constraint_SU_check.toggled.connect(self._on_SU_toggled)
 
     # ------------------------------------------------------------------
     # Public
@@ -151,8 +145,8 @@ class _StateTab(QWidget):
 
     def get_b(self) -> np.ndarray | None:
         """Return full bias vector (q+s, 1) = [b_X; b_Y], or None if invalid."""
-        bx = self._bx_widget.get_vector()   # (q, 1)
-        by = self._by_widget.get_vector()   # (s, 1)
+        bx = self._bx_widget.get_vector()
+        by = self._by_widget.get_vector()
         if bx is None or by is None:
             return None
         return np.vstack([bx, by])
@@ -182,82 +176,201 @@ class _StateTab(QWidget):
         )
 
     # ------------------------------------------------------------------
-    # Constraint (4.7) — auto-compute B
+    # Constraint toggle handlers
     # ------------------------------------------------------------------
 
-    def _on_constraint_toggled(self, checked: bool) -> None:
-        """Enable / disable the H5 constraint mode."""
+    def _on_A_toggled(self, checked: bool) -> None:
         if checked:
-            # Save current B before overwriting it with the constrained value
+            self._uncheck_others(self._constraint_A_check)
             F = self._f_widget.get_matrix()
             if F is not None:
-                q = self._q
-                self._saved_B = F[:q, q:].copy()
+                self._saved_A = F[:self._q, :self._q].copy()
+            self._recompute_A()
+        else:
+            self._restore_A()
+
+    def _on_B_toggled(self, checked: bool) -> None:
+        if checked:
+            self._uncheck_others(self._constraint_B_check)
+            F = self._f_widget.get_matrix()
+            if F is not None:
+                self._saved_B = F[:self._q, self._q:].copy()
             self._recompute_B()
         else:
-            # Restore B to its pre-constraint value and make the block editable again
-            q, s = self._q, self._s
-            self._f_widget.set_block_editable(0, q, q, q + s, True)
-            self._f_widget.set_constraint_status("")
-            if self._saved_B is not None:
-                F = self._f_widget.get_matrix()
-                if F is not None:
-                    restored_F = F.copy()
-                    restored_F[:q, q:] = self._saved_B
-                    self._updating_B = True
-                    self._f_widget.set_matrix(restored_F)
-                    self._updating_B = False
-                self._saved_B = None
+            self._restore_B()
 
-    def _recompute_B(self) -> None:
-        """Solve for B(k) in real-time and overwrite it in F(k)."""
-        if not self._constraint_check.isChecked() or self._updating_B:
+    def _on_SU_toggled(self, checked: bool) -> None:
+        if checked:
+            self._uncheck_others(self._constraint_SU_check)
+            Sw = self._sigma_widget.get_matrix()
+            if Sw is not None:
+                self._saved_SU = Sw[:self._q, :self._q].copy()
+            self._recompute_SU()
+        else:
+            self._restore_SU()
+
+    # ------------------------------------------------------------------
+    # Recompute methods (fire on every value_changed)
+    # ------------------------------------------------------------------
+
+    def _on_value_changed(self) -> None:
+        """Dispatch to the active constraint recomputation, if any."""
+        if self._constraint_A_check.isChecked():
+            self._recompute_A()
+        elif self._constraint_B_check.isChecked():
+            self._recompute_B()
+        elif self._constraint_SU_check.isChecked():
+            self._recompute_SU()
+
+    def _recompute_A(self) -> None:
+        if not self._constraint_A_check.isChecked() or self._updating:
             return
-        F  = self._f_widget.get_matrix()
-        Sw = self._sigma_widget.get_matrix()
+        F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
         if F is None or Sw is None:
             return
 
-        B_new = self._compute_B_from_constraint(F, Sw)
+        A_new = self._call_constraint(compute_A_from_h5, dict(
+            B=F[:self._q, self._q:], C=F[self._q:, :self._q], D=F[self._q:, self._q:],
+            SU=Sw[:self._q, :self._q], Dt=Sw[:self._q, self._q:], SV=Sw[self._q:, self._q:],
+        ))
+        if A_new is None:
+            self._f_widget.set_constraint_status(
+                "✗  A — singular system", "color: #cc0000; font-size: 10px;")
+            return
 
+        q = self._q
+        new_F = F.copy()
+        new_F[:q, :q] = A_new
+        self._updating = True
+        self._f_widget.set_matrix(new_F)
+        self._f_widget.set_block_editable(0, q, 0, q, False)
+        self._updating = False
+        self._f_widget.set_constraint_status(
+            "✓  A satisfies constraint (4.8)", "color: #155399; font-size: 10px;")
+
+    def _recompute_B(self) -> None:
+        if not self._constraint_B_check.isChecked() or self._updating:
+            return
+        F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
+        if F is None or Sw is None:
+            return
+
+        B_new = self._call_constraint(compute_B_from_h5, dict(
+            A=F[:self._q, :self._q], C=F[self._q:, :self._q], D=F[self._q:, self._q:],
+            SU=Sw[:self._q, :self._q], Dt=Sw[:self._q, self._q:], SV=Sw[self._q:, self._q:],
+        ))
         if B_new is None:
             self._f_widget.set_constraint_status(
-                "✗  B — singular system",
-                "color: #cc0000; font-size: 10px;",
-            )
+                "✗  B — singular system", "color: #cc0000; font-size: 10px;")
             return
 
         q, s = self._q, self._s
         new_F = F.copy()
         new_F[:q, q:] = B_new
-
-        self._updating_B = True
+        self._updating = True
         self._f_widget.set_matrix(new_F)
-        # Re-apply computed tint on the B block (set_matrix resets all cells)
         self._f_widget.set_block_editable(0, q, q, q + s, False)
-        self._updating_B = False
-
+        self._updating = False
         self._f_widget.set_constraint_status(
-            "✓  B satisfies constraint (4.7)",
-            "color: #1a7a3a; font-size: 10px;",
-        )
+            "✓  B satisfies constraint (4.8)", "color: #1a7a3a; font-size: 10px;")
 
-    def _compute_B_from_constraint(
-        self, F: np.ndarray, Sw: np.ndarray
-    ) -> np.ndarray | None:
-        """Return B (q×s) from the H5 constraint, or None if the system is singular."""
+    def _recompute_SU(self) -> None:
+        if not self._constraint_SU_check.isChecked() or self._updating:
+            return
+        F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
+        if F is None or Sw is None:
+            return
+
+        SU_new = self._call_constraint(compute_SU_from_h5, dict(
+            A=F[:self._q, :self._q], B=F[:self._q, self._q:],
+            C=F[self._q:, :self._q], D=F[self._q:, self._q:],
+            Dt=Sw[:self._q, self._q:], SV=Sw[self._q:, self._q:],
+        ))
+        if SU_new is None:
+            self._sigma_widget.set_constraint_status(
+                "✗  Σ_U — singular system", "color: #cc0000; font-size: 10px;")
+            return
+
         q = self._q
+        new_Sw = Sw.copy()
+        new_Sw[:q, :q] = SU_new
+        self._updating = True
+        self._sigma_widget.set_matrix(new_Sw)
+        self._sigma_widget.set_block_editable(0, q, 0, q, False)
+        self._updating = False
+        self._sigma_widget.set_constraint_status(
+            "✓  Σ_U satisfies constraint (4.8)", "color: #6c3483; font-size: 10px;")
+
+    # ------------------------------------------------------------------
+    # Restore methods (called when a checkbox is unchecked)
+    # ------------------------------------------------------------------
+
+    def _restore_A(self) -> None:
+        q = self._q
+        self._f_widget.set_block_editable(0, q, 0, q, True)
+        self._f_widget.set_constraint_status("")
+        if self._saved_A is not None:
+            F = self._f_widget.get_matrix()
+            if F is not None:
+                restored = F.copy()
+                restored[:q, :q] = self._saved_A
+                self._updating = True
+                self._f_widget.set_matrix(restored)
+                self._updating = False
+            self._saved_A = None
+
+    def _restore_B(self) -> None:
+        q, s = self._q, self._s
+        self._f_widget.set_block_editable(0, q, q, q + s, True)
+        self._f_widget.set_constraint_status("")
+        if self._saved_B is not None:
+            F = self._f_widget.get_matrix()
+            if F is not None:
+                restored = F.copy()
+                restored[:q, q:] = self._saved_B
+                self._updating = True
+                self._f_widget.set_matrix(restored)
+                self._updating = False
+            self._saved_B = None
+
+    def _restore_SU(self) -> None:
+        q = self._q
+        self._sigma_widget.set_block_editable(0, q, 0, q, True)
+        self._sigma_widget.set_constraint_status("")
+        if self._saved_SU is not None:
+            Sw = self._sigma_widget.get_matrix()
+            if Sw is not None:
+                restored = Sw.copy()
+                restored[:q, :q] = self._saved_SU
+                self._updating = True
+                self._sigma_widget.set_matrix(restored)
+                self._updating = False
+            self._saved_SU = None
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _uncheck_others(self, keep: QCheckBox) -> None:
+        """Silently uncheck every constraint checkbox except *keep*."""
+        for chk, restore in [
+            (self._constraint_A_check,  self._restore_A),
+            (self._constraint_B_check,  self._restore_B),
+            (self._constraint_SU_check, self._restore_SU),
+        ]:
+            if chk is not keep and chk.isChecked():
+                chk.blockSignals(True)
+                chk.setChecked(False)
+                chk.blockSignals(False)
+                restore()
+
+    @staticmethod
+    def _call_constraint(fn, kwargs: dict) -> np.ndarray | None:
+        """Call a constraint function and return None on ValueError."""
         try:
-            return compute_B_from_h5(
-                A=F[:q, :q], C=F[q:, :q], D=F[q:, q:],
-                SU=Sw[:q, :q], Dt=Sw[:q, q:], SV=Sw[q:, q:],
-            )
+            return fn(**kwargs)
         except ValueError:
             return None
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _on_child_validity(self, _: bool) -> None:
         self.validity_changed.emit(self.is_valid())

@@ -76,6 +76,7 @@ class MatrixTableWidget(QWidget):
 
         if title:
             lbl = QLabel(title)
+            lbl.setTextFormat(Qt.TextFormat.RichText)
             lbl.setStyleSheet("font-weight: bold;")
             layout.addWidget(lbl)
 
@@ -351,6 +352,7 @@ class StochasticMatrixWidget(QWidget):
 
         if title:
             lbl = QLabel(title)
+            lbl.setTextFormat(Qt.TextFormat.RichText)
             lbl.setStyleSheet("font-weight: bold;")
             layout.addWidget(lbl)
 
@@ -515,6 +517,7 @@ class VectorWidget(QWidget):
 
         if title:
             lbl = QLabel(title)
+            lbl.setTextFormat(Qt.TextFormat.RichText)
             lbl.setStyleSheet("font-weight: bold;")
             layout.addWidget(lbl)
 

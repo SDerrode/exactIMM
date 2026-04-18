@@ -117,7 +117,8 @@ class _StateTab(QWidget):
         widgets_row.setSpacing(16)
 
         self._f_widget = MatrixTableWidget(
-            q, s, is_covariance=False, title=f"F({k})", default_value=0.0,
+            q, s, is_covariance=False,
+            title=f"<i>F</i>({k})", default_value=0.0,
         )
         self._f_widget.set_matrix(np.eye(q + s) * 0.5)
 
@@ -139,12 +140,19 @@ class _StateTab(QWidget):
         widgets_row.addLayout(f_col)
 
         self._sigma_widget = MatrixTableWidget(
-            q, s, is_covariance=True, title=f"Σ_W({k})", default_value=0.1,
+            q, s, is_covariance=True,
+            title=f"Σ<sub>W</sub>({k})", default_value=0.1,
         )
 
-        self._mu_widget = VectorWidget(q + s, title=f"μ_z0({k})", default_value=0.0)
-        self._bx_widget = VectorWidget(q,     title=f"b_X({k})",  default_value=0.0)
-        self._by_widget = VectorWidget(s,     title=f"b_Y({k})",  default_value=0.0)
+        self._mu_widget = VectorWidget(
+            q + s, title=f"μ<sub>z₀</sub>({k})", default_value=0.0,
+        )
+        self._bx_widget = VectorWidget(
+            q, title=f"<i>b</i><sub>X</sub>({k})", default_value=0.0,
+        )
+        self._by_widget = VectorWidget(
+            s, title=f"<i>b</i><sub>Y</sub>({k})", default_value=0.0,
+        )
 
         for w in (self._sigma_widget,
                   self._mu_widget, self._bx_widget, self._by_widget):

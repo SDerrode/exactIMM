@@ -186,7 +186,7 @@ class GSSMainWindow(QMainWindow):
 
         self._param_panel = ParamPanel(K, q, s)
         self._param_panel.validity_changed.connect(self._on_validity_changed)
-        left_layout.addWidget(self._param_panel, stretch=1)
+        left_layout.addWidget(self._param_panel)  # no stretch: natural height
 
         # Transition matrix P
         p_section = QHBoxLayout()
@@ -220,6 +220,8 @@ class GSSMainWindow(QMainWindow):
         self._seed_edit.textChanged.connect(self._on_sim_params_changed)
         seed_row.addWidget(self._seed_edit)
         left_layout.addLayout(seed_row)
+
+        left_layout.addStretch()   # pushes buttons to the bottom of the panel
 
         # Buttons — grille 2×2
         #   [Simulate]        [Filter]

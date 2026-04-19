@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-04-19
+
+### Added
+
+- **`prg/learning/semi_supervised.py`** — Baum-Welch EM estimator for
+  the case where (X, Y) are observed but the regime sequence R is
+  *hidden*.  The model is treated as an HMM with continuous emissions
+  N(F(k) Z_n + b(k), Σ_W(k)) and Markov transitions P:
+  - **E-step**: forward / backward in log-domain
+    (`scipy.special.logsumexp`); Cholesky-based vectorised emission
+    log-pdf (`_log_mvn_batch`); posteriors γ_n(k) and ξ_n(j,k)
+  - **M-step**: closed-form weighted updates of P, π₀, μ_z0(k),
+    Σ_z0(k); weighted OLS for F(k), b(k); weighted MLE for Σ_W(k);
+    optional H5 projection on A / B / Σ_U *at every M-step* (Generalized
+    EM — log-likelihood not guaranteed to be monotone)
+  - **Initialisation**: k-means on the first differences ΔZ_n
+    (`scipy.cluster.vq.kmeans2`), seeded by reproducible RNG draws
+  - **Multi-start**: `n_inits` independent EM runs (default 10), best
+    log-likelihood retained; failed runs are skipped
+  - **Label-switching mitigation**: regimes reordered by A[0,0]
+    descending after convergence
+  - **`fit_semi_supervised(xs, ys, K, …)`** — public API; returns
+    `(params, info)` where `info` contains `best_log_lik`,
+    `best_init_seed`, `log_lik_history`, and `all_log_liks`
+  - **CLI** (`python -m prg.learning.semi_supervised`): `-K`,
+    `--constraint`, `--delta-zero`, `--n-inits`, `--max-iter`, `--tol`,
+    `--seed`, `--output`, `--model-name`, `-v`
+- **`tests/test_semi_supervised.py`** — 25 pytest tests:
+  `_log_mvn_batch` against scipy reference, forward/backward against
+  brute-force enumeration over K^N sequences, γ/ξ marginal consistency,
+  k-means init validity & reproducibility, weighted-fit reduction to
+  OLS, log-likelihood monotonicity (no constraint), constraint-b
+  satisfaction post-EM, multi-start ranking, statistical recovery
+  (A within 0.30 of truth at N=2000, K=2, 5 starts), regime reordering,
+  CLI smoke tests
+
+### Changed
+
+- **CLI stem precedence** in both `supervised.py` and `semi_supervised.py`:
+  the generated class name is now derived as `--model-name` if given,
+  otherwise from the `--output` file stem if given, otherwise from the
+  auto-generated stem (previously the auto stem was used whenever
+  `--model-name` was omitted, yielding a class name that could mismatch
+  the requested output filename)
+
 ## [0.8.0] — 2026-04-19
 
 ### Added

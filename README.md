@@ -39,9 +39,12 @@ fofgss/
 │   ├── filter/
 │   │   ├── gss_filter.py       # GSSFilter — fast optimal filter (Option B)
 │   │   └── main.py             # CLI entry point for the filter
+│   ├── learning/
+│   │   ├── supervised.py       # OLS fit when R is observed
+│   │   └── semi_supervised.py  # Baum-Welch EM when R is hidden
 │   ├── simulate.py             # CLI entry point for the simulator
 │   └── gui/                    # Optional PyQt6 graphical interface
-├── tests/                      # 113 pytest tests
+├── tests/                      # 181 pytest tests
 ├── data/
 │   └── simulated/              # Generated CSV files
 ├── docs/                       # LaTeX source (CS_FinaleBis.tex, macros.tex)
@@ -184,6 +187,21 @@ B = compute_B_from_h5(A, C, D, SU, Delta, SV)   # returns (q, s) array
 
 ---
 
+## Learning the model from data
+
+Two estimators are available:
+
+- **Supervised** (`prg.learning.supervised`) — when the regime sequence
+  $R_n$ is observed (alongside $X_n$ and $Y_n$): closed-form per-regime
+  OLS, fast, deterministic.
+- **Semi-supervised** (`prg.learning.semi_supervised`) — when only
+  $X_n$ and $Y_n$ are observed and $R_n$ is hidden: Baum-Welch EM with
+  k-means initialisation and multi-start.
+
+Both write a ready-to-use `BaseGSSModel` subclass to `prg/models/`.
+
+---
+
 ## Supervised learning
 
 The supervised estimator learns all GSS parameters from a fully-observed
@@ -264,6 +282,91 @@ For each regime $k$ the model is $Z_{n+1} = F(k)\,Z_n + b(k) + W_{n+1}$.
 The Markov matrix $P$ is estimated by transition-frequency counts.
 Constraints `--constraint {a,b,su}` are mutually exclusive; `--delta-zero`
 is independent and applied before the H5 step.
+
+---
+
+## Semi-supervised learning
+
+When $R_n$ is hidden but $(X_n, Y_n)$ are observed, the regime sequence
+is inferred jointly with the parameters by Baum-Welch EM.
+
+```bash
+# Estimate K=2 regimes from a CSV (the 'r' column is ignored)
+python -m prg.learning.semi_supervised data/simulated/sim.csv -K 2
+
+# 20 random restarts, verbose log-L per iteration
+python -m prg.learning.semi_supervised sim.csv -K 2 \
+    --n-inits 20 --seed 42 -v
+
+# H5 constraint applied at every M-step (Generalized EM)
+python -m prg.learning.semi_supervised sim.csv -K 2 \
+    --constraint b --delta-zero
+```
+
+### CLI options
+
+| Option | Default | Description |
+|---|---|---|
+| `csv` | — | Input CSV (the `r` column is ignored if present) |
+| `-K`, `--K` | — | Number of regimes (required) |
+| `--constraint {a,b,su}` | `None` | H5 projection at every M-step |
+| `--delta-zero` | `False` | Force Δ(k) = 0 before each H5 step |
+| `--n-inits` | `10` | Number of independent EM restarts |
+| `--max-iter` | `100` | Maximum EM iterations per run |
+| `--tol` | `1e-5` | Convergence threshold on \|Δ log L\| |
+| `--seed` | `None` | Base RNG seed (different k-means seeds derived from it) |
+| `--output` / `--model-name` | auto | Same as supervised |
+| `-v` | `False` | Print per-iteration log-likelihood |
+
+### Algorithm
+
+For each EM iteration:
+
+1. **E-step** — log-domain forward / backward on the HMM with emissions
+   $p(Z_n \mid Z_{n-1}, R_n=k) = \mathcal{N}(F(k) Z_{n-1} + b(k), \Sigma_W(k))$
+   yields posteriors $\gamma_n(k)$ and $\xi_n(j,k)$ and the marginal
+   log-likelihood.
+2. **M-step**:
+   - $\hat P(j,k) = \sum_n \xi_n(j,k) / \sum_n \gamma_n(j)$
+   - $\hat\pi_0(k) = \gamma_0(k)$
+   - $\hat F(k), \hat b(k)$ by **weighted OLS** with weights $\gamma_{n+1}(k)$
+   - $\hat\Sigma_W(k)$ = weighted MLE of residual covariance
+   - Optional H5 projection on $A$, $B$, or $\Sigma_U$
+3. **Convergence** — stop when $|\Delta \log L| < \mathrm{tol}$.
+
+### Notes & caveats
+
+- **Multi-start is essential.** EM is non-convex; the algorithm runs
+  `--n-inits` independent k-means initialisations and keeps the
+  best-likelihood solution.
+- **Label switching.** After convergence, regimes are reordered by
+  $A(k)[0,0]$ (descending) for reproducibility. Don't expect the
+  estimated regime indices to match a known ground truth without
+  post-hoc alignment.
+- **GEM with constraints.** When `--constraint` is set, the H5
+  projection at each M-step *breaks* the EM monotonicity guarantee.
+  Convergence is monitored on $|\Delta \log L|$ (absolute value).
+- **Required N.** With $K=2$ and $q=s=1$, $N \ge 2000$ typically gives
+  $|\hat A - A_{\text{true}}| < 0.05$.
+
+### Python API
+
+```python
+from prg.learning.semi_supervised import fit_semi_supervised
+
+params, info = fit_semi_supervised(
+    xs, ys, K=2,
+    constraint=None,        # 'a' | 'b' | 'su' | None
+    delta_zero=False,
+    n_inits=10,
+    max_iter=100,
+    tol=1e-5,
+    seed=42,
+)
+print(info["best_log_lik"])           # log-likelihood of best run
+print(info["all_log_liks"])           # log L of every restart
+print(info["log_lik_history"])        # per-iteration log L of best run
+```
 
 ---
 
@@ -386,9 +489,11 @@ source .venv/bin/activate
 pytest
 ```
 
-113 tests covering matrix diagnostics, parameter validation, iterator protocol,
-reproducibility, CSV output, statistical sanity, filter correctness, and H5
-constraint computation.
+181 tests covering matrix diagnostics, parameter validation, iterator
+protocol, reproducibility, CSV output, statistical sanity, filter
+correctness, H5 constraint computation, supervised OLS estimation, and
+Baum-Welch EM (forward/backward, weighted M-step, multi-start,
+constraint integration).
 
 ---
 

@@ -671,9 +671,13 @@ def main() -> None:
         sys.exit(1)
 
     # --- Resolve file stem and class name ---
-    raw_name = args.model_name or _auto_model_stem(K, q, s)
-    # Accept a full path in --model-name: keep only the stem
-    stem = pathlib.Path(raw_name).stem  # strips .py if present
+    # Stem precedence: --model-name > --output stem > auto
+    if args.model_name is not None:
+        stem = pathlib.Path(args.model_name).stem
+    elif args.output is not None:
+        stem = pathlib.Path(args.output).stem
+    else:
+        stem = _auto_model_stem(K, q, s)
     class_name = _class_name_from_stem(stem)
 
     # --- Resolve output path ---

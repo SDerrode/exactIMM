@@ -18,6 +18,7 @@ import inspect
 import sys
 
 import numpy as np
+from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QApplication
 
 from prg.gui.main_window import GSSMainWindow
@@ -75,11 +76,34 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("FofGss Simulator")
 
-    win = GSSMainWindow(K=K, q=q, s=s, P=P, model=model)
-    win.resize(1100, 700)
-    win.show()
+    # Restart loop: recreate the window when a preset with new K/q/s is selected.
+    while True:
+        win = GSSMainWindow(K=K, q=q, s=s, P=P, model=model)
+        # Only apply default size if no saved geometry (QSettings) exists
+        if QSettings("FofGss", "Simulator").value("geometry") is None:
+            win.resize(1100, 700)
 
-    sys.exit(app.exec())
+        # Container for the next model (mutable so the lambda can write to it).
+        _next: list = []
+
+        def _on_restart(m, w=win, buf=_next) -> None:
+            buf.append(m)
+            w.close()
+
+        win.restart_with_model.connect(_on_restart)
+        win.show()
+        app.exec()          # blocks until the window is closed
+
+        if not _next:       # normal exit — no restart requested
+            break
+
+        # Prepare next iteration
+        model = _next[0]
+        p_dict = model.get_params()
+        K, q, s = p_dict["K"], p_dict["q"], p_dict["s"]
+        P = np.asarray(p_dict["P"]) if p_dict.get("P") is not None else None
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":

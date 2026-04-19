@@ -196,18 +196,64 @@ python -m prg.gui.main -K 2 -q 1 -s 1
 python -m prg.gui.main --model model_gss_K2_q1_s1
 ```
 
-**Features**
+**Left panel — Parameters**
 
-| Panel | Description |
+| Widget | Description |
 |---|---|
-| Parameter tabs | One tab per Markov state; editable F(k) and Σ_W(k) tables with block colour coding (A=blue, B=green, C=yellow, D=pink) |
-| H5 constraint | "Constraint on F(k)" checkbox per tab — when checked, B(k) is auto-computed in real-time; B cells become read-only (saturated green) |
-| Validation | [Simuler] disabled + red text when any matrix is invalid (non-float entry or non-SPD Σ_W) |
-| Simulation | Runs in a background thread; modal wait dialog prevents interaction |
-| Plot | 1 + q + s subplots: R_n (step), X_i (lines), Y_i (lines); full matplotlib toolbar |
-| Save | [Enregistrer CSV] writes `data/simulated/simulated_gui_N{N}_seed{seed}_{ts}.csv` |
+| Preset selector | Load any model from `prg/models/` in one click; triggers a full window restart when K, q, or s differ |
+| Parameter tabs | One tab per Markov state; editable F(k), Σ_W(k), μ_{z0}(k), b(k) with block colour coding (A=blue, B=green, C=yellow, D=pink) |
+| H5 constraint checkboxes | Four per tab (A / B / Σ_U / Δ=0); auto-compute B(k) or enforce Δ=0 in real-time; affected cells become read-only |
+| Stability badges | Spectral radii ρ(F), ρ(A), ρ(D) shown live below the F(k) table |
+| Randomize button 🎲 | Fills F(k) and Σ_W(k) with random stable parameters |
+| Transition matrix P | Editable (K×K) row-stochastic matrix; stationary distribution π* shown live |
+| N / Seed | Number of steps (default 1 000); optional integer seed |
+| Monte Carlo checkbox | Enables M-trajectory mode; M spinbox (default 50) |
+| Auto-filter checkbox | Runs Filter automatically after each single Simulate |
 
-Fixed (non-editable) parameters: P = uniform 1/K (or model's P), π₀ = stationary, μ_{z0} = 0, Σ_{z0} = I.
+**Right panel — Plots** (`2 + q + 2s` subplots, shared x-axis)
+
+| Subplot | Content |
+|---|---|
+| R_n | Regime sequence (step plot) |
+| π_n(k) | Filtered regime posteriors — one line per state, populated after Filter |
+| X^i (×q) | Hidden component(s); filter overlay (dashed mean ± 2σ band) added after Filter |
+| Y^i (×s) | Observed component(s) |
+| ν^i (×s) | Filter innovations, populated after Filter |
+
+**Simulation modes**
+
+| Mode | How |
+|---|---|
+| Single trajectory | Simulate → optional Filter (or tick Auto-filter) |
+| Monte Carlo | Tick Monte Carlo, set M, Simulate — shows mean ± 2σ + median over M runs |
+| Load CSV | File → Load CSV — display external data, then run Filter with current params |
+
+**Filter quality frame** (shown after Filter)
+
+| Metric | Description |
+|---|---|
+| log L | Total log-likelihood and per-step mean |
+| MSE / RMSE | Against ground-truth X (only when X is available) |
+| Ljung-Box | Whiteness test per innovation component (green/amber/red badge) |
+| Skew · Kurt | Skewness and excess kurtosis badges; note that GSS innovations are theoretically a mixture of Gaussians, so non-zero kurtosis is expected |
+
+**Param drift indicator** — if you edit any parameter after Simulate and before Filter, the Filter button shows `⚠ Filter` with a tooltip; the Filter will use the parameters captured at Simulate, not the current widget values. Re-run Simulate to apply the new parameters.
+
+**Keyboard shortcuts**
+
+| Shortcut | Action |
+|---|---|
+| Ctrl+R | Simulate |
+| Ctrl+F | Filter |
+| Ctrl+Shift+R | Reset |
+| Ctrl+S | Save CSV |
+| Ctrl+O | Load CSV |
+| Ctrl+E | Export model code (.py) |
+| Ctrl+Shift+E | Export plots (PNG/PDF/SVG) |
+| Ctrl+I | Innovation histograms |
+| Ctrl+Shift+X | MC X distributions |
+
+Window geometry, splitter position, M, seed, and auto-filter state are restored across sessions.
 
 ---
 

@@ -71,12 +71,22 @@ class FilterResult:
         E[X_n X_n^T | y_{1:n}]   (uncentred second moment)
     pi : ndarray (K,)
         p(r_n | y_{1:n})
+    innovation : ndarray (s, 1)
+        ν_n = y_n − ŷ_{n|n−1}  (prediction residual).
+        For n=0 the prior predictive mean Σ_r π_0(r) μ_Y(r) is used.
+        A white innovation sequence indicates a well-tuned filter.
+    log_lik : float
+        Incremental log-likelihood log p(y_n | y_{1:n-1}) (or log p(y_1) for n=0).
+        The cumulative sum Σ_n log_lik is the total log-likelihood log p(y_{1:N}),
+        useful for BIC/AIC model selection.
     """
 
-    n:    int
-    E_x:  np.ndarray   # (q, 1)
-    E_xx: np.ndarray   # (q, q)
-    pi:   np.ndarray   # (K,)
+    n:          int
+    E_x:        np.ndarray   # (q, 1)
+    E_xx:       np.ndarray   # (q, q)
+    pi:         np.ndarray   # (K,)
+    innovation: np.ndarray   # (s, 1)
+    log_lik:    float = 0.0  # incremental log p(y_n | y_{1:n-1})
 
     @property
     def Var_x(self) -> np.ndarray:
@@ -207,26 +217,50 @@ class GSSFilter:
             # log p(y1 | r1=r)  =  log π0(r)  +  log N(y1; μ_Y, S_YY)   (eq I.2)
             log_w[r] = (
                 np.log(p.pi0[r] + 1e-300)
-                + multivariate_normal.logpdf(y1.ravel(), mean=mu_Y.ravel(), cov=S_YY)
+                + multivariate_normal.logpdf(
+                    y1.ravel(), mean=mu_Y.ravel(), cov=S_YY,
+                    allow_singular=True,
+                )
             )
 
             # Kalman gain  M_r = S_XY S_YY^{-1}   (eq I.3)
-            M_r   = np.linalg.solve(S_YY.T, S_XY.T).T        # (q, s)
-            e_x   = mu_X + M_r @ (y1 - mu_Y)                 # (q, 1)
-            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))                # (q, q)
+            M_r   = _safe_solve(S_YY.T, S_XY.T).T             # (q, s)
+            e_x   = mu_X + M_r @ (y1 - mu_Y)                  # (q, 1)
+            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))     # (q, q)
 
             E_x_r.append(e_x)
             Var_x_r.append(var_x)
 
-        # Posterior weights  (eq I.2 — normalisation)
-        log_w -= log_w.max()
-        pi1 = np.exp(log_w);  pi1 /= pi1.sum()
+        # Incremental log-likelihood log p(y_1) = logsumexp_r [log π_0(r) + log N(y_1|r)]
+        # (computed before max-subtraction normalisation below)
+        log_lik = float(logsumexp(log_w)) if np.isfinite(log_w).any() else -np.inf
+
+        # Posterior weights  (eq I.2 — normalisation) with NaN/collapse guard
+        log_max = log_w.max()
+        if not np.isfinite(log_max):
+            # All weights collapsed to -inf (numerical underflow) — fall back to π_0
+            pi1 = p.pi0.copy()
+            logger.warning("Filter init: log-weights all -inf; falling back to π_0.")
+        else:
+            log_w -= log_max
+            pi1 = np.exp(log_w)
+            s_pi = pi1.sum()
+            if not np.isfinite(s_pi) or s_pi <= 0.0:
+                pi1 = p.pi0.copy()
+                logger.warning("Filter init: invalid posterior sum; falling back to π_0.")
+            else:
+                pi1 /= s_pi
 
         # Marginal filtered estimates  (eqs 8–9)
         E_x, E_xx = _mix(pi1, E_x_r, Var_x_r, K)
 
+        # Innovation: ν_1 = y_1 − prior predictive mean Σ_r π_0(r) μ_Y(r)
+        y_pred = sum(p.pi0[r] * p.mu_z0(r)[q:] for r in range(K))
+        innov  = y1 - y_pred
+
         self._pi = pi1
-        return FilterResult(n=self._n, E_x=E_x, E_xx=E_xx, pi=pi1)
+        return FilterResult(n=self._n, E_x=E_x, E_xx=E_xx, pi=pi1,
+                            innovation=innov, log_lik=log_lik)
 
     # ------------------------------------------------------------------
     # Recursion  n → n+1  (eqs 17ter, 16–17, 13'–15, 18, 21'–22, 8–9)
@@ -274,11 +308,17 @@ class GSSFilter:
 
         # ---- (13'),(14),(15),(18)  Transition density → π_{n+1} ----------
         log_alpha = np.full(K, -np.inf)
+        # Accumulate marginal predicted observation for the innovation:
+        #   ŷ_{n+1|n} = E[Y_{n+1}|y_{1:n}]
+        #             = Σ_{rn,rnp1} joint[rn,rnp1] · mean_c(rn, rnp1)
+        # joint already sums to 1, so no extra normalisation needed.
+        y_pred_acc = np.zeros_like(y_new)    # (s, 1)
 
         for rnp1 in range(K):
             # Centred covariance of Z_{n+1}  (used for Γ̃ and Kalman later)
             Sig_np1  = _sym(P_np1[rnp1] - mu_np1[rnp1] @ mu_np1[rnp1].T)
             S_YY_np1 = Sig_np1[q:, q:]                        # (s, s)
+            F = p.f_matrix.F(rnp1)                            # only depends on rnp1
 
             log_terms: list[float] = []
             for rn in range(K):
@@ -291,13 +331,11 @@ class GSSFilter:
                 mu_Y_n = self._mu[rn][q:]                      # (s, 1)
                 S_YY_n = Sig_n[q:, q:]                         # (s, s)
 
-                F = p.f_matrix.F(rnp1)
-
                 # Cov[Z_{n+1}, Z_n | r_{n:n+1}]  =  F Σ_n  (eq 16, centred)
                 Cov_Ynp1_Yn = (F @ Sig_n)[q:, q:]             # (s, s)
 
                 # M̃_{r_{n:n+1}}  =  Cov · S_YY_n^{-1}   (eq 14 — centred)
-                M_t = np.linalg.solve(S_YY_n.T, Cov_Ynp1_Yn.T).T  # (s, s)
+                M_t = _safe_solve(S_YY_n.T, Cov_Ynp1_Yn.T).T     # (s, s)
 
                 # Γ̃_{r_{n:n+1}}  =  S_YY_{n+1}(rnp1) − M̃ Cov^T  (eq 15 — centred)
                 # _psd_floor guards against tiny negative values from
@@ -308,17 +346,43 @@ class GSSFilter:
                 mu_Ynp1 = F[q:, :] @ self._mu[rn] + p.b(rnp1)[q:]   # (s, 1)
                 mean_c  = mu_Ynp1 + M_t @ (y_prev - mu_Y_n)
 
-                log_lik = multivariate_normal.logpdf(
-                    y_new.ravel(), mean=mean_c.ravel(), cov=Gamma
+                # Accumulate for the marginal innovation prediction
+                y_pred_acc += w * mean_c
+
+                log_lik_c = multivariate_normal.logpdf(
+                    y_new.ravel(), mean=mean_c.ravel(), cov=Gamma,
+                    allow_singular=True,
                 )
-                log_terms.append(np.log(w) + log_lik)
+                log_terms.append(np.log(w) + log_lik_c)
 
             if log_terms:
                 log_alpha[rnp1] = float(logsumexp(log_terms))
 
-        # Normalise  (eq 18)
-        log_alpha -= log_alpha.max()
-        pi_np1 = np.exp(log_alpha);  pi_np1 /= pi_np1.sum()
+        # Incremental log-likelihood log p(y_{n+1}|y_{1:n}) = logsumexp_rnp1(log_alpha)
+        # (before max-subtraction normalisation below)
+        log_lik = float(logsumexp(log_alpha)) if np.isfinite(log_alpha).any() else -np.inf
+
+        # Normalise  (eq 18) with NaN/collapse guard
+        log_max = log_alpha.max()
+        if not np.isfinite(log_max):
+            # All log_alpha are -inf — fall back to prior predictive p(r_{n+1}|y_{1:n})
+            pi_np1 = marg_rnp1.copy()
+            logger.warning(
+                "Filter step %d: log_alpha all -inf; falling back to marginal p(r_{n+1}|y_{1:n}).",
+                self._n,
+            )
+        else:
+            log_alpha -= log_max
+            pi_np1 = np.exp(log_alpha)
+            s_pi = pi_np1.sum()
+            if not np.isfinite(s_pi) or s_pi <= 0.0:
+                pi_np1 = marg_rnp1.copy()
+                logger.warning(
+                    "Filter step %d: invalid posterior sum; falling back to marg_rnp1.",
+                    self._n,
+                )
+            else:
+                pi_np1 /= s_pi
 
         # ---- (21'),(22)  Kalman update ------------------------------------
         E_x_r:   list[np.ndarray] = []
@@ -329,9 +393,9 @@ class GSSFilter:
             mu_X = mu_np1[rnp1][:q];  mu_Y = mu_np1[rnp1][q:]
             S_XX = Sig[:q, :q];  S_XY = Sig[:q, q:];  S_YY = Sig[q:, q:]
 
-            M_r   = np.linalg.solve(S_YY.T, S_XY.T).T        # (q, s)  eq (21')
+            M_r   = _safe_solve(S_YY.T, S_XY.T).T             # (q, s)  eq (21')
             e_x   = mu_X + M_r @ (y_new - mu_Y)               # (q, 1)
-            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))                 # (q, q)  eq (22)
+            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))     # (q, q)  eq (22)
 
             E_x_r.append(e_x)
             Var_x_r.append(var_x)
@@ -339,12 +403,18 @@ class GSSFilter:
         # ---- (8),(9)  Marginal estimates ----------------------------------
         E_x, E_xx = _mix(pi_np1, E_x_r, Var_x_r, K)
 
+        # Innovation: ν_{n+1} = y_{n+1} − ŷ_{n+1|n}
+        # ŷ_{n+1|n} was accumulated in the double loop above as the
+        # exact marginal E[Y_{n+1}|y_{1:n}].
+        innov = y_new - y_pred_acc
+
         # ---- State update --------------------------------------------------
         self._pi  = pi_np1
         self._P_z = P_np1
         self._mu  = mu_np1
 
-        return FilterResult(n=self._n, E_x=E_x, E_xx=E_xx, pi=pi_np1)
+        return FilterResult(n=self._n, E_x=E_x, E_xx=E_xx, pi=pi_np1,
+                            innovation=innov, log_lik=log_lik)
 
     # ------------------------------------------------------------------
     # Batch run methods
@@ -501,6 +571,25 @@ class GSSFilter:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+
+def _safe_solve(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """
+    Solve A X = B robustly.
+
+    Tries :func:`numpy.linalg.solve` first (fast LU). If A is singular or
+    ill-conditioned, falls back to :func:`numpy.linalg.lstsq` which uses
+    an SVD-based pseudo-inverse and handles rank-deficient A gracefully.
+
+    This is critical for near-unit-root GSS systems where S_YY can become
+    numerically singular after many recursion steps.
+    """
+    try:
+        return np.linalg.solve(A, B)
+    except np.linalg.LinAlgError:
+        logger.warning("_safe_solve: singular matrix, falling back to lstsq.")
+        X, *_ = np.linalg.lstsq(A, B, rcond=None)
+        return X
 
 
 def _sym(M: np.ndarray) -> np.ndarray:

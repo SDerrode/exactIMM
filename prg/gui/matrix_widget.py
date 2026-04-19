@@ -85,6 +85,7 @@ class MatrixTableWidget(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setMinimumSize(self._n * 46, self._n * 26)
         self._table.setMaximumWidth(self._n * 58)
+        self._table.setMaximumHeight(self._n * 26 + 4)
         for col in range(self._n):
             self._table.setColumnWidth(col, 52)
         for row in range(self._n):
@@ -194,33 +195,38 @@ class MatrixTableWidget(QWidget):
 
     #  F(k) block layout:          Σ_W(k) block layout:
     #  ┌──────────┬──────────┐     ┌──────────┬──────────┐
-    #  │  A  blue │  B green │     │  Σ_U blue│  Δ green │
+    #  │  A  blue │  B green │     │  Σ_U purp│  Δ white │
     #  ├──────────┼──────────┤     ├──────────┼──────────┤
-    #  │  C  yell │  D  pink │     │  Δᵀ yell │  Σ_V pink│
+    #  │  C white │  D white │     │  Δᵀ white│  Σ_V wht │
     #  └──────────┴──────────┘     └──────────┴──────────┘
     _BLOCK_BG: dict[tuple[bool, bool], str] = {
-        (True,  True):  "#d6eaf8",   # top-left  — blue
-        (True,  False): "#d5f5e3",   # top-right — green  (B / Δ)
-        (False, True):  "#fef9e7",   # bot-left  — yellow (C / Δᵀ)
-        (False, False): "#fde8e8",   # bot-right — pink   (D / Σ_V)
+        (True,  True):  "#d6eaf8",   # top-left  — blue  (A)
+        (True,  False): "#d5f5e3",   # top-right — green (B)
+        (False, True):  "white",     # bot-left  — white (C)
+        (False, False): "white",     # bot-right — white (D)
     }
     # Saturated version: cell is auto-computed (read-only)
     _BLOCK_COMPUTED_BG: dict[tuple[bool, bool], str] = {
-        (True,  True):  "#aed6f1",   # blue  — computed
+        (True,  True):  "#aed6f1",   # blue  — computed A
         (True,  False): "#a9dfbf",   # green — computed B
-        (False, True):  "#f9e79f",   # yellow — computed
-        (False, False): "#f1948a",   # pink  — computed
+        (False, True):  "#e0e0e0",   # grey  — computed C
+        (False, False): "#e0e0e0",   # grey  — computed D
     }
 
     def _cell_bg(self, r: int, c: int) -> str:
         """Normal background colour for cell (r, c)."""
         if self._is_covariance:
+            # Σ_U block (top-left) gets a light purple tint matching the checkbox
+            if r < self._q and c < self._q:
+                return "#e8d5f5"
             return "white"
         return self._BLOCK_BG[(r < self._q, c < self._q)]
 
     def _cell_computed_bg(self, r: int, c: int) -> str:
         """Saturated background colour for a locked / auto-computed cell."""
         if self._is_covariance:
+            if r < self._q and c < self._q:
+                return "#c9a8e8"   # saturated purple — computed Σ_U
             return "#ddeeff"
         return self._BLOCK_COMPUTED_BG[(r < self._q, c < self._q)]
 
@@ -333,6 +339,7 @@ class StochasticMatrixWidget(QWidget):
     """
 
     validity_changed = pyqtSignal(bool)
+    value_changed    = pyqtSignal()   # fired on every user edit
 
     def __init__(
         self,
@@ -427,6 +434,7 @@ class StochasticMatrixWidget(QWidget):
             return
         self._validate_cell(item)
         self._validate_all()
+        self.value_changed.emit()
 
     def _validate_cell(self, item: QTableWidgetItem) -> bool:
         try:
@@ -497,6 +505,7 @@ class VectorWidget(QWidget):
     """
 
     validity_changed = pyqtSignal(bool)
+    value_changed    = pyqtSignal()   # fired on every user edit
 
     def __init__(
         self,
@@ -526,6 +535,7 @@ class VectorWidget(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setMinimumSize(56, n * 26)
         self._table.setMaximumWidth(70)
+        self._table.setMaximumHeight(n * 26 + 4)
         self._table.setColumnWidth(0, 60)
         for row in range(n):
             self._table.setRowHeight(row, 24)
@@ -586,6 +596,7 @@ class VectorWidget(QWidget):
             return
         self._validate_cell(item)
         self._validate_all()
+        self.value_changed.emit()
 
     def _validate_cell(self, item: QTableWidgetItem) -> bool:
         try:

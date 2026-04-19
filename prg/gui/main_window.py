@@ -25,25 +25,334 @@ Fixed (non-editable) parameters
   Sigma_z0= I_{q+s}
 """
 
+import csv
 import datetime
 import pathlib
+import time
+from dataclasses import dataclass, field
 import numpy as np
+from scipy.stats import chi2 as _chi2_dist
+from scipy.stats import jarque_bera as _jb
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from prg.filter.gss_filter import GSSFilter
+
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QLabel, QSpinBox, QLineEdit, QPushButton,
     QDialog, QMessageBox, QSizePolicy, QSplitter,
-    QFileDialog, QFrame,
+    QFileDialog, QFrame, QComboBox, QCheckBox, QProgressBar,
 )
+
+# ---------------------------------------------------------------------------
+# White-noise test (Ljung-Box)
+# ---------------------------------------------------------------------------
+
+_PILL_OK    = ("font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+               "background: #d4edda; color: #155724; border: 1px solid #c3e6cb;")
+_PILL_WARN  = ("font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+               "background: #fff3cd; color: #856404; border: 1px solid #ffc107;")
+_PILL_ERR   = ("font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+               "background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;")
+
+
+def _ljung_box(x: np.ndarray, lags: int | None = None) -> tuple[float, float, int]:
+    """
+    Ljung-Box portmanteau test for autocorrelation.
+
+    H₀: no autocorrelation up to lag *h*.
+
+    Returns (Q_stat, p_value, h_used).
+    High p-value → fail to reject H₀ → innovation looks like white noise.
+    """
+    n = len(x)
+    h = lags if lags is not None else min(20, max(5, n // 10))
+    h = min(h, n - 1)
+    x = x - x.mean()
+    var = float(np.var(x))
+    if var < 1e-30:                         # constant series
+        return 0.0, 1.0, h
+    # Sample autocorrelations ρ_k, k = 1…h
+    rho_sq = np.array([
+        (np.dot(x[k:], x[:-k]) / (n * var)) ** 2
+        for k in range(1, h + 1)
+    ])
+    Q = float(n * (n + 2) * np.sum(rho_sq / (n - np.arange(1, h + 1))))
+    p = float(1.0 - _chi2_dist.cdf(Q, df=h))
+    return Q, p, h
+
+
+def _shape_diagnostics(x: np.ndarray) -> tuple[float, float, float, float]:
+    """
+    Compute sample shape diagnostics for an innovation series.
+
+    Returns ``(skewness, excess_kurtosis, JB_stat, p_value)``.
+
+    - Skewness  S        : 3rd standardised moment.   |S| ≈ 0 ⇔ symmetric.
+    - Excess kurtosis K  : 4th std. moment − 3.       |K| ≈ 0 ⇔ Gaussian tails.
+    - Jarque–Bera (JB)   : combined test, JB ~ χ²(2) under H₀ "Gaussian".
+                           Computed via SciPy's reference implementation.
+
+    For a Gaussian Switching System the marginal innovation is theoretically
+    a *mixture of Gaussians* conditional on the regime, so non-zero kurtosis
+    (and a small JB p-value) is expected even for a correctly-tuned filter.
+    Use S and K as the primary indicator and JB as a sanity check.
+    """
+    n = len(x)
+    if n < 4:
+        return 0.0, 0.0, 0.0, 1.0
+    xc = np.asarray(x, dtype=float) - float(np.mean(x))
+    sigma2 = float(np.mean(xc ** 2))
+    if sigma2 < 1e-30:                      # constant series
+        return 0.0, 0.0, 0.0, 1.0
+    sigma = float(np.sqrt(sigma2))
+    z = xc / sigma
+    S    = float(np.mean(z ** 3))
+    Kurt = float(np.mean(z ** 4) - 3.0)
+    try:
+        jb_res = _jb(x)                    # SciPy returns (statistic, pvalue)
+        JB     = float(jb_res[0])
+        p      = float(jb_res[1])
+    except Exception:                       # noqa: BLE001
+        # Manual fallback (matches SciPy formula exactly)
+        JB = n * (S ** 2 / 6.0 + Kurt ** 2 / 24.0)
+        p  = float(1.0 - _chi2_dist.cdf(JB, df=2))
+    return S, Kurt, JB, p
+
+
+# ---------------------------------------------------------------------------
+# Stationary distribution helper
+# ---------------------------------------------------------------------------
+
+def _stationary_dist(P: np.ndarray) -> np.ndarray | None:
+    """Stationary distribution of a row-stochastic matrix (left eigenvector)."""
+    try:
+        vals, vecs = np.linalg.eig(P.T)
+        idx = int(np.argmin(np.abs(vals - 1.0)))
+        pi = np.real(vecs[:, idx])
+        pi = np.maximum(pi, 0.0)
+        s  = pi.sum()
+        return pi / s if s > 1e-12 else None
+    except np.linalg.LinAlgError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Histogram dialogs
+# ---------------------------------------------------------------------------
+
+class _InnovHistDialog(QDialog):
+    """Non-modal dialog: innovation histograms + Gaussian fit."""
+
+    def __init__(self, innovations: np.ndarray, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Innovation histograms")
+        self.setModal(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        from matplotlib.backends.backend_qtagg import (
+            FigureCanvasQTAgg, NavigationToolbar2QT,
+        )
+        from matplotlib.figure import Figure
+        from scipy.stats import norm as _norm
+
+        s      = innovations.shape[1]
+        layout = QVBoxLayout(self)
+
+        fig     = Figure(figsize=(max(4, 3.5 * s), 3.8), tight_layout=True)
+        canvas  = FigureCanvasQTAgg(fig)
+        toolbar = NavigationToolbar2QT(canvas, self)
+
+        colours = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+        for i in range(s):
+            ax = fig.add_subplot(1, s, i + 1)
+            x  = innovations[:, i]
+            ax.hist(x, bins=40, density=True,
+                    color=colours[i % len(colours)], alpha=0.70,
+                    label="empirical")
+            mu, sigma = float(x.mean()), float(x.std())
+            if sigma > 1e-10:
+                xg = np.linspace(x.min(), x.max(), 300)
+                ax.plot(xg, _norm.pdf(xg, mu, sigma),
+                        "k--", linewidth=1.5,
+                        label=f"N({mu:.3f}, {sigma:.3f}²)")
+            ax.set_title(rf"$\nu^{i}$   (N = {len(x)})", fontsize=10)
+            ax.set_xlabel("value", fontsize=9)
+            ax.set_ylabel("density", fontsize=9)
+            ax.legend(fontsize=8)
+            ax.grid(True, linestyle=":", alpha=0.4)
+
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas)
+        self.resize(max(420, 340 * s), 420)
+
+
+class _MCHistDialog(QDialog):
+    """Non-modal dialog: marginal X distributions at a chosen time step."""
+
+    def __init__(self, xs_all: np.ndarray, parent=None):
+        # xs_all shape: (M, N, q)
+        super().__init__(parent)
+        self.setWindowTitle("Monte Carlo — X distributions")
+        self.setModal(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        from matplotlib.backends.backend_qtagg import (
+            FigureCanvasQTAgg, NavigationToolbar2QT,
+        )
+        from matplotlib.figure import Figure
+        from scipy.stats import norm as _norm
+
+        self._xs_all = xs_all
+        self._norm   = _norm
+        M, N, q = xs_all.shape
+
+        layout = QVBoxLayout(self)
+
+        ctrl = QHBoxLayout()
+        ctrl.addWidget(QLabel("Time step  n ="))
+        self._n_spin = QSpinBox()
+        self._n_spin.setRange(0, N - 1)
+        self._n_spin.setValue(N - 1)
+        self._n_spin.setToolTip(f"Choose time step (0 … {N - 1})")
+        ctrl.addWidget(self._n_spin)
+        ctrl.addStretch()
+        layout.addLayout(ctrl)
+
+        self._fig    = Figure(figsize=(max(4, 3.5 * q), 3.8), tight_layout=True)
+        self._canvas = FigureCanvasQTAgg(self._fig)
+        toolbar      = NavigationToolbar2QT(self._canvas, self)
+
+        layout.addWidget(toolbar)
+        layout.addWidget(self._canvas)
+        self.resize(max(420, 340 * q), 460)
+
+        self._n_spin.valueChanged.connect(self._update)
+        self._update(N - 1)
+
+    def _update(self, n: int) -> None:
+        self._fig.clf()
+        M, N, q   = self._xs_all.shape
+        colours_x = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+        from scipy.stats import norm as _norm
+        for i in range(q):
+            ax = self._fig.add_subplot(1, q, i + 1)
+            x  = self._xs_all[:, n, i]
+            ax.hist(x, bins=min(50, max(10, M // 10)), density=True,
+                    color=colours_x[i % len(colours_x)], alpha=0.70)
+            mu, sigma = float(x.mean()), float(x.std())
+            if sigma > 1e-10:
+                xg = np.linspace(x.min(), x.max(), 300)
+                ax.plot(xg, _norm.pdf(xg, mu, sigma),
+                        "k--", linewidth=1.5,
+                        label=f"N({mu:.2f}, {sigma:.2f}²)")
+                ax.legend(fontsize=8)
+            ax.set_title(rf"$X^{i}$  at  $n = {n}$   (M = {M})", fontsize=10)
+            ax.set_xlabel("value", fontsize=9)
+            ax.set_ylabel("density", fontsize=9)
+            ax.grid(True, linestyle=":", alpha=0.4)
+        self._canvas.draw_idle()
+
+
+# ---------------------------------------------------------------------------
 
 from prg.classes.FMatrix import FMatrix
 from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
 from prg.classes.NoiseCovariance import GSSNoiseCovariance
+from prg.models.presets import PRESETS
 from prg.gui.matrix_widget import StochasticMatrixWidget
 from prg.gui.param_panel import ParamPanel
 from prg.gui.plot_panel import PlotPanel
+
+
+# ---------------------------------------------------------------------------
+# Session state — single source of truth for everything produced by Simulate /
+# Filter / Monte-Carlo / Load. Replacing the previous handful of scattered
+# `_last_*` attributes with one dataclass makes invariants explicit (e.g. the
+# innovation array is meaningless without the data that produced it) and
+# narrows the API: every state mutation goes through one of the methods below.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _SessionState:
+    """Holds everything the UI may need to display about the current session.
+
+    Three independent slots:
+
+    * data       — produced by Simulate (single) or Load CSV
+    * innovations — produced by Filter, only meaningful with `data` AND `params`
+    * mc_xs_all  — produced by Monte-Carlo, independent of the above
+
+    `params` and `params_signature` are captured at the moment Simulate /
+    Load runs, NOT live from the widgets. The Filter step uses them as-is
+    even if the widgets have since been edited (drift is signalled in the
+    UI but not silently corrected).
+    """
+
+    data: tuple | None = None              # (ns, rs, xs, ys, seed_used)
+    params: object | None = None           # GSSParams (avoids circular import)
+    params_signature: tuple | None = None  # bytes signature of GUI at capture
+    innovations: np.ndarray | None = None  # (N, s)
+    mc_xs_all: np.ndarray | None = None    # (M, N, q)
+
+    # ----- Predicates --------------------------------------------------
+
+    def has_data(self) -> bool:
+        return self.data is not None
+
+    def has_filter(self) -> bool:
+        return self.innovations is not None
+
+    def has_mc(self) -> bool:
+        return self.mc_xs_all is not None
+
+    def can_filter(self) -> bool:
+        return self.has_data() and self.params is not None
+
+    # ----- Atomic mutations -------------------------------------------
+
+    def reset(self) -> None:
+        """Forget everything — called from Reset button."""
+        self.data = None
+        self.params = None
+        self.params_signature = None
+        self.innovations = None
+        self.mc_xs_all = None
+
+    def begin_simulation(self, params: object, signature: tuple | None) -> None:
+        """About to launch a new Simulate: capture params, drop stale results."""
+        self.params = params
+        self.params_signature = signature
+        self.innovations = None      # filter result no longer matches
+        # mc_xs_all stays — single Simulate doesn't invalidate previous MC
+
+    def begin_mc(self, params: object, signature: tuple | None) -> None:
+        """About to launch a new Monte Carlo run: capture params, drop results."""
+        self.params = params
+        self.params_signature = signature
+        self.innovations = None
+        self.mc_xs_all = None
+
+    def store_data(self, ns, rs, xs, ys, seed) -> None:
+        self.data = (ns, rs, xs, ys, seed)
+
+    def store_innovations(self, innov: np.ndarray) -> None:
+        self.innovations = innov
+
+    def store_mc(self, xs_all: np.ndarray) -> None:
+        self.mc_xs_all = xs_all
+
+    def load_external(self, ns, rs, xs, ys, params: object,
+                      signature: tuple | None) -> None:
+        """User loaded an external CSV: store it with the live GUI params."""
+        self.data = (ns, rs, xs, ys, None)
+        self.params = params
+        self.params_signature = signature
+        self.innovations = None
+        # mc_xs_all unaffected
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +376,11 @@ class _SimWorker(QThread):
             sim = GSSSimulator(self._params, N=self._N, seed=self._seed)
             ns, rs = [], []
             xs_rows, ys_rows = [], []
-            for n, r, x, y in sim:
+            # Check interruption every CHECK_EVERY iterations to keep overhead low
+            CHECK_EVERY = 256
+            for i, (n, r, x, y) in enumerate(sim):
+                if (i & (CHECK_EVERY - 1)) == 0 and self.isInterruptionRequested():
+                    return                       # silent abort: no signal emitted
                 ns.append(n)
                 rs.append(r)
                 xs_rows.append(x.ravel())
@@ -82,8 +395,8 @@ class _SimWorker(QThread):
 class _FilterWorker(QThread):
     """Run GSSFilter step-by-step in a background thread."""
 
-    # E_xs (N,q), Var_xs (N,q), pis (N,K)
-    finished = pyqtSignal(object, object, object)
+    # E_xs (N,q), Var_xs (N,q), pis (N,K), innovations (N,s), log_lik_total (float)
+    finished = pyqtSignal(object, object, object, object, float)
     error = pyqtSignal(str)
 
     def __init__(
@@ -98,22 +411,108 @@ class _FilterWorker(QThread):
 
     def run(self) -> None:
         try:
-            from prg.filter.gss_filter import GSSFilter
             filt = GSSFilter(self._params)
-            E_xs_list:   list[np.ndarray] = []
-            Var_xs_list: list[np.ndarray] = []
-            pis_list:    list[np.ndarray] = []
-            for y_row in self._ys:
+            E_xs_list:    list[np.ndarray] = []
+            Var_xs_list:  list[np.ndarray] = []
+            pis_list:     list[np.ndarray] = []
+            innov_list:   list[np.ndarray] = []
+            log_lik_total: float = 0.0
+            CHECK_EVERY = 256
+            for i, y_row in enumerate(self._ys):
+                if (i & (CHECK_EVERY - 1)) == 0 and self.isInterruptionRequested():
+                    return
                 res = filt.step(y_row.reshape(-1, 1))
                 E_xs_list.append(res.E_x.ravel())
                 Var_xs_list.append(res.Var_x.diagonal())
                 pis_list.append(res.pi)
+                innov_list.append(res.innovation.ravel())
+                if np.isfinite(res.log_lik):
+                    log_lik_total += float(res.log_lik)
             self.finished.emit(
                 np.array(E_xs_list),
                 np.array(Var_xs_list),
                 np.array(pis_list),
+                np.array(innov_list),
+                log_lik_total,
             )
         except Exception as exc:  # noqa: BLE001
+            self.error.emit(str(exc))
+
+
+class _MCWorker(QThread):
+    """Run M independent GSSSimulator trajectories and compute statistics."""
+
+    # mean_xs (N,q), std_xs (N,q), median_xs (N,q),
+    # mean_ys (N,s), std_ys (N,s), median_ys (N,s),
+    # regime_freqs (N,K), ns list[int]
+    finished = pyqtSignal(object, object, object, object, object, object, object, list)
+    progress = pyqtSignal(int, int)   # (m_done, M_total)
+    error    = pyqtSignal(str)
+
+    def __init__(
+        self,
+        params: GSSParams,
+        N: int,
+        M: int,
+        seed: int | None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._params = params
+        self._N      = N
+        self._M      = M
+        self._seed   = seed
+        self.xs_all: np.ndarray | None = None   # (M, N, q), set after run()
+
+    def run(self) -> None:
+        try:
+            M, N = self._M, self._N
+            K = self._params.K
+            q = self._params.q
+            s = self._params.s
+
+            xs_all = np.zeros((M, N, q))
+            ys_all = np.zeros((M, N, s))
+            rs_all = np.zeros((M, N), dtype=int)
+            ns_ref: list[int] = []
+
+            for m in range(M):
+                if self.isInterruptionRequested():
+                    return                       # silent abort between trajectories
+                seed_m = (self._seed + m) if self._seed is not None else None
+                sim = GSSSimulator(self._params, N=N, seed=seed_m)
+                ns_m, xs_m, ys_m, rs_m = [], [], [], []
+                for n, r, x, y in sim:
+                    ns_m.append(n)
+                    rs_m.append(r)
+                    xs_m.append(x.ravel())
+                    ys_m.append(y.ravel())
+                xs_all[m] = np.array(xs_m)
+                ys_all[m] = np.array(ys_m)
+                rs_all[m] = np.array(rs_m)
+                if not ns_ref:
+                    ns_ref = ns_m
+                self.progress.emit(m + 1, M)
+
+            self.xs_all = xs_all                         # keep for histogram dialog
+            mean_xs   = xs_all.mean(axis=0)              # (N, q)
+            std_xs    = xs_all.std(axis=0)               # (N, q)
+            median_xs = np.median(xs_all, axis=0)        # (N, q)
+            mean_ys   = ys_all.mean(axis=0)              # (N, s)
+            std_ys    = ys_all.std(axis=0)               # (N, s)
+            median_ys = np.median(ys_all, axis=0)        # (N, s)
+
+            # Fraction of runs in each regime at each step
+            regime_freqs = np.zeros((N, K))
+            for k in range(K):
+                regime_freqs[:, k] = (rs_all == k).mean(axis=0)
+
+            self.finished.emit(
+                mean_xs, std_xs, median_xs,
+                mean_ys, std_ys, median_ys,
+                regime_freqs, ns_ref,
+            )
+        except Exception as exc:   # noqa: BLE001
             self.error.emit(str(exc))
 
 
@@ -122,16 +521,52 @@ class _FilterWorker(QThread):
 # ---------------------------------------------------------------------------
 
 class _WaitDialog(QDialog):
+    """Modal wait dialog with progress bar.
+
+    Defaults to indeterminate (busy) mode; `set_progress(m, M)` switches to
+    a determinate percentage bar and updates it.
+    """
+
     def __init__(self, message: str = "Please wait…", parent=None):
         super().__init__(parent)
         self.setWindowTitle(message)
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
         layout = QVBoxLayout(self)
-        lbl = QLabel(message)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl)
-        self.setFixedSize(320, 80)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+
+        self._msg_lbl = QLabel(message)
+        self._msg_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._msg_lbl)
+
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 0)            # indeterminate by default
+        self._bar.setTextVisible(True)
+        self._bar.setFormat("%p%")
+        self._bar.setMinimumWidth(260)
+        layout.addWidget(self._bar)
+
+        self._prog_lbl = QLabel("")
+        self._prog_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._prog_lbl.setStyleSheet("font-size: 10px; color: #555555;")
+        layout.addWidget(self._prog_lbl)
+        self.setFixedSize(340, 130)
+
+        self._t0 = time.perf_counter()
+
+    def set_progress(self, m: int, M: int) -> None:
+        """Update the progress bar (switches to determinate mode)."""
+        if self._bar.maximum() == 0 and M > 0:
+            self._bar.setRange(0, M)
+        self._bar.setValue(m)
+        elapsed = time.perf_counter() - self._t0
+        # ETA estimate
+        eta_txt = ""
+        if m > 0 and m < M:
+            eta = elapsed * (M - m) / m
+            eta_txt = f"  |  ETA ~ {eta:4.1f}s"
+        self._prog_lbl.setText(f"Run {m} / {M}   ({elapsed:4.1f}s elapsed{eta_txt})")
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +575,10 @@ class _WaitDialog(QDialog):
 
 class GSSMainWindow(QMainWindow):
     """Interactive GSS simulator window."""
+
+    # Emitted when the user picks a preset with different K/q/s.
+    # The slot in main.py closes this window and reopens with the new model.
+    restart_with_model = pyqtSignal(object)
 
     def __init__(
         self,
@@ -157,11 +596,14 @@ class GSSMainWindow(QMainWindow):
         # Transition matrix (fixed, not editable)
         self._P = P if P is not None else np.full((K, K), 1.0 / K)
 
-        self._last_data: tuple | None = None   # (ns, rs, xs, ys, seed_used)
+        # Single source of truth for everything Simulate / Filter / MC / Load
+        # produces. See _SessionState above for the invariants.
+        self._state = _SessionState()
+
         self._worker: _SimWorker | None = None
         self._filter_worker: _FilterWorker | None = None
+        self._mc_worker: _MCWorker | None = None
         self._wait_dlg: _WaitDialog | None = None
-        self._current_params: GSSParams | None = None
 
         self.setWindowTitle(
             f"FofGss — GSS Simulator  (K={K}, q={q}, s={s})"
@@ -175,6 +617,7 @@ class GSSMainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = splitter
         main_layout.addWidget(splitter)
 
         # ── left panel ───────────────────────────────────────────────
@@ -184,8 +627,29 @@ class GSSMainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
+        # ── Preset selector ───────────────────────────────────────────
+        self._presets = PRESETS
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(6)
+        preset_row.addWidget(QLabel("Preset :"))
+        self._preset_combo = QComboBox()
+        self._preset_combo.addItem("— choisir un modèle —")
+        for entry in PRESETS:
+            self._preset_combo.addItem(entry.label)
+            self._preset_combo.setItemData(
+                self._preset_combo.count() - 1,
+                entry.tooltip,
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        self._preset_combo.setToolTip("Charger un modèle prédéfini")
+        self._preset_combo.activated.connect(self._on_preset_selected)
+        preset_row.addWidget(self._preset_combo, stretch=1)
+        left_layout.addLayout(preset_row)
+
         self._param_panel = ParamPanel(K, q, s)
         self._param_panel.validity_changed.connect(self._on_validity_changed)
+        self._param_panel.value_changed.connect(self._refresh_filter_button_drift_indicator)
+        self._param_panel.constraint_toggled.connect(self._on_reset)
         left_layout.addWidget(self._param_panel)  # no stretch: natural height
 
         # Transition matrix P
@@ -196,9 +660,17 @@ class GSSMainWindow(QMainWindow):
         self._p_widget = StochasticMatrixWidget(K, title=f"P  ({K}×{K})")
         self._p_widget.set_matrix(self._P)
         self._p_widget.validity_changed.connect(self._on_validity_changed)
+        self._p_widget.value_changed.connect(self._update_stationary_display)
+        self._p_widget.value_changed.connect(self._refresh_filter_button_drift_indicator)
         p_section.addWidget(self._p_widget)
+
+        self._stationary_label = QLabel("")
+        self._stationary_label.setStyleSheet("font-size: 10px; color: #444444;")
+        p_section.addWidget(self._stationary_label)
+
         p_section.addStretch()
         left_layout.addLayout(p_section)
+        self._update_stationary_display()   # initialise avec la valeur par défaut
 
         # N field
         n_row = QHBoxLayout()
@@ -220,6 +692,35 @@ class GSSMainWindow(QMainWindow):
         self._seed_edit.textChanged.connect(self._on_sim_params_changed)
         seed_row.addWidget(self._seed_edit)
         left_layout.addLayout(seed_row)
+
+        # Monte Carlo row
+        mc_row = QHBoxLayout()
+        self._mc_check = QCheckBox("Monte Carlo")
+        self._mc_check.setToolTip(
+            "Run M independent simulations and display mean ± 2σ trajectories."
+        )
+        mc_row.addWidget(self._mc_check)
+        mc_row.addWidget(QLabel("M ="))
+        self._mc_spin = QSpinBox()
+        self._mc_spin.setRange(2, 5000)
+        self._mc_spin.setValue(50)
+        self._mc_spin.setSingleStep(10)
+        self._mc_spin.setMaximumWidth(90)
+        self._mc_spin.setToolTip("Number of Monte-Carlo runs")
+        mc_row.addWidget(self._mc_spin)
+        mc_row.addStretch()
+        left_layout.addLayout(mc_row)
+
+        # Auto-filter row
+        auto_row = QHBoxLayout()
+        self._auto_filter_check = QCheckBox("Auto-filter after simulate")
+        self._auto_filter_check.setToolTip(
+            "When enabled, the filter is launched automatically at the end of a\n"
+            "single simulation (no effect in Monte-Carlo mode)."
+        )
+        auto_row.addWidget(self._auto_filter_check)
+        auto_row.addStretch()
+        left_layout.addLayout(auto_row)
 
         left_layout.addStretch()   # pushes buttons to the bottom of the panel
 
@@ -244,26 +745,49 @@ class GSSMainWindow(QMainWindow):
         self._btn_save.setEnabled(False)
         self._btn_save.clicked.connect(self._on_save)
 
+        self._btn_load = QPushButton("Load CSV…")
+        self._btn_load.setFixedHeight(36)
+        self._btn_load.clicked.connect(self._on_load_data)
+
         self._btn_export = QPushButton("Export model…")
         self._btn_export.setFixedHeight(36)
         self._btn_export.setEnabled(False)
         self._btn_export.clicked.connect(self._on_export_model)
 
-        self._btn_reset = QPushButton("⟳  Reset")
-        self._btn_reset.setFixedHeight(30)
-        self._btn_reset.setStyleSheet(
-            "QPushButton { color: #856404; border: 1px solid #ffc107;"
-            " border-radius: 3px; background: #fff8e6; }"
-            "QPushButton:hover { background: #fff3cd; }"
-            "QPushButton:pressed { background: #ffc107; color: #000; }"
+        self._btn_export_plots = QPushButton("Export plots…")
+        self._btn_export_plots.setFixedHeight(36)
+        self._btn_export_plots.setEnabled(False)
+        self._btn_export_plots.clicked.connect(self._on_export_plots)
+
+        self._btn_innov_hist = QPushButton("📊 Innovation histograms…")
+        self._btn_innov_hist.setFixedHeight(36)
+        self._btn_innov_hist.setEnabled(False)
+        self._btn_innov_hist.setToolTip(
+            "Show histogram of each innovation component + Gaussian fit."
         )
+        self._btn_innov_hist.clicked.connect(self._on_innov_hist)
+
+        self._btn_mc_hist = QPushButton("📊 X distributions…")
+        self._btn_mc_hist.setFixedHeight(36)
+        self._btn_mc_hist.setEnabled(False)
+        self._btn_mc_hist.setToolTip(
+            "Show marginal distribution of X at a chosen time step (MC mode)."
+        )
+        self._btn_mc_hist.clicked.connect(self._on_mc_hist)
+
+        self._btn_reset = QPushButton("⟳  Reset")
+        self._btn_reset.setFixedHeight(36)
         self._btn_reset.clicked.connect(self._on_reset)
 
-        btn_grid.addWidget(self._btn_simulate, 0, 0)
-        btn_grid.addWidget(self._btn_filter,   0, 1)
-        btn_grid.addWidget(self._btn_save,     1, 0)
-        btn_grid.addWidget(self._btn_export,   1, 1)
-        btn_grid.addWidget(self._btn_reset,    2, 0, 1, 2)   # spans both columns
+        btn_grid.addWidget(self._btn_simulate,    0, 0)
+        btn_grid.addWidget(self._btn_filter,      0, 1)
+        btn_grid.addWidget(self._btn_save,        1, 0)
+        btn_grid.addWidget(self._btn_load,        1, 1)
+        btn_grid.addWidget(self._btn_export,      2, 0)
+        btn_grid.addWidget(self._btn_export_plots,2, 1)
+        btn_grid.addWidget(self._btn_innov_hist,  3, 0)
+        btn_grid.addWidget(self._btn_mc_hist,     3, 1)
+        btn_grid.addWidget(self._btn_reset,       4, 0, 1, 2)
 
         left_layout.addLayout(btn_grid)
 
@@ -279,6 +803,15 @@ class GSSMainWindow(QMainWindow):
         self._mse_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mse_layout.addWidget(self._mse_title)
 
+        self._loglik_label = QLabel("")
+        self._loglik_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._loglik_label.setToolTip(
+            "Total log-likelihood log p(y_{1:N}) = Σ log p(y_n|y_{1:n-1}).\n"
+            "Useful for model selection (BIC/AIC).\n"
+            "Mean value per step shown in parentheses."
+        )
+        mse_layout.addWidget(self._loglik_label)
+
         self._mse_global_label = QLabel("")
         self._mse_global_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mse_layout.addWidget(self._mse_global_label)
@@ -291,6 +824,54 @@ class GSSMainWindow(QMainWindow):
         self._mse_comp_labels: list[QLabel] = []
 
         left_layout.addWidget(self._mse_frame)
+
+        # ── Innovation diagnostics (Ljung-Box + Jarque-Bera) ─────────
+        self._innov_frame = QFrame()
+        self._innov_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self._innov_frame.setVisible(False)
+        innov_layout = QVBoxLayout(self._innov_frame)
+        innov_layout.setContentsMargins(8, 6, 8, 6)
+        innov_layout.setSpacing(4)
+
+        innov_title = QLabel("Innovation diagnostics")
+        innov_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        innov_title.setStyleSheet("font-size: 10px; font-weight: bold;")
+        innov_title.setToolTip(
+            "Ljung-Box: whiteness (no autocorrelation up to lag h).\n"
+            "Shape:    sample skewness S and excess kurtosis K.\n"
+            "          For a GSS, the innovation is a mixture of Gaussians,\n"
+            "          so K ≠ 0 is expected even when the filter is correct."
+        )
+        innov_layout.addWidget(innov_title)
+
+        innov_grid = QGridLayout()
+        innov_grid.setSpacing(4)
+        header_style = "font-size: 9px; color: #555555; font-style: italic;"
+        h_lb = QLabel("Ljung-Box")
+        h_jb = QLabel("Skew · Kurt")
+        h_lb.setStyleSheet(header_style);  h_lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h_jb.setStyleSheet(header_style);  h_jb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        innov_grid.addWidget(h_lb, 0, 1)
+        innov_grid.addWidget(h_jb, 0, 2)
+
+        self._innov_lb_badges: list[QLabel] = []
+        self._innov_jb_badges: list[QLabel] = []
+        for i in range(s):
+            name = QLabel(f"ν^{i}")
+            name.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            name.setStyleSheet("font-size: 10px;")
+            lb = QLabel();  lb.setAlignment(Qt.AlignmentFlag.AlignCenter);  lb.setFixedHeight(20)
+            jb = QLabel();  jb.setAlignment(Qt.AlignmentFlag.AlignCenter);  jb.setFixedHeight(20)
+            innov_grid.addWidget(name, i + 1, 0)
+            innov_grid.addWidget(lb,   i + 1, 1)
+            innov_grid.addWidget(jb,   i + 1, 2)
+            self._innov_lb_badges.append(lb)
+            self._innov_jb_badges.append(jb)
+        innov_grid.setColumnStretch(1, 1)
+        innov_grid.setColumnStretch(2, 1)
+        innov_layout.addLayout(innov_grid)
+
+        left_layout.addWidget(self._innov_frame)
 
         self._status_bar = QLabel("")
         self._status_bar.setWordWrap(True)
@@ -311,11 +892,17 @@ class GSSMainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
+        # ── Menu bar + status bar + persisted settings ────────────────
+        self._build_menu_bar()
+        self._build_status_bar()
+
         # If a model was passed, load its F and Σ_W
         if model is not None:
             self._load_model(model)
 
         self._refresh_simulate_button()
+        self._load_settings()
+        self._refresh_session_summary()
 
     # ------------------------------------------------------------------
     # Slots
@@ -323,24 +910,104 @@ class GSSMainWindow(QMainWindow):
 
     def _on_validity_changed(self, _: bool) -> None:
         self._refresh_simulate_button()
+        self._refresh_filter_button_drift_indicator()
+
+    def _refresh_filter_button_drift_indicator(self) -> None:
+        """Mark the Filter button when GUI params differ from those captured.
+
+        A small ⚠ prefix on the button label, plus a tooltip, makes it
+        obvious that re-clicking Filter will use the *captured* parameters,
+        not the ones currently shown in the widgets. Cleared as soon as
+        the user re-runs Simulate.
+        """
+        base_label = "Filter"
+        if self._state.params_signature is None:
+            self._btn_filter.setText(base_label)
+            self._btn_filter.setToolTip("")
+            return
+        live_sig = self._params_signature()
+        if live_sig is not None and live_sig != self._state.params_signature:
+            self._btn_filter.setText("⚠ " + base_label)
+            self._btn_filter.setToolTip(
+                "Parameters in the panel have changed since the last Simulate.\n"
+                "Filter will use the parameters captured at Simulate, not the\n"
+                "current GUI values. Re-run Simulate to use the new ones."
+            )
+        else:
+            self._btn_filter.setText(base_label)
+            self._btn_filter.setToolTip("")
 
     def _on_sim_params_changed(self) -> None:
         """Called when N or Seed changes: invalidate current results."""
-        if self._last_data is None:
+        if not self._state.has_data():
             return
         self._on_reset()
 
     def _on_reset(self) -> None:
         """Clear all simulation / filter results and reset the interface."""
-        self._last_data = None
-        self._current_params = None
+        # Stop in-flight workers FIRST so their late `finished` signal
+        # cannot resurrect the state we are about to clear.
+        self._cancel_active_workers()
+        # Also dismiss any wait dialog from a cancelled operation
+        if getattr(self, "_wait_dlg", None) is not None:
+            self._wait_dlg.close()
+            self._wait_dlg = None
+        # Re-enable the simulate button (a cancelled MC may have left it disabled)
+        self._btn_simulate.setEnabled(True)
+
+        self._state.reset()
+        self._refresh_filter_button_drift_indicator()
         self._btn_filter.setEnabled(False)
         self._btn_save.setEnabled(False)
+        self._btn_export.setEnabled(False)
+        self._btn_export_plots.setEnabled(False)
+        self._btn_innov_hist.setEnabled(False)
+        self._btn_mc_hist.setEnabled(False)
+        self._sync_menu_actions()
         self._mse_frame.setVisible(False)
+        self._innov_frame.setVisible(False)
         self._status_bar.setText("")
         self._plot_panel.clear()
+        self.statusBar().showMessage("Reset — ready.", 4000)
+
+    def _cancel_active_workers(self) -> None:
+        """Disconnect signals and request interruption on every running worker.
+
+        Disconnecting first ensures that any `finished` / `error` / `progress`
+        signal already queued on the event loop will be discarded by Qt
+        instead of running our handlers and corrupting freshly-reset state.
+        """
+        for attr in ("_worker", "_filter_worker", "_mc_worker"):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            try:
+                w.finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                w.error.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            if hasattr(w, "progress"):
+                try:
+                    w.progress.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            if w.isRunning():
+                w.requestInterruption()
+                w.quit()
+                # Don't block the UI: the worker checks isInterruptionRequested()
+                # at fixed checkpoints and aborts silently. We let it die alone.
+            setattr(self, attr, None)
 
     def _on_simulate(self) -> None:
+        if self._mc_check.isChecked():
+            self._on_simulate_mc()
+        else:
+            self._on_simulate_single()
+
+    def _on_simulate_single(self) -> None:
         params = self._build_gss_params()
         if params is None:
             return
@@ -348,21 +1015,61 @@ class GSSMainWindow(QMainWindow):
         N = self._n_spin.value()
         seed = self._parse_seed()
 
-        self._current_params = params
+        self._state.begin_simulation(params, self._params_signature())
+        self._refresh_filter_button_drift_indicator()
         self._btn_simulate.setEnabled(False)
         self._btn_save.setEnabled(False)
         self._btn_filter.setEnabled(False)
+        self._btn_innov_hist.setEnabled(False)
+        self._sync_menu_actions()
         self._mse_frame.setVisible(False)
+        self._innov_frame.setVisible(False)
         self._plot_panel.clear_filter_overlay()
         self._status_bar.setText("")
+        self._op_t0 = time.perf_counter()
+        self.statusBar().showMessage(f"Simulating  N = {N}…")
 
-        self._wait_dlg = _WaitDialog(parent=self)
+        self._wait_dlg = _WaitDialog(f"Simulating  N = {N}…", parent=self)
         self._wait_dlg.show()
 
         self._worker = _SimWorker(params, N, seed, parent=self)
         self._worker.finished.connect(self._on_sim_finished)
         self._worker.error.connect(self._on_sim_error)
         self._worker.start()
+
+    def _on_simulate_mc(self) -> None:
+        params = self._build_gss_params()
+        if params is None:
+            return
+
+        N    = self._n_spin.value()
+        M    = self._mc_spin.value()
+        seed = self._parse_seed()
+
+        self._state.begin_mc(params, self._params_signature())
+        self._refresh_filter_button_drift_indicator()
+        self._btn_simulate.setEnabled(False)
+        self._btn_save.setEnabled(False)
+        self._btn_filter.setEnabled(False)
+        self._btn_innov_hist.setEnabled(False)
+        self._btn_mc_hist.setEnabled(False)
+        self._sync_menu_actions()
+        self._mse_frame.setVisible(False)
+        self._innov_frame.setVisible(False)
+        self._status_bar.setText("")
+        self._op_t0 = time.perf_counter()
+        self.statusBar().showMessage(f"Monte Carlo  M = {M}, N = {N}…")
+
+        self._wait_dlg = _WaitDialog(f"Monte Carlo  (M = {M})…", parent=self)
+        self._wait_dlg.show()
+
+        self._mc_worker = _MCWorker(params, N, M, seed, parent=self)
+        self._mc_worker.finished.connect(self._on_mc_finished)
+        self._mc_worker.error.connect(self._on_mc_error)
+        self._mc_worker.progress.connect(
+            lambda m, tot, dlg=self._wait_dlg: dlg.set_progress(m, tot)
+        )
+        self._mc_worker.start()
 
     def _on_sim_finished(
         self,
@@ -371,87 +1078,197 @@ class GSSMainWindow(QMainWindow):
         xs: np.ndarray,
         ys: np.ndarray,
     ) -> None:
+        # Drop signals that arrived after a Reset / new operation: the worker
+        # was disconnected & nulled out, so any leftover queued signal is stale.
+        if self.sender() is not self._worker:
+            return
         if self._wait_dlg:
             self._wait_dlg.accept()
             self._wait_dlg = None
 
         seed = self._parse_seed()
-        self._last_data = (ns, rs, xs, ys, seed)
+        self._state.store_data(ns, rs, xs, ys, seed)
         self._plot_panel.update_plots(ns, rs, xs, ys, self._K)
 
         self._btn_save.setEnabled(True)
         self._btn_filter.setEnabled(True)
+        self._btn_export_plots.setEnabled(True)
+        self._sync_menu_actions()
         self._refresh_simulate_button()
 
+        elapsed = time.perf_counter() - getattr(self, "_op_t0", time.perf_counter())
+        self.statusBar().showMessage(
+            f"Simulation complete — N = {len(ns)} steps in {elapsed:.2f}s.", 6000
+        )
+
+        # Auto-filter chaining (single mode only; MC handled separately)
+        if self._auto_filter_check.isChecked() and self._state.can_filter():
+            self._on_filter()
+
     def _on_sim_error(self, msg: str) -> None:
+        if self.sender() is not self._worker:
+            return
         if self._wait_dlg:
             self._wait_dlg.reject()
             self._wait_dlg = None
 
         self._status_bar.setText(f"Error: {msg}")
+        self.statusBar().showMessage(f"Simulation error: {msg}", 8000)
+        self._refresh_simulate_button()
+
+    def _on_mc_finished(
+        self,
+        mean_xs:      np.ndarray,   # (N, q)
+        std_xs:       np.ndarray,   # (N, q)
+        median_xs:    np.ndarray,   # (N, q)
+        mean_ys:      np.ndarray,   # (N, s)
+        std_ys:       np.ndarray,   # (N, s)
+        median_ys:    np.ndarray,   # (N, s)
+        regime_freqs: np.ndarray,   # (N, K)
+        ns:           list,
+    ) -> None:
+        if self.sender() is not self._mc_worker:
+            return
+        if self._wait_dlg:
+            self._wait_dlg.accept()
+            self._wait_dlg = None
+
+        M = self._mc_spin.value()
+        if self._mc_worker is not None and self._mc_worker.xs_all is not None:
+            self._state.store_mc(self._mc_worker.xs_all)
+        self._plot_panel.update_mc_plots(
+            ns, mean_xs, std_xs, median_xs,
+            mean_ys, std_ys, median_ys,
+            regime_freqs, self._K, M,
+        )
+
+        # MC mode: no single trajectory — Filter / Save CSV not meaningful
+        self._btn_filter.setEnabled(False)
+        self._btn_save.setEnabled(False)
+        self._btn_export_plots.setEnabled(True)
+        self._btn_mc_hist.setEnabled(self._state.has_mc())
+        self._sync_menu_actions()
+
+        elapsed = time.perf_counter() - getattr(self, "_op_t0", time.perf_counter())
+        msg = (
+            f"Monte Carlo complete — M = {M}, N = {self._n_spin.value()} "
+            f"steps in {elapsed:.2f}s."
+        )
+        self._status_bar.setText(msg)
+        self.statusBar().showMessage(msg, 8000)
+        self._refresh_simulate_button()
+
+    def _on_mc_error(self, msg: str) -> None:
+        if self.sender() is not self._mc_worker:
+            return
+        if self._wait_dlg:
+            self._wait_dlg.reject()
+            self._wait_dlg = None
+
+        self._status_bar.setText(f"Monte Carlo error: {msg}")
+        self.statusBar().showMessage(f"Monte Carlo error: {msg}", 8000)
         self._refresh_simulate_button()
 
     def _on_filter(self) -> None:
-        if self._last_data is None or self._current_params is None:
+        if not self._state.can_filter():
             return
 
-        _, _, _, ys, _ = self._last_data
+        _, _, _, ys, _ = self._state.data
+
+        # Warn the user if the parameters displayed on screen have drifted
+        # from those captured at Simulate (or Load CSV) — the filter uses
+        # the captured ones, not whatever is in the widgets right now.
+        live_sig = self._params_signature()
+        params_drifted = (
+            live_sig is not None
+            and self._state.params_signature is not None
+            and live_sig != self._state.params_signature
+        )
 
         self._btn_filter.setEnabled(False)
+        self._sync_menu_actions()
         self._mse_frame.setVisible(False)
         self._status_bar.setText("")
+        self._op_t0 = time.perf_counter()
+        msg = f"Filtering  N = {len(ys)}…"
+        if params_drifted:
+            msg += "  ⚠ using parameters captured at last Simulate (GUI values differ)"
+        self.statusBar().showMessage(msg)
 
         self._wait_dlg = _WaitDialog("Filtering…", parent=self)
         self._wait_dlg.show()
 
         self._filter_worker = _FilterWorker(
-            self._current_params, ys, parent=self
+            self._state.params, ys, parent=self
         )
-        self._filter_worker.finished.connect(self._on_filter_finished)
+        self._filter_worker.finished.connect(self._on_filter_finished)  # type: ignore[arg-type]
         self._filter_worker.error.connect(self._on_filter_error)
         self._filter_worker.start()
 
     def _on_filter_finished(
         self,
-        E_xs: np.ndarray,    # (N, q)
-        Var_xs: np.ndarray,  # (N, q)
-        pis: np.ndarray,     # (N, K)
+        E_xs:          np.ndarray,   # (N, q)
+        Var_xs:        np.ndarray,   # (N, q)
+        pis:           np.ndarray,   # (N, K)
+        innovations:   np.ndarray,   # (N, s)
+        log_lik_total: float,
     ) -> None:
+        if self.sender() is not self._filter_worker:
+            return
+        if not self._state.has_data():
+            return                       # state cleared while filter was running
         if self._wait_dlg:
             self._wait_dlg.accept()
             self._wait_dlg = None
 
-        ns, rs, xs, ys, _ = self._last_data
+        ns, rs, xs, ys, _ = self._state.data
+        N = len(ns)
 
-        # Overlay filtered estimates on the plot
+        # Overlay filtered estimates + regime posterior + innovation sequence
+        self._state.store_innovations(innovations)
         self._plot_panel.add_filter_overlay(ns, E_xs, Var_xs)
+        self._plot_panel.add_pi_overlay(ns, pis, self._K)
+        self._plot_panel.update_innovations(ns, innovations)
 
-        # Compute and display MSE / RMSE
-        err = xs - E_xs                              # (N, q)
-        mse_per_comp = np.mean(err ** 2, axis=0)     # (q,)
-        mse_global   = float(mse_per_comp.mean())
-        rmse_global  = float(np.sqrt(mse_global))
+        # ── Filter quality frame — always visible after filter ───────
+        mean_ll = log_lik_total / N if N > 0 else float("nan")
+        self._loglik_label.setText(
+            f"log L = {log_lik_total:.4g}   (mean = {mean_ll:.4g})"
+        )
 
-        self._mse_global_label.setText(f"MSE  = {mse_global:.5g}")
-        self._rmse_label.setText(f"RMSE = {rmse_global:.5g}")
+        # MSE / RMSE only when ground-truth X is available
+        if xs is not None:
+            err = xs - E_xs                              # (N, q)
+            mse_per_comp = np.mean(err ** 2, axis=0)     # (q,)
+            mse_global   = float(mse_per_comp.mean())
+            rmse_global  = float(np.sqrt(mse_global))
 
-        # Color the frame: green if RMSE is small relative to signal std
-        sig_std = float(xs.std()) if xs.std() > 0 else 1.0
-        ratio   = rmse_global / sig_std          # 0 = perfect, 1 = as bad as noise
-        if ratio < 0.20:
-            bg, fg, border = "#d4edda", "#155724", "#c3e6cb"   # green
-        elif ratio < 0.50:
-            bg, fg, border = "#fff3cd", "#856404", "#ffc107"   # amber
+            self._mse_global_label.setText(f"MSE  = {mse_global:.5g}")
+            self._rmse_label.setText(f"RMSE = {rmse_global:.5g}")
+
+            # Color the frame: green if RMSE is small relative to signal std
+            sig_std = float(xs.std()) if xs.std() > 0 else 1.0
+            ratio   = rmse_global / sig_std
+            if ratio < 0.20:
+                bg, fg, border = "#d4edda", "#155724", "#c3e6cb"   # green
+            elif ratio < 0.50:
+                bg, fg, border = "#fff3cd", "#856404", "#ffc107"   # amber
+            else:
+                bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"   # red
         else:
-            bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"   # red
+            # No ground truth: neutral styling, hide MSE/RMSE rows
+            self._mse_global_label.setText("")
+            self._rmse_label.setText("")
+            bg, fg, border = "#eef2f7", "#333333", "#c8d0d8"
 
         self._mse_frame.setStyleSheet(
             f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
             f" border-radius: 4px; }}"
         )
-        title_style  = f"font-weight: bold; font-size: 11px; color: {fg};"
-        value_style  = f"font-size: 10px; color: {fg};"
+        title_style = f"font-weight: bold; font-size: 11px; color: {fg};"
+        value_style = f"font-size: 10px; color: {fg};"
         self._mse_title.setStyleSheet(title_style)
+        self._loglik_label.setStyleSheet(value_style)
         self._mse_global_label.setStyleSheet(value_style)
         self._rmse_label.setStyleSheet(value_style)
 
@@ -462,8 +1279,8 @@ class GSSMainWindow(QMainWindow):
             lbl.deleteLater()
         self._mse_comp_labels.clear()
 
-        if self._q > 1:
-            for i, v in enumerate(mse_per_comp):
+        if xs is not None and self._q > 1:
+            for i, v in enumerate(np.mean((xs - E_xs) ** 2, axis=0)):
                 lbl = QLabel(f"  MSE(X^{i}) = {v:.5g}")
                 lbl.setStyleSheet(f"font-size: 9px; color: {fg};")
                 mse_vbox.addWidget(lbl)
@@ -472,14 +1289,71 @@ class GSSMainWindow(QMainWindow):
         self._mse_frame.setVisible(True)
 
         self._btn_filter.setEnabled(True)
+        self._btn_innov_hist.setEnabled(True)
+        self._sync_menu_actions()
+
+        elapsed = time.perf_counter() - getattr(self, "_op_t0", time.perf_counter())
+        self.statusBar().showMessage(
+            f"Filter complete — N = {N}, log L = {log_lik_total:.4g}  "
+            f"({elapsed:.2f}s).",
+            8000,
+        )
+
+        # ── Innovation diagnostics: Ljung-Box + Jarque-Bera ────────────
+        for i in range(self._s):
+            # Ljung-Box
+            _, p_lb, h_lb = _ljung_box(innovations[:, i])
+            if p_lb > 0.10:
+                style, icon, verdict = _PILL_OK,   "✓", "white"
+            elif p_lb > 0.05:
+                style, icon, verdict = _PILL_WARN, "~", "border"
+            else:
+                style, icon, verdict = _PILL_ERR,  "✗", "autocor."
+            self._innov_lb_badges[i].setText(
+                f"{icon} {verdict}  p={p_lb:.3f}"
+            )
+            self._innov_lb_badges[i].setStyleSheet(style)
+            self._innov_lb_badges[i].setToolTip(
+                f"Ljung-Box: Q stat with h = {h_lb} lags.\n"
+                f"p = {p_lb:.4g} (p > 0.10 ⇒ white noise)."
+            )
+            # Shape diagnostics (skewness + excess kurtosis + JB)
+            S, K, JB, p_jb = _shape_diagnostics(innovations[:, i])
+            # Verdict driven by the moments themselves (more robust than JB
+            # p-value for GSS innovations, which are mixtures of Gaussians).
+            sk_ok = abs(S) < 0.25 and abs(K) < 0.50
+            sk_wn = abs(S) < 0.50 and abs(K) < 1.00
+            if sk_ok:
+                style, icon = _PILL_OK,   "✓"
+            elif sk_wn:
+                style, icon = _PILL_WARN, "~"
+            else:
+                style, icon = _PILL_ERR,  "✗"
+            self._innov_jb_badges[i].setText(
+                f"{icon}  S={S:+.2f}  K={K:+.2f}"
+            )
+            self._innov_jb_badges[i].setStyleSheet(style)
+            self._innov_jb_badges[i].setToolTip(
+                f"Skewness  S = {S:+.4f}   (target ≈ 0)\n"
+                f"Excess kurtosis  K = {K:+.4f}   (target ≈ 0 for Gaussian)\n"
+                f"Jarque-Bera  JB = {JB:.3f}   p = {p_jb:.4g}\n"
+                "Note: GSS innovations are theoretically a mixture of Gaussians\n"
+                "(conditional on the regime), so K ≠ 0 is expected even for a\n"
+                "correctly-tuned filter. Use S and K as the primary indicator."
+            )
+        self._innov_frame.setVisible(True)
 
     def _on_filter_error(self, msg: str) -> None:
+        if self.sender() is not self._filter_worker:
+            return
         if self._wait_dlg:
             self._wait_dlg.reject()
             self._wait_dlg = None
 
         self._status_bar.setText(f"Filter error: {msg}")
+        self.statusBar().showMessage(f"Filter error: {msg}", 8000)
         self._btn_filter.setEnabled(True)
+        self._sync_menu_actions()
 
     def _on_export_model(self) -> None:
         """Open a save-file dialog and write a ready-to-use Python model file."""
@@ -507,9 +1381,9 @@ class GSSMainWindow(QMainWindow):
             QMessageBox.critical(self, "Write error", str(exc))
 
     def _on_save(self) -> None:
-        if self._last_data is None:
+        if not self._state.has_data():
             return
-        ns, rs, xs, ys, seed_used = self._last_data
+        ns, rs, xs, ys, seed_used = self._state.data
 
         output_dir = pathlib.Path("data/simulated")
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -523,7 +1397,6 @@ class GSSMainWindow(QMainWindow):
         q, s = self._q, self._s
         header = ["n", "r"] + [f"x_{i}" for i in range(q)] + [f"y_{i}" for i in range(s)]
 
-        import csv
         with filepath.open("w", newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(header)
@@ -536,9 +1409,331 @@ class GSSMainWindow(QMainWindow):
             f"File saved:\n{filepath.resolve()}",
         )
 
+    def _on_preset_selected(self, index: int) -> None:
+        """Load a preset model; restart the window if K/q/s differ."""
+        if index == 0:          # placeholder item
+            return
+        entry = self._presets[index - 1]
+        try:
+            model = entry.load()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Preset error", str(exc))
+            self._preset_combo.setCurrentIndex(0)
+            return
+
+        if entry.K == self._K and entry.q == self._q and entry.s == self._s:
+            # Same dimensions — load in place and reset plots
+            self._load_model(model)
+            self._on_reset()
+        else:
+            answer = QMessageBox.question(
+                self,
+                "Changement de dimensions",
+                f"Ce modèle requiert K={entry.K}, q={entry.q}, s={entry.s}.\n"
+                f"La fenêtre va être recréée. Continuer ?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self.restart_with_model.emit(model)
+            else:
+                self._preset_combo.setCurrentIndex(0)
+
+    def _on_export_plots(self) -> None:
+        """Save the current plot panel figure to a PNG or PDF file."""
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export plots",
+            str(pathlib.Path("data/simulated") / "plots.pdf"),
+            "PDF (*.pdf);;PNG (*.png);;SVG (*.svg);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            self._plot_panel.save_figure(path)
+            QMessageBox.information(
+                self, "Export plots",
+                f"Figure saved:\n{pathlib.Path(path).resolve()}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Export error", str(exc))
+
+    def _on_load_data(self) -> None:
+        """Open a CSV file and display it without running a simulation."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load simulation data",
+            str(pathlib.Path("data/simulated")),
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, newline="", encoding="utf-8") as fh:
+                reader = csv.DictReader(fh)
+                rows = list(reader)
+
+            if not rows:
+                QMessageBox.warning(self, "Load error", "File is empty.")
+                return
+
+            headers = list(rows[0].keys())
+
+            # --- Validate required columns ---
+            required = ["n", "r"] + [f"y_{i}" for i in range(self._s)]
+            missing = [c for c in required if c not in headers]
+            if missing:
+                QMessageBox.warning(
+                    self, "Load error",
+                    f"Missing column(s): {missing}\n"
+                    f"Expected at least: n, r, y_0 … y_{self._s - 1}\n"
+                    f"Found: {headers}",
+                )
+                return
+
+            # --- Parse ---
+            ns = [int(float(row["n"])) for row in rows]
+            rs = [int(float(row["r"])) for row in rows]
+            ys = np.array(
+                [[float(row[f"y_{i}"]) for i in range(self._s)] for row in rows]
+            )
+
+            x_cols = [f"x_{i}" for i in range(self._q)]
+            has_x  = all(c in headers for c in x_cols)
+            xs     = (
+                np.array([[float(row[f"x_{i}"]) for i in range(self._q)]
+                          for row in rows])
+                if has_x else None
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Load error", str(exc))
+            return
+
+        # --- Update state ---
+        live_params = self._build_gss_params()  # uses current GUI params
+        self._state.load_external(
+            ns, rs, xs, ys,
+            params=live_params,
+            signature=self._params_signature(),
+        )
+        self._refresh_filter_button_drift_indicator()
+
+        self._plot_panel.clear_filter_overlay()
+        self._plot_panel.update_plots(ns, rs, xs, ys, self._K)
+
+        self._btn_filter.setEnabled(self._state.can_filter())
+        self._btn_save.setEnabled(False)        # nothing new generated
+        self._btn_export_plots.setEnabled(True)
+        self._sync_menu_actions()
+        self._mse_frame.setVisible(False)
+
+        info = f"Loaded {len(ns)} steps from '{pathlib.Path(path).name}'"
+        if not has_x:
+            info += "  (no ground-truth X)"
+        self._status_bar.setText(info)
+        self.statusBar().showMessage(info, 6000)
+
+    # ------------------------------------------------------------------
+    # Menu bar, status bar, settings
+    # ------------------------------------------------------------------
+
+    def _build_menu_bar(self) -> None:
+        """Create the application menu bar with keyboard shortcuts."""
+        mb = self.menuBar()
+
+        # ── File menu ────────────────────────────────────────────────
+        file_menu = mb.addMenu("&File")
+
+        self._act_save = QAction("Save &CSV", self)
+        self._act_save.setShortcut(QKeySequence("Ctrl+S"))
+        self._act_save.setStatusTip("Save current simulation as CSV")
+        self._act_save.setEnabled(False)
+        self._act_save.triggered.connect(self._on_save)
+        file_menu.addAction(self._act_save)
+
+        self._act_load = QAction("&Load CSV…", self)
+        self._act_load.setShortcut(QKeySequence("Ctrl+O"))
+        self._act_load.setStatusTip("Load a previously saved simulation CSV")
+        self._act_load.triggered.connect(self._on_load_data)
+        file_menu.addAction(self._act_load)
+
+        file_menu.addSeparator()
+
+        self._act_export = QAction("Export &model…", self)
+        self._act_export.setShortcut(QKeySequence("Ctrl+E"))
+        self._act_export.setStatusTip("Export current parameters as a Python model file")
+        self._act_export.setEnabled(False)
+        self._act_export.triggered.connect(self._on_export_model)
+        file_menu.addAction(self._act_export)
+
+        self._act_export_plots = QAction("Export &plots…", self)
+        self._act_export_plots.setShortcut(QKeySequence("Ctrl+Shift+E"))
+        self._act_export_plots.setStatusTip("Save current plot panel as PDF/PNG/SVG")
+        self._act_export_plots.setEnabled(False)
+        self._act_export_plots.triggered.connect(self._on_export_plots)
+        file_menu.addAction(self._act_export_plots)
+
+        file_menu.addSeparator()
+
+        act_quit = QAction("&Quit", self)
+        act_quit.setShortcut(QKeySequence.StandardKey.Quit)
+        act_quit.setStatusTip("Quit the application")
+        act_quit.triggered.connect(self.close)
+        file_menu.addAction(act_quit)
+
+        # ── Simulation menu ──────────────────────────────────────────
+        sim_menu = mb.addMenu("&Simulation")
+
+        self._act_simulate = QAction("Si&mulate", self)
+        self._act_simulate.setShortcut(QKeySequence("Ctrl+R"))
+        self._act_simulate.setStatusTip("Run simulation (single or Monte-Carlo)")
+        self._act_simulate.triggered.connect(self._on_simulate)
+        sim_menu.addAction(self._act_simulate)
+
+        self._act_filter = QAction("&Filter", self)
+        self._act_filter.setShortcut(QKeySequence("Ctrl+F"))
+        self._act_filter.setStatusTip("Run the optimal filter on the current simulation")
+        self._act_filter.setEnabled(False)
+        self._act_filter.triggered.connect(self._on_filter)
+        sim_menu.addAction(self._act_filter)
+
+        sim_menu.addSeparator()
+
+        self._act_reset = QAction("&Reset", self)
+        self._act_reset.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        self._act_reset.setStatusTip("Clear all results and reset the plots")
+        self._act_reset.triggered.connect(self._on_reset)
+        sim_menu.addAction(self._act_reset)
+
+        # ── View menu ────────────────────────────────────────────────
+        view_menu = mb.addMenu("&View")
+
+        self._act_innov_hist = QAction("&Innovation histograms…", self)
+        self._act_innov_hist.setShortcut(QKeySequence("Ctrl+I"))
+        self._act_innov_hist.setStatusTip("Show histogram of each innovation component")
+        self._act_innov_hist.setEnabled(False)
+        self._act_innov_hist.triggered.connect(self._on_innov_hist)
+        view_menu.addAction(self._act_innov_hist)
+
+        self._act_mc_hist = QAction("MC &X distributions…", self)
+        self._act_mc_hist.setShortcut(QKeySequence("Ctrl+Shift+X"))
+        self._act_mc_hist.setStatusTip("Show marginal distribution of X at a chosen time step")
+        self._act_mc_hist.setEnabled(False)
+        self._act_mc_hist.triggered.connect(self._on_mc_hist)
+        view_menu.addAction(self._act_mc_hist)
+
+    def _build_status_bar(self) -> None:
+        """Permanent status bar: ephemeral messages + session summary."""
+        sb = self.statusBar()
+        sb.setSizeGripEnabled(False)
+
+        # Permanent right-side session summary label
+        self._sb_session_lbl = QLabel("")
+        self._sb_session_lbl.setStyleSheet("font-size: 10px; color: #333333;")
+        sb.addPermanentWidget(self._sb_session_lbl)
+
+        # Wire signals that change session parameters to refresh the summary
+        self._n_spin.valueChanged.connect(self._refresh_session_summary)
+        self._mc_spin.valueChanged.connect(self._refresh_session_summary)
+        self._mc_check.toggled.connect(self._refresh_session_summary)
+        self._seed_edit.textChanged.connect(self._refresh_session_summary)
+        self._auto_filter_check.toggled.connect(self._refresh_session_summary)
+
+    def _refresh_session_summary(self) -> None:
+        """Update the right-hand permanent label in the status bar."""
+        if not hasattr(self, "_sb_session_lbl"):
+            return
+        seed = self._seed_edit.text().strip() or "random"
+        mc   = f"M={self._mc_spin.value()}" if self._mc_check.isChecked() else "MC off"
+        auto = "auto-filter" if self._auto_filter_check.isChecked() else ""
+        parts = [
+            f"K={self._K}·q={self._q}·s={self._s}",
+            f"N={self._n_spin.value()}",
+            mc,
+            f"seed={seed}",
+        ]
+        if auto:
+            parts.append(auto)
+        self._sb_session_lbl.setText("  |  ".join(parts))
+
+    # -- Settings persistence via QSettings --------------------------------
+
+    def _settings(self) -> QSettings:
+        return QSettings("FofGss", "Simulator")
+
+    def _load_settings(self) -> None:
+        s = self._settings()
+        # N and Monte-Carlo state are intentionally NOT restored: every
+        # launch starts with the safe defaults set in the constructor
+        # (N=1000, MC unchecked), so a previous heavy session can't make
+        # the next launch sluggish or unexpectedly run a long MC.
+        self._mc_spin.setValue(int(s.value("M", self._mc_spin.value())))
+        seed = s.value("seed", self._seed_edit.text())
+        if seed is not None:
+            self._seed_edit.setText(str(seed))
+        self._auto_filter_check.setChecked(s.value("auto_filter", False, type=bool))
+
+        geom = s.value("geometry")
+        if geom is not None:
+            try:
+                self.restoreGeometry(geom)
+            except Exception:                                       # noqa: BLE001
+                pass
+        split = s.value("splitter")
+        if split is not None:
+            try:
+                self._splitter.restoreState(split)
+            except Exception:                                       # noqa: BLE001
+                pass
+
+    def _save_settings(self) -> None:
+        s = self._settings()
+        # N and mc_on intentionally not saved — see _load_settings.
+        s.setValue("M", self._mc_spin.value())
+        s.setValue("seed", self._seed_edit.text())
+        s.setValue("auto_filter", self._auto_filter_check.isChecked())
+        s.setValue("geometry", self.saveGeometry())
+        s.setValue("splitter", self._splitter.saveState())
+        # Clean up legacy keys from previous versions so they can't resurface
+        s.remove("N")
+        s.remove("mc_on")
+
+    def closeEvent(self, event) -> None:                            # noqa: N802
+        self._cancel_active_workers()
+        self._save_settings()
+        super().closeEvent(event)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _update_stationary_display(self) -> None:
+        """Recompute and display the stationary distribution π* of P."""
+        P = self._p_widget.get_matrix()
+        if P is None:
+            self._stationary_label.setText("")
+            return
+        pi = _stationary_dist(P)
+        if pi is None:
+            self._stationary_label.setText("π* = ?")
+            return
+        parts = "   ".join(f"π<sub>{k}</sub> = {pi[k]:.3f}" for k in range(len(pi)))
+        self._stationary_label.setText(f"π* :  {parts}")
+
+    def _on_innov_hist(self) -> None:
+        """Open innovation histogram dialog."""
+        if not self._state.has_filter():
+            return
+        dlg = _InnovHistDialog(self._state.innovations, parent=self)
+        dlg.show()
+
+    def _on_mc_hist(self) -> None:
+        """Open MC X-distribution histogram dialog."""
+        if not self._state.has_mc():
+            return
+        dlg = _MCHistDialog(self._state.mc_xs_all, parent=self)
+        dlg.show()
 
     def _refresh_simulate_button(self) -> None:
         valid = self._param_panel.is_valid() and self._p_widget.is_valid()
@@ -554,6 +1749,19 @@ class GSSMainWindow(QMainWindow):
             self._status_bar.setText(
                 "Invalid parameter(s) — fix before simulating."
             )
+        self._sync_menu_actions()
+
+    def _sync_menu_actions(self) -> None:
+        """Mirror every QPushButton's enabled state into its matching QAction."""
+        if not hasattr(self, "_act_simulate"):
+            return   # menu bar not built yet
+        self._act_simulate.setEnabled(self._btn_simulate.isEnabled())
+        self._act_filter.setEnabled(self._btn_filter.isEnabled())
+        self._act_save.setEnabled(self._btn_save.isEnabled())
+        self._act_export.setEnabled(self._btn_export.isEnabled())
+        self._act_export_plots.setEnabled(self._btn_export_plots.isEnabled())
+        self._act_innov_hist.setEnabled(self._btn_innov_hist.isEnabled())
+        self._act_mc_hist.setEnabled(self._btn_mc_hist.isEnabled())
 
     def _parse_seed(self) -> int | None:
         text = self._seed_edit.text().strip()
@@ -563,6 +1771,31 @@ class GSSMainWindow(QMainWindow):
             return int(text)
         except ValueError:
             return None
+
+    def _params_signature(self) -> tuple | None:
+        """Compact byte-level signature of the GUI parameters.
+
+        Two simulations done with identical widget values produce the same
+        signature; any edit invalidates it. Used to warn the user when the
+        parameters displayed on screen no longer match those captured at
+        the last Simulate (and thus used by Filter).
+
+        Returns None if any widget is currently invalid.
+        """
+        F  = self._param_panel.get_F_list()
+        S  = self._param_panel.get_Sigma_W_list()
+        mu = self._param_panel.get_mu_z0_list()
+        b  = self._param_panel.get_b_list()
+        P  = self._p_widget.get_matrix()
+        if any(x is None for x in (F, S, mu, b, P)):
+            return None
+        return (
+            tuple(np.ascontiguousarray(m).tobytes() for m in F),
+            tuple(np.ascontiguousarray(m).tobytes() for m in S),
+            tuple(np.ascontiguousarray(m).tobytes() for m in mu),
+            tuple(np.ascontiguousarray(m).tobytes() for m in b),
+            np.ascontiguousarray(P).tobytes(),
+        )
 
     def _build_gss_params(self) -> GSSParams | None:
         """Collect GUI values and build a GSSParams object."""
@@ -739,15 +1972,12 @@ class GSSMainWindow(QMainWindow):
 
     def _load_model(self, model) -> None:
         """Pre-fill tables from a BaseGSSModel instance."""
-        from prg.classes.NoiseCovariance import GSSNoiseCovariance as _NC
-        from prg.classes.FMatrix import FMatrix as _FM
-
         p = model.get_params()
         K, q, s = p["K"], p["q"], p["s"]
 
         # Build block noise cov to get full Σ_W
-        nc = _NC(K, q, s, p["Sigma_U_list"], p["Delta_list"], p["Sigma_V_list"])
-        fm = _FM(K, q, s, p["A_list"], p["B_list"], p["C_list"], p["D_list"])
+        nc = GSSNoiseCovariance(K, q, s, p["Sigma_U_list"], p["Delta_list"], p["Sigma_V_list"])
+        fm = FMatrix(K, q, s, p["A_list"], p["B_list"], p["C_list"], p["D_list"])
 
         mu_list = p.get("mu_z0_list")
         b_list  = p.get("b_list")
@@ -759,3 +1989,4 @@ class GSSMainWindow(QMainWindow):
         if p.get("P") is not None:
             self._P = np.asarray(p["P"])
             self._p_widget.set_matrix(self._P)
+            self._update_stationary_display()

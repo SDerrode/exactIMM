@@ -11,16 +11,22 @@ Each tab (_StateTab) exposes:
 
 Constraint checkboxes (eq. 4.8)
 ---------------------------------
-Each tab has four mutually exclusive checkboxes — at most one can be
-active at a time.  When checked, the corresponding block is auto-computed
-in real-time and rendered read-only.
-Unchecking restores the value that was present before the constraint was
-activated.
+The constraint (4.8) is a single equation in A, B, C, D, Σ_U, Δ, Σ_V.
+It can be solved for exactly one of {A, B, Σ_U} at a time — those three
+are therefore mutually exclusive.
+
+Δ = 0 is an independent constraint (it zeros the off-diagonal block of
+Σ_W) and can coexist with any of {A, B, Σ_U}.  When Δ changes state,
+the active H5 constraint is automatically re-evaluated with the new Δ.
+
+Valid combinations:
+  □ A alone       □ B alone       □ Σ_U alone
+  □ Δ=0 alone     □ Δ=0 + A       □ Δ=0 + B       □ Δ=0 + Σ_U
 
   □ Constraint on A(k)   — A determined by B, C, D, Σ_U, Δ, Σ_V  (eq. 4.8)
   □ Constraint on B(k)   — B determined by A, C, D, Σ_U, Δ, Σ_V  (eq. 4.8)
   □ Constraint on Σ_U(k) — Σ_U determined by A, B, C, D, Δ, Σ_V  (eq. 4.8)
-  □ Δ = 0(k)             — off-diagonal block of Σ_W forced to zero
+  □ Δ = 0(k)             — off-diagonal block of Σ_W forced to zero (independent)
 
 Stability indicators
 --------------------
@@ -39,7 +45,7 @@ import numpy as np
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QScrollArea,
-    QCheckBox,
+    QCheckBox, QPushButton,
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
@@ -54,7 +60,9 @@ class _StateTab(QWidget):
     """One tab: F(k), Σ_W(k), μ_z0(k), b_X(k), b_Y(k) side by side,
     plus four mutually exclusive constraint checkboxes and a stability badge."""
 
-    validity_changed = pyqtSignal(bool)
+    validity_changed  = pyqtSignal(bool)
+    value_changed     = pyqtSignal()    # emitted whenever any cell changes
+    constraint_toggled = pyqtSignal()   # emitted when any checkbox is checked
 
     # Checkbox colour palette  (text-color, checked-fill, border)
     _CHK_STYLES = {
@@ -110,6 +118,13 @@ class _StateTab(QWidget):
             chk_row.addWidget(chk)
 
         chk_row.addStretch()
+        btn_rand = QPushButton("🎲 Randomize")
+        btn_rand.setFixedHeight(24)
+        btn_rand.setToolTip(
+            "Fill F(k) and Σ_W(k) with random stable parameters."
+        )
+        btn_rand.clicked.connect(self._randomize)
+        chk_row.addWidget(btn_rand)
         layout.addLayout(chk_row)
 
         # -- Matrix/vector widgets row --
@@ -123,6 +138,9 @@ class _StateTab(QWidget):
         self._f_widget.set_matrix(np.eye(q + s) * 0.5)
 
         # Stability badges live in a sub-column directly below _f_widget
+        self._stab_F_badge = QLabel()
+        self._stab_F_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._stab_F_badge.setFixedHeight(16)
         self._stab_A_badge = QLabel()
         self._stab_A_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._stab_A_badge.setFixedHeight(16)
@@ -134,6 +152,7 @@ class _StateTab(QWidget):
         f_col.setSpacing(2)
         f_col.setContentsMargins(0, 0, 0, 0)
         f_col.addWidget(self._f_widget)
+        f_col.addWidget(self._stab_F_badge)
         f_col.addWidget(self._stab_A_badge)
         f_col.addWidget(self._stab_D_badge)
         f_col.addStretch()
@@ -170,6 +189,7 @@ class _StateTab(QWidget):
         for w in (self._f_widget, self._sigma_widget,
                   self._mu_widget, self._bx_widget, self._by_widget):
             w.validity_changed.connect(self._on_child_validity)
+            w.value_changed.connect(self.value_changed)   # forward upward
 
         self._f_widget.value_changed.connect(self._on_value_changed)
         self._sigma_widget.value_changed.connect(self._on_value_changed)
@@ -205,6 +225,7 @@ class _StateTab(QWidget):
 
     def set_F(self, mat: np.ndarray) -> None:
         self._f_widget.set_matrix(mat)
+        self._update_stability_badges()
 
     def set_Sigma_W(self, mat: np.ndarray) -> None:
         self._sigma_widget.set_matrix(mat)
@@ -233,41 +254,45 @@ class _StateTab(QWidget):
 
     def _on_A_toggled(self, checked: bool) -> None:
         if checked:
-            self._uncheck_others(self._constraint_A_check)
+            self._uncheck_h5_others(self._constraint_A_check)
             F = self._f_widget.get_matrix()
             if F is not None:
                 self._saved_A = F[:self._q, :self._q].copy()
             self._recompute_A()
+            self.constraint_toggled.emit()
         else:
             self._restore_A()
 
     def _on_B_toggled(self, checked: bool) -> None:
         if checked:
-            self._uncheck_others(self._constraint_B_check)
+            self._uncheck_h5_others(self._constraint_B_check)
             F = self._f_widget.get_matrix()
             if F is not None:
                 self._saved_B = F[:self._q, self._q:].copy()
             self._recompute_B()
+            self.constraint_toggled.emit()
         else:
             self._restore_B()
 
     def _on_SU_toggled(self, checked: bool) -> None:
         if checked:
-            self._uncheck_others(self._constraint_SU_check)
+            self._uncheck_h5_others(self._constraint_SU_check)
             Sw = self._sigma_widget.get_matrix()
             if Sw is not None:
                 self._saved_SU = Sw[:self._q, :self._q].copy()
             self._recompute_SU()
+            self.constraint_toggled.emit()
         else:
             self._restore_SU()
 
     def _on_delta_toggled(self, checked: bool) -> None:
+        # Δ=0 is independent — does NOT uncheck {A, B, Σ_U}
         if checked:
-            self._uncheck_others(self._constraint_delta_check)
             Sw = self._sigma_widget.get_matrix()
             if Sw is not None:
                 self._saved_Delta = Sw[:self._q, self._q:].copy()
             self._recompute_delta()
+            self.constraint_toggled.emit()
         else:
             self._restore_delta()
 
@@ -311,6 +336,7 @@ class _StateTab(QWidget):
         self._updating = False
         self._f_widget.set_constraint_status(
             "✓  A satisfies constraint (4.8)", "color: #155399; font-size: 10px;")
+        self._update_stability_badges()
 
     def _recompute_B(self) -> None:
         if not self._constraint_B_check.isChecked() or self._updating:
@@ -337,6 +363,7 @@ class _StateTab(QWidget):
         self._updating = False
         self._f_widget.set_constraint_status(
             "✓  B satisfies constraint (4.8)", "color: #1a7a3a; font-size: 10px;")
+        self._update_stability_badges()
 
     def _recompute_SU(self) -> None:
         if not self._constraint_SU_check.isChecked() or self._updating:
@@ -366,7 +393,11 @@ class _StateTab(QWidget):
             "✓  Σ_U satisfies constraint (4.8)", "color: #6c3483; font-size: 10px;")
 
     def _recompute_delta(self) -> None:
-        """Set Δ(k) = 0 and lock both off-diagonal blocks of Σ_W."""
+        """Set Δ(k) = 0 and lock both off-diagonal blocks of Σ_W.
+
+        If an H5 constraint (A, B or Σ_U) is also active, it is re-evaluated
+        immediately so that it uses the updated Δ = 0.
+        """
         if not self._constraint_delta_check.isChecked() or self._updating:
             return
         Sw = self._sigma_widget.get_matrix()
@@ -383,8 +414,9 @@ class _StateTab(QWidget):
         self._sigma_widget.set_block_editable(0, q, q, q + s, False)
         self._sigma_widget.set_block_editable(q, q + s, 0, q, False)
         self._updating = False
-        self._sigma_widget.set_constraint_status(
-            "✓  Δ = 0  (noise independence)", "color: #0e6655; font-size: 10px;")
+        self._sigma_widget.set_constraint_status("")
+        # Re-trigger the active H5 constraint so it uses Δ = 0
+        self._retrigger_h5()
 
     # ------------------------------------------------------------------
     # Restore methods (called when a checkbox is unchecked)
@@ -449,14 +481,18 @@ class _StateTab(QWidget):
                 self._sigma_widget.set_matrix(restored)
                 self._updating = False
             self._saved_Delta = None
+        # Re-trigger the active H5 constraint so it uses the restored Δ
+        self._retrigger_h5()
 
     # ------------------------------------------------------------------
     # Stability badges  (read-only display, no correction)
     # ------------------------------------------------------------------
 
     def _update_stability_badges(self) -> None:
-        """Recompute ρ(A(k)) and ρ(D(k)); refresh both colour-coded badges."""
+        """Recompute ρ(F(k)), ρ(A(k)) and ρ(D(k)); refresh all three badges."""
         F = self._f_widget.get_matrix()
+        n = self._q + self._s
+        self._set_badge(self._stab_F_badge, "ρ(F)", F, 0, n, 0, n)
         self._set_badge(self._stab_A_badge, "ρ(A)", F, 0, self._q, 0, self._q)
         self._set_badge(self._stab_D_badge, "ρ(D)", F,
                         self._q, self._q + self._s,
@@ -504,19 +540,51 @@ class _StateTab(QWidget):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _uncheck_others(self, keep: QCheckBox) -> None:
-        """Silently uncheck every constraint checkbox except *keep*."""
+    def _randomize(self) -> None:
+        """Fill F(k) and Σ_W(k) with random valid parameters."""
+        rng = np.random.default_rng()
+        n = self._q + self._s
+
+        # Random stable F: scale so ρ(F) ∈ [0.70, 0.90]
+        F_raw = rng.uniform(-1.0, 1.0, (n, n))
+        rho = float(np.max(np.abs(np.linalg.eigvals(F_raw))))
+        target = float(rng.uniform(0.70, 0.90))
+        F_rand = F_raw * (target / max(rho, 1e-10))
+
+        # Random SPD Σ_W: Wishart-like L @ L.T + ε·I, diagonal ≈ 0.1–0.5
+        L  = rng.uniform(-0.5, 0.5, (n, n))
+        Sw = L @ L.T + 0.05 * np.eye(n)
+        Sw = Sw / (np.sqrt(np.diag(Sw).mean()) / 0.3)
+
+        self._f_widget.set_matrix(F_rand)
+        self._sigma_widget.set_matrix(Sw)
+        self._update_stability_badges()
+        self.constraint_toggled.emit()   # reset plots in main window
+
+    def _uncheck_h5_others(self, keep: QCheckBox) -> None:
+        """Silently uncheck the other H5 checkboxes ({A, B, Σ_U}) except *keep*.
+
+        Δ=0 is intentionally NOT touched — it can coexist with any H5 constraint.
+        """
         for chk, restore in [
-            (self._constraint_A_check,     self._restore_A),
-            (self._constraint_B_check,     self._restore_B),
-            (self._constraint_SU_check,    self._restore_SU),
-            (self._constraint_delta_check, self._restore_delta),
+            (self._constraint_A_check,  self._restore_A),
+            (self._constraint_B_check,  self._restore_B),
+            (self._constraint_SU_check, self._restore_SU),
         ]:
             if chk is not keep and chk.isChecked():
                 chk.blockSignals(True)
                 chk.setChecked(False)
                 chk.blockSignals(False)
                 restore()
+
+    def _retrigger_h5(self) -> None:
+        """Re-evaluate the active H5 constraint (A, B or Σ_U), if any."""
+        if self._constraint_A_check.isChecked():
+            self._recompute_A()
+        elif self._constraint_B_check.isChecked():
+            self._recompute_B()
+        elif self._constraint_SU_check.isChecked():
+            self._recompute_SU()
 
     @staticmethod
     def _call_constraint(fn, kwargs: dict) -> np.ndarray | None:
@@ -544,7 +612,9 @@ class ParamPanel(QWidget):
         Emitted whenever the overall validity changes.
     """
 
-    validity_changed = pyqtSignal(bool)
+    validity_changed   = pyqtSignal(bool)
+    value_changed      = pyqtSignal()   # forwarded from any _StateTab cell edit
+    constraint_toggled = pyqtSignal()   # forwarded from any _StateTab
 
     def __init__(self, K: int, q: int, s: int, parent=None):
         super().__init__(parent)
@@ -568,10 +638,16 @@ class ParamPanel(QWidget):
         for k in range(K):
             tab = _StateTab(k, q, s)
             tab.validity_changed.connect(self._on_tab_validity)
+            tab.value_changed.connect(self.value_changed)   # forward upward
+            tab.constraint_toggled.connect(self.constraint_toggled)
 
             scroll = QScrollArea()
             scroll.setWidget(tab)
             scroll.setWidgetResizable(True)
+            scroll.setStyleSheet(
+                "QScrollArea { background-color: palette(window); border: none; }"
+                "QScrollArea > QWidget > QWidget { background-color: palette(window); }"
+            )
             self._tabs.addTab(scroll, f"State {k}")
             self._state_tabs.append(tab)
 

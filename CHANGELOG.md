@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-19
+
+### Added
+
+- **`_SessionState` dataclass** (`prg/gui/main_window.py`) — single source of truth
+  for all session results (data, params, innovations, mc_xs_all); replaces 5 scattered
+  `_last_*` attributes with explicit predicates (`has_data()`, `can_filter()`, …) and
+  atomic mutations (`reset()`, `begin_simulation()`, `store_innovations()`, …)
+- **Worker cancellation** — new `_cancel_active_workers()` helper disconnects signals
+  and calls `requestInterruption()` + `quit()` on all three workers; invoked by
+  Reset and `closeEvent()`; each worker checks `isInterruptionRequested()` at fixed
+  intervals (256 iterations) and aborts silently without emitting `finished`
+- **Stale-signal guards** — every `_on_*_finished` / `_on_*_error` handler now
+  verifies `self.sender() is self._<worker>` before touching state, preventing
+  queued signals from corrupting a freshly-reset session
+- **Param drift indicator** — `⚠ Filter` button label + tooltip when the GUI
+  parameters differ from those captured at the last Simulate; the comparison is based
+  on a byte-level signature (`_params_signature()`) recomputed on every cell edit;
+  `VectorWidget.value_changed` signal added; propagated up via `_StateTab.value_changed`
+  → `ParamPanel.value_changed`; status-bar message added at Filter launch
+- **Filter enhancements** (`prg/filter/gss_filter.py`):
+  - `_safe_solve(A, B)` — `lstsq` fallback when `np.linalg.solve` raises `LinAlgError`
+  - `allow_singular=True` on all `multivariate_normal.logpdf` calls
+  - NaN guards on π normalisation (fallback to π₀ or marginal)
+  - `log_lik: float` field in `FilterResult`; incremental accumulation via `logsumexp`
+- **Log-likelihood display** — `log L = … (mean = …/step)` shown in the Filter quality
+  frame after each Filter run
+- **π_n(k) dedicated subplot** — regime posteriors now occupy their own axis (height
+  ratio 0.55) directly below R_n; R_n is a clean step plot again (no twinx)
+- **Innovation diagnostics frame** — two-column grid: Ljung-Box whiteness badges
+  (per component) + Skew · Kurt badges coloured by moment thresholds
+  (|S| < 0.25 ∧ |K| < 0.50 = green; intermediate = amber; otherwise = red);
+  tooltip explains that GSS innovations are theoretically a mixture of Gaussians
+- **Menu bar** (`File` / `Simulation` / `View`) with keyboard shortcuts:
+  Ctrl+S (Save CSV), Ctrl+O (Load CSV), Ctrl+E (Export model), Ctrl+Shift+E
+  (Export plots), Ctrl+Q (Quit), Ctrl+R (Simulate), Ctrl+F (Filter),
+  Ctrl+Shift+R (Reset), Ctrl+I (Innovation histograms), Ctrl+Shift+X (MC distributions)
+- **Status bar** with live session summary `K=·q=·s= | N= | M= | seed= | auto-filter`
+- **Auto-filter checkbox** — when checked, Filter runs automatically after each
+  single Simulate completes
+- **Progress dialog** — indeterminate spinner by default; switches to determinate bar
+  with elapsed + ETA during Monte Carlo
+- **QSettings persistence** for window geometry, splitter position, M, seed, and
+  auto-filter state (N and MC-on intentionally not persisted — always start at
+  defaults N = 1000, MC unchecked)
+- **Export plots** button and Ctrl+Shift+E — saves the figure to PNG/PDF/SVG
+- **Export model code** button and Ctrl+E — generates a ready-to-use `.py` model
+  file from the current GUI parameters
+- **Innovation histogram dialog** (Ctrl+I) — per-component KDE + Gaussian reference
+- **MC X-distribution dialog** (Ctrl+Shift+X) — per-component, per-time-step KDE
+
+### Fixed
+
+- **X-axis not updating when N decreases** (`prg/gui/plot_panel.py`) — after `cla()`
+  on multiple `sharex=True` axes, autoscale-x was silently disabled so new data did
+  not drive the limits; `_set_shared_xlim()` now re-enables autoscale and pins
+  x-limits to the current data range at the end of `update_plots`,
+  `update_mc_plots`, and `update_innovations`
+- **`Artist.remove()` crash after `cla()`** — `clear_filter_overlay`,
+  `clear_innovations`, `_clear_mc_plots` now catch `NotImplementedError` and
+  `AttributeError` in addition to `ValueError`
+- **Wrong legend axis index** in `clear_filter_overlay` (`1 + i` → `_x_offset + i`)
+- **Race condition on Reset** — a late `finished` signal from a cancelled worker
+  could overwrite freshly-reset state; fixed by disconnect-before-null in
+  `_cancel_active_workers()` combined with `sender()` guards in handlers
+- **`_on_filter_finished` crash** when `_state.data` was cleared by a concurrent Reset
+- `_on_reset()` now also closes the wait dialog and re-enables the Simulate button
+  after cancelling an in-flight MC or Filter
+
+### Changed
+
+- Default N = 1000 at launch (not persisted); Monte Carlo checkbox unchecked at
+  launch (not persisted); previous persisted values are cleaned up from QSettings
+- Import hygiene (`prg/gui/main_window.py`): `csv`, `jarque_bera as _jb`,
+  `GSSFilter`, `PRESETS` moved to module-level; redundant local re-imports of
+  `GSSNoiseCovariance` and `FMatrix` inside `_load_model()` removed (the
+  module-level names were already available)
+- `VectorWidget` (`prg/gui/matrix_widget.py`) — new `value_changed = pyqtSignal()`
+  emitted on every cell edit (previously only `validity_changed` was available)
+
 ## [0.6.0] — 2026-04-16
 
 ### Added

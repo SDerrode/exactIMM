@@ -184,6 +184,89 @@ B = compute_B_from_h5(A, C, D, SU, Delta, SV)   # returns (q, s) array
 
 ---
 
+## Supervised learning
+
+The supervised estimator learns all GSS parameters from a fully-observed
+$(R_n, X_n, Y_n)$ CSV (such as those produced by the simulator).
+
+```bash
+# Estimate from a simulated CSV (no constraint)
+python -m prg.learning.supervised data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
+
+# Enforce H5 constraint on B (post-hoc) and force Δ = 0
+python -m prg.learning.supervised sim.csv --constraint b --delta-zero
+
+# Enforce H5 constraint on A; save to a custom file
+python -m prg.learning.supervised sim.csv --constraint a \
+    --output prg/models/model_my_estimated.py --model-name model_my_estimated
+
+# Verbose output (per-regime summaries)
+python -m prg.learning.supervised sim.csv -v
+```
+
+The generated `.py` file is a `BaseGSSModel` subclass and can be used directly:
+
+```bash
+python -m prg.simulate --model model_learned_K2_q1_s1 -N 1000 --seed 42
+python -m prg.filter.main --model model_learned_K2_q1_s1 -N 1000 --seed 42
+```
+
+### CLI options
+
+| Option | Default | Description |
+|---|---|---|
+| `csv` | — | Path to simulation CSV (required) |
+| `--constraint {a,b,su}` | `None` | H5 post-hoc projection on A, B, or Σ_U |
+| `--delta-zero` | `False` | Force Δ(k) = 0 before the H5 step |
+| `--output PATH` | auto | Destination `.py` file |
+| `--model-name NAME` | auto | File/class base name |
+| `-v` / `--verbose` | `False` | Print per-regime fit summaries |
+
+### Python API
+
+```python
+from prg.learning.supervised import fit_supervised, _read_csv
+import pathlib
+
+rs, xs, ys, K, q, s = _read_csv(pathlib.Path("sim.csv"))
+params = fit_supervised(rs, xs, ys, K, q, s, constraint="b", delta_zero=True)
+
+# params is a dict ready for GSSParams.from_model() or code generation
+from prg.classes.GSSParams import GSSParams
+gss_params = GSSParams(
+    K=params["K"], q=params["q"], s=params["s"],
+    P=params["P"],
+    A_list=params["A_list"], B_list=params["B_list"],
+    C_list=params["C_list"], D_list=params["D_list"],
+    Sigma_U_list=params["Sigma_U_list"],
+    Delta_list=params["Delta_list"],
+    Sigma_V_list=params["Sigma_V_list"],
+    pi0=params["pi0"],
+    mu_z0_list=params["mu_z0_list"],
+    Sigma_z0_list=params["Sigma_z0_list"],
+    b_list=params["b_list"],
+)
+```
+
+### Estimation approach
+
+For each regime $k$ the model is $Z_{n+1} = F(k)\,Z_n + b(k) + W_{n+1}$.
+
+1. **Free OLS** — collect all pairs $(Z_n, Z_{n+1})$ for which $r_{n+1}=k$,
+   augment with a constant column, and solve the least-squares problem.
+   The noise covariance $\Sigma_W(k)$ is the MLE sample covariance of residuals.
+
+2. **Δ = 0** *(optional)* — zero out the off-diagonal block of $\Sigma_W(k)$.
+
+3. **H5 projection** *(optional)* — recompute $A$, $B$, or $\Sigma_U$ from the
+   remaining estimated blocks using the analytical H5 formula (eq. 4.8).
+
+The Markov matrix $P$ is estimated by transition-frequency counts.
+Constraints `--constraint {a,b,su}` are mutually exclusive; `--delta-zero`
+is independent and applied before the H5 step.
+
+---
+
 ## Graphical interface
 
 The GUI requires `pip install -e ".[gui]"` (PyQt6 + matplotlib).

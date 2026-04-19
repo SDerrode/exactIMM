@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-04-19
+
+### Added
+
+- **`prg/learning/` package** — new supervised estimation module
+- **`prg/learning/supervised.py`** — estimate all GSS parameters from
+  fully-observed (R, X, Y) data (CSV produced by `prg.simulate`):
+  - `fit_supervised(rs, xs, ys, K, q, s, …)` — public API returning a
+    parameter dict; per-regime OLS on pairs (Z_n, Z_{n+1}) for which
+    r_{n+1} = k; P estimated from transition counts; initial conditions
+    from sample moments per regime
+  - `--constraint {a,b,su}` — post-hoc H5 projection: recompute A, B, or
+    Σ_U analytically from the other estimated blocks (via
+    `compute_A_from_h5`, `compute_B_from_h5`, `compute_SU_from_h5`)
+  - `--delta-zero` — force Δ(k) = 0 before the H5 step
+  - `_generate_model_code()` — renders a ready-to-use `BaseGSSModel`
+    subclass file in the same style as the GUI export
+  - CLI entry point (`python -m prg.learning.supervised <csv> [OPTIONS]`)
+    with `--output`, `--model-name`, `-v`
+- **`tests/test_supervised.py`** — 43 pytest tests covering `_read_csv`
+  (valid/invalid inputs), `_nearest_spd`, `_fit_regime` (OLS exactness on
+  noise-free data, shapes, `delta_zero`, `constraint='b'`),
+  `fit_supervised` (keys, dimensions, row-stochastic P, SPD guarantees,
+  error cases, statistical recovery within 0.15), code-generation
+  helpers (`_fmt_arr` / `_fmt_list` eval-roundtrip), generated-file
+  importability, and full CLI smoke tests
+
 ## [0.7.0] — 2026-04-19
 
 ### Added

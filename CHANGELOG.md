@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-04-20
+
+### Added
+
+- **`--constraint-each-iter` flag** for the semi-supervised EM
+  estimator (`prg.learning.semi_supervised`).  When set, the H5
+  projection (and `--delta-zero`) is applied at *every* M-step
+  (Generalized-EM, log-likelihood may not be monotone).
+- New tests in `tests/test_semi_supervised.py`:
+  `test_post_hoc_keeps_log_lik_monotone`,
+  `test_constraint_each_iter_b`,
+  `test_post_hoc_vs_each_iter_differ`,
+  `test_constraint_each_iter_passes`,
+  `test_constraint_each_iter_flag` (CLI).
+- **Joseph form for the mode-conditional posterior covariance
+  update** in `prg/filter/gss_filter.py`: optional, controlled by
+  `joseph: bool = False` at the `GSSFilter` constructor.
+  Mathematically equivalent to the short form under stationarity but
+  numerically more stable (symmetric and PSD by construction).
+- **GUI checkbox "Joseph form (covariance update)"** in the main
+  window, with QSettings persistence and tooltip.  The session
+  summary now appends `cov=Joseph` or `cov=short`.
+- New tests in `tests/test_gss_filter.py`: `TestJosephForm`
+  (constructor flag, equivalence with the short form, end-to-end
+  filter equivalence, PSD check) and `TestStationaryMoments`
+  (`π_∞ P = π_∞`, fixed-point equation for `μ(k)`).
+- New model files in `prg/models/`:
+  - `model_em_K2_q1_s1.py` — parameters estimated by Baum-Welch EM
+    (semi-supervised) on a synthetic K=2, q=s=1 trajectory of N=3000.
+  - `model_gss_K2_q1_s1_contrast.py` — model designed to produce
+    visually contrasted X⁰ and Y⁰ signals (decoupled cross-terms,
+    swapped fixed points across regimes).
+  - `model_gss_K2_q1_s1_custom.py` — placeholder template generated
+    by the GUI for user-edited parameters.
+
+### Changed
+
+- **Default constraint timing in semi-supervised EM is now post-hoc.**
+  `--constraint` (and `--delta-zero`) are no longer applied during
+  EM iterations — instead, EM converges on the unconstrained
+  log-likelihood and the projection is applied **once** to the
+  best run's converged parameters.  This restores standard EM
+  monotonicity by default and matches the supervised estimator's
+  behaviour.  To recover the previous behaviour, pass
+  `--constraint-each-iter` (or `constraint_each_iter=True` in the
+  Python API).
+- New keyword argument `constraint_each_iter: bool = False` on
+  `fit_semi_supervised(...)` and the internal `_em_run(...)`.
+- README updated: dedicated "Constraint timing" caveat, CLI table
+  entry, and Python-API example.
+- **Filter recursion rewritten as exact IMM under (H5)** in
+  `prg/filter/gss_filter.py`.  The reverse-time regime transition
+  now uses the **stationary** marginal `π_∞` (instead of the
+  filtered `π_n`), aligning the implementation with the IEEE paper
+  (§3, eq. *reverse_P*).  Under stationarity all per-regime Kalman
+  quantities (gain `K_gain[k]`, posterior covariance `P_post[k]`)
+  and pair-conditional likelihood quantities (`μ_Y(j,k)`, `M_t(j,k)`,
+  `Γ(j,k)`) become constants in `n`: they are now pre-computed once
+  in `_precompute()` at filter construction by fixed-point iteration
+  on `μ(k), P(k)` (max 1000 iters, tol 1e-12) and stored on the
+  filter instance.  The per-step `_update_step()` is correspondingly
+  much shorter.
+- `GSSFilter` now exposes `joseph` and `stationary_distribution`
+  read-only properties.
+- `tests/test_gss_filter.py::test_regime_probabilities_not_degenerate`
+  relaxed: trajectories must visit both regimes (regime 0 preferred
+  at some steps, regime 1 at others) instead of bounding the
+  trajectory-mean of `p_r_0` between 0.2 and 0.8.  The new exact-IMM
+  formulation is more confident in regime decisions when (H5) does
+  not hold for the test model.
+- **Build system**: `pyproject.toml` switched from the deprecated
+  `setuptools.backends.legacy:build` backend to the standard
+  `setuptools.build_meta`.
+- `.gitignore` now excludes the `paper/` directory (LaTeX sources
+  for the IEEE submission, kept out of the repo).
+- `docs/CS_FinaleBis.tex` / `.pdf` updated with the new derivations
+  (stationary regime moments, Joseph remark, time-reversed
+  stationary transition).
+
 ## [0.9.0] — 2026-04-19
 
 ### Added

@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=72", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "fofgss"
-version = "0.9.0"
+version = "0.10.0"
 description = "Fast optimal filtering in Gaussian switching systems"
 readme = "README.md"
 license = { file = "LICENSE" }

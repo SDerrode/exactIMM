@@ -403,15 +403,17 @@ class _FilterWorker(QThread):
         self,
         params: GSSParams,
         ys: np.ndarray,   # (N, s)
+        joseph: bool = False,
         parent=None,
     ):
         super().__init__(parent)
         self._params = params
         self._ys = ys
+        self._joseph = joseph
 
     def run(self) -> None:
         try:
-            filt = GSSFilter(self._params)
+            filt = GSSFilter(self._params, joseph=self._joseph)
             E_xs_list:    list[np.ndarray] = []
             Var_xs_list:  list[np.ndarray] = []
             pis_list:     list[np.ndarray] = []
@@ -693,23 +695,29 @@ class GSSMainWindow(QMainWindow):
         seed_row.addWidget(self._seed_edit)
         left_layout.addLayout(seed_row)
 
-        # Monte Carlo row
+        # Monte Carlo row — checkbox HIDDEN per user request.
+        # The widget is still created so the rest of the codebase
+        # (_run_simulate / _MCWorker / _on_mc_finished) keeps working
+        # unchanged; it simply stays unchecked and invisible, so MC mode
+        # is unreachable from the UI.
         mc_row = QHBoxLayout()
         self._mc_check = QCheckBox("Monte Carlo")
         self._mc_check.setToolTip(
             "Run M independent simulations and display mean ± 2σ trajectories."
         )
-        mc_row.addWidget(self._mc_check)
-        mc_row.addWidget(QLabel("M ="))
+        self._mc_check.hide()                                # ← hidden
+        # mc_row.addWidget(self._mc_check)                   # ← not laid out
         self._mc_spin = QSpinBox()
         self._mc_spin.setRange(2, 5000)
         self._mc_spin.setValue(50)
         self._mc_spin.setSingleStep(10)
         self._mc_spin.setMaximumWidth(90)
         self._mc_spin.setToolTip("Number of Monte-Carlo runs")
-        mc_row.addWidget(self._mc_spin)
-        mc_row.addStretch()
-        left_layout.addLayout(mc_row)
+        self._mc_spin.hide()                                 # ← hidden too
+        # mc_row.addWidget(QLabel("M ="))
+        # mc_row.addWidget(self._mc_spin)
+        # mc_row.addStretch()
+        # left_layout.addLayout(mc_row)
 
         # Auto-filter row
         auto_row = QHBoxLayout()
@@ -721,6 +729,19 @@ class GSSMainWindow(QMainWindow):
         auto_row.addWidget(self._auto_filter_check)
         auto_row.addStretch()
         left_layout.addLayout(auto_row)
+
+        # Joseph form row
+        joseph_row = QHBoxLayout()
+        self._joseph_check = QCheckBox("Joseph form (covariance update)")
+        self._joseph_check.setToolTip(
+            "If checked, the mode-conditional posterior covariance is computed\n"
+            "via the Joseph form (numerically stable, symmetric and PSD by\n"
+            "construction). Mathematically equivalent to the short form under\n"
+            "stationarity. See paper Appendix E."
+        )
+        joseph_row.addWidget(self._joseph_check)
+        joseph_row.addStretch()
+        left_layout.addLayout(joseph_row)
 
         left_layout.addStretch()   # pushes buttons to the bottom of the panel
 
@@ -1199,7 +1220,9 @@ class GSSMainWindow(QMainWindow):
         self._wait_dlg.show()
 
         self._filter_worker = _FilterWorker(
-            self._state.params, ys, parent=self
+            self._state.params, ys,
+            joseph=self._joseph_check.isChecked(),
+            parent=self,
         )
         self._filter_worker.finished.connect(self._on_filter_finished)  # type: ignore[arg-type]
         self._filter_worker.error.connect(self._on_filter_error)
@@ -1639,6 +1662,7 @@ class GSSMainWindow(QMainWindow):
         self._mc_check.toggled.connect(self._refresh_session_summary)
         self._seed_edit.textChanged.connect(self._refresh_session_summary)
         self._auto_filter_check.toggled.connect(self._refresh_session_summary)
+        self._joseph_check.toggled.connect(self._refresh_session_summary)
 
     def _refresh_session_summary(self) -> None:
         """Update the right-hand permanent label in the status bar."""
@@ -1647,11 +1671,13 @@ class GSSMainWindow(QMainWindow):
         seed = self._seed_edit.text().strip() or "random"
         mc   = f"M={self._mc_spin.value()}" if self._mc_check.isChecked() else "MC off"
         auto = "auto-filter" if self._auto_filter_check.isChecked() else ""
+        joseph = "Joseph" if self._joseph_check.isChecked() else "short"
         parts = [
             f"K={self._K}·q={self._q}·s={self._s}",
             f"N={self._n_spin.value()}",
             mc,
             f"seed={seed}",
+            f"cov={joseph}",
         ]
         if auto:
             parts.append(auto)
@@ -1673,6 +1699,7 @@ class GSSMainWindow(QMainWindow):
         if seed is not None:
             self._seed_edit.setText(str(seed))
         self._auto_filter_check.setChecked(s.value("auto_filter", False, type=bool))
+        self._joseph_check.setChecked(s.value("joseph", False, type=bool))
 
         geom = s.value("geometry")
         if geom is not None:
@@ -1693,6 +1720,7 @@ class GSSMainWindow(QMainWindow):
         s.setValue("M", self._mc_spin.value())
         s.setValue("seed", self._seed_edit.text())
         s.setValue("auto_filter", self._auto_filter_check.isChecked())
+        s.setValue("joseph", self._joseph_check.isChecked())
         s.setValue("geometry", self.saveGeometry())
         s.setValue("splitter", self._splitter.saveState())
         # Clean up legacy keys from previous versions so they can't resurface

@@ -575,6 +575,108 @@ Ainsi, dès que $A$, $C$, $D$, $\Sigma_U$, $\Sigma_V$, $\Delta$ sont fixées, la
 \emph{entièrement déterminée} par (4.8) : la contrainte (H5) lève le degré de liberté
 correspondant.
 
+\medskip
+\noindent\textbf{Déduction de $A$ — système linéaire.}
+La même équation (4.7) peut être réorganisée pour exhiber $A^T$ comme inconnue, lorsque
+$B$, $C$, $D$, $\Sigma_U$, $\Sigma_V$, $\Delta$ sont fixées. En isolant les deux termes
+en $A^T$ (celui dans $QA^T$ à droite et celui dans $\Delta^T A^T$ qui provient de $\Delta^T A$
+dans la version transposée de la contrainte) :
+\begin{equation}
+  P M^{-1}\,Q\,A^T \;-\; \Delta^T A^T
+  \;=\; L B^T \;-\; P M^{-1}\,\Delta^T,
+  \tag{4.9}
+\end{equation}
+soit, en factorisant à gauche :
+\begin{equation}
+  \underbrace{\bigl(P M^{-1} Q - \Delta^T\bigr)}_{\displaystyle G}\; A^T
+  \;=\; L\,B^T \;-\; P M^{-1}\,\Delta^T,
+  \tag{4.10}
+\end{equation}
+où $G \in \mathbb{R}^{s \times q}$ et le second membre est dans $\mathbb{R}^{s \times q}$.
+La résolution dépend du rapport entre $s$ et $q$ :
+\begin{itemize}
+  \item \textbf{si $s \geq q$ et $G$ est de rang plein $q$,} la solution unique au sens
+    des moindres carrés (qui annule le résidu) est :
+    \begin{equation}
+      \boxed{A^T \;=\; \bigl(G^T G\bigr)^{-1}\,G^T\,\bigl(L B^T - P M^{-1} \Delta^T\bigr) ;}
+      \tag{4.11}
+    \end{equation}
+  \item \textbf{si $s < q$ ou $G$ est rang-déficient,} $A$ n'est pas uniquement déterminé
+    par (H5) : il subsiste $q - \mathrm{rg}(G) \geq 1$ degrés de liberté.
+\end{itemize}
+En pratique, on résout (4.10) au moyen de \texttt{numpy.linalg.lstsq} et on signale
+toute déficience de rang.
+
+\medskip
+\noindent\textbf{Déduction de $\Sigma_U$ — système linéaire vectorisé.}
+Lorsque $A$, $B$, $C$, $D$, $\Delta$, $\Sigma_V$ sont fixées et que l'on cherche $\Sigma_U$,
+le problème devient \emph{non linéaire} dans la forme brute de (4.4) car $\Sigma_U$
+apparaît à la fois dans $Q$ ($Q = C\Sigma_U + D\Delta^T$) et dans $M$
+($M = QC^T + RD^T + \Sigma_V$ contient le terme $C\Sigma_U C^T$). On
+\emph{linéarise} en multipliant (4.7) à gauche par $M$, ce qui élimine $M^{-1}$.
+
+\noindent Posons les blocs « libres de $\Sigma_U$ » :
+\begin{equation}
+  Q_0 := D\,\Delta^T,                  \qquad
+  M_0 := Q_0\,C^T + R\,D^T + \Sigma_V, \qquad
+  R   := C\,\Delta + D\,\Sigma_V,
+  \tag{4.12}
+\end{equation}
+de sorte que $Q = Q_0 + C\,\Sigma_U$ et $M = M_0 + C\,\Sigma_U\,C^T$. En multipliant
+(4.7) par $M$ à gauche et en regroupant les termes :
+\begin{equation}
+  \bigl(M_0 + C\,\Sigma_U\,C^T\bigr)\bigl(\Delta^T A + \Sigma_V B^T\bigr)
+  \;=\; P\,\bigl((Q_0 + C\,\Sigma_U)\,A^T + R\,B^T + \Delta^T\bigr).
+  \tag{4.13}
+\end{equation}
+En notant
+\begin{equation}
+  Z := \Sigma_V\,B^T + \Delta^T A,    \qquad
+  W := Q_0\,A^T + R\,B^T + \Delta^T,
+  \tag{4.14}
+\end{equation}
+(tous deux de taille $s \times q$ et indépendants de $\Sigma_U$), l'égalité (4.13) se
+réécrit :
+\begin{equation}
+  C\,\Sigma_U\,C^T\,Z \;-\; P\,C\,\Sigma_U\,A^T
+  \;=\; \underbrace{P\,W \;-\; M_0\,Z}_{\displaystyle \mathrm{RHS}\,\in\,\mathbb{R}^{s\times q}}.
+  \tag{4.15}
+\end{equation}
+
+\noindent Pour transformer cette équation matricielle en un système linéaire standard, on
+utilise l'identité de \emph{vectorisation}
+$\mathrm{vec}(XYZ) = (Z^T \otimes X)\,\mathrm{vec}(Y)$ (où $\otimes$ est le produit de
+Kronecker). En posant $E := C^T Z$ ($q \times q$) et $PC := P\,C$ ($s \times q$), il vient
+$\mathrm{vec}(C \Sigma_U C^T Z) = (E^T \otimes C)\,\mathrm{vec}(\Sigma_U)$ et
+$\mathrm{vec}(P C \Sigma_U A^T) = (A \otimes PC)\,\mathrm{vec}(\Sigma_U)$, d'où le
+système linéaire $(sq) \times q^2$ :
+\begin{equation}
+  \boxed{\bigl[(E^T \otimes C) - (A \otimes PC)\bigr]\,\mathrm{vec}(\Sigma_U)
+  \;=\; \mathrm{vec}(\mathrm{RHS}).}
+  \tag{4.16}
+\end{equation}
+La résolution se fait par moindres carrés ; $\Sigma_U$ est ensuite \emph{symétrisée}
+($\Sigma_U \leftarrow (\Sigma_U + \Sigma_U^T)/2$) puis on vérifie sa
+\emph{définie-positivité} par décomposition de Cholesky.
+
+\medskip
+\noindent\textbf{Bilan.} La contrainte (H5) lie les sept matrices $(A, B, C, D, \Sigma_U,
+\Delta, \Sigma_V)$ d'un même régime par une seule équation matricielle. Selon la matrice
+que l'on considère comme inconnue :
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+  \textbf{Inconnue} & \textbf{Système (équation)} & \textbf{Existence/unicité} \\ \hline
+  $B$       & $L\,B^T = \mathrm{rhs}_B$        \quad (4.7)  & unique si $L \succ 0$ \\
+  $A$       & $G\,A^T = \mathrm{rhs}_A$        \quad (4.10) & unique si $\mathrm{rg}(G) = q$ \\
+  $\Sigma_U$ & Kronecker $(sq \times q^2)$    \quad (4.16) & unique si $\mathrm{rg} = q^2$, puis SPD \\
+\end{tabular}
+\end{center}
+
+Les trois projections sont implémentées dans \texttt{prg/utils/h5\_constraint.py}
+(\texttt{compute\_B\_from\_h5}, \texttt{compute\_A\_from\_h5},
+\texttt{compute\_SU\_from\_h5}), avec contrôle de conditionnement et levée d'exception
+en cas de système mal posé.
+
 }% fin {\color{red}}
 
 \end{document}

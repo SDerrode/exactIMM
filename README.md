@@ -298,9 +298,13 @@ python -m prg.learning.semi_supervised data/simulated/sim.csv -K 2
 python -m prg.learning.semi_supervised sim.csv -K 2 \
     --n-inits 20 --seed 42 -v
 
-# H5 constraint applied at every M-step (Generalized EM)
+# H5 constraint applied once at the end of EM (default — log-lik monotone)
 python -m prg.learning.semi_supervised sim.csv -K 2 \
     --constraint b --delta-zero
+
+# Same constraint, but enforced at every M-step (Generalized EM mode)
+python -m prg.learning.semi_supervised sim.csv -K 2 \
+    --constraint b --delta-zero --constraint-each-iter
 ```
 
 ### CLI options
@@ -309,8 +313,9 @@ python -m prg.learning.semi_supervised sim.csv -K 2 \
 |---|---|---|
 | `csv` | — | Input CSV (the `r` column is ignored if present) |
 | `-K`, `--K` | — | Number of regimes (required) |
-| `--constraint {a,b,su}` | `None` | H5 projection at every M-step |
-| `--delta-zero` | `False` | Force Δ(k) = 0 before each H5 step |
+| `--constraint {a,b,su}` | `None` | H5 projection target (post-hoc by default) |
+| `--delta-zero` | `False` | Force Δ(k) = 0 before the H5 step |
+| `--constraint-each-iter` | `False` | Apply the constraint at every M-step (GEM); otherwise applied once at the end |
 | `--n-inits` | `10` | Number of independent EM restarts |
 | `--max-iter` | `100` | Maximum EM iterations per run |
 | `--tol` | `1e-5` | Convergence threshold on \|Δ log L\| |
@@ -331,8 +336,12 @@ For each EM iteration:
    - $\hat\pi_0(k) = \gamma_0(k)$
    - $\hat F(k), \hat b(k)$ by **weighted OLS** with weights $\gamma_{n+1}(k)$
    - $\hat\Sigma_W(k)$ = weighted MLE of residual covariance
-   - Optional H5 projection on $A$, $B$, or $\Sigma_U$
+   - Optional H5 projection on $A$, $B$, or $\Sigma_U$ (only with
+     `--constraint-each-iter`; otherwise projected once after EM)
 3. **Convergence** — stop when $|\Delta \log L| < \mathrm{tol}$.
+4. **Post-hoc projection** — if `--constraint` is set without
+   `--constraint-each-iter`, the H5 projection (and $\Delta = 0$) is
+   applied **once** to the converged parameters of the best run.
 
 ### Notes & caveats
 
@@ -343,9 +352,14 @@ For each EM iteration:
   $A(k)[0,0]$ (descending) for reproducibility. Don't expect the
   estimated regime indices to match a known ground truth without
   post-hoc alignment.
-- **GEM with constraints.** When `--constraint` is set, the H5
-  projection at each M-step *breaks* the EM monotonicity guarantee.
-  Convergence is monitored on $|\Delta \log L|$ (absolute value).
+- **Constraint timing.** By default the H5 projection is applied **once
+  at the end** of EM, so the iterations remain a standard EM with
+  monotone log-likelihood — the constraint behaves exactly like the
+  supervised post-hoc projection. Pass `--constraint-each-iter` to
+  enforce H5 at every M-step (Generalized EM): the constraint is
+  satisfied throughout the optimisation but log-likelihood
+  monotonicity is no longer guaranteed (convergence is then monitored
+  on $|\Delta \log L|$).
 - **Required N.** With $K=2$ and $q=s=1$, $N \ge 2000$ typically gives
   $|\hat A - A_{\text{true}}| < 0.05$.
 
@@ -356,8 +370,9 @@ from prg.learning.semi_supervised import fit_semi_supervised
 
 params, info = fit_semi_supervised(
     xs, ys, K=2,
-    constraint=None,        # 'a' | 'b' | 'su' | None
+    constraint=None,            # 'a' | 'b' | 'su' | None
     delta_zero=False,
+    constraint_each_iter=False, # True → GEM; False (default) → post-hoc
     n_inits=10,
     max_iter=100,
     tol=1e-5,

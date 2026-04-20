@@ -7,6 +7,9 @@
 # Documentation sources (Word/PDF reports)
 docs/
 
+# Research paper sources (LaTeX) — kept out of the repo
+paper/
+
 
 # Original and generated data
 /data/simulated/*

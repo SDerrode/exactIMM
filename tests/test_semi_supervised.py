@@ -323,6 +323,7 @@ class TestEMRun:
             np.linalg.cholesky(params["Sigma_V_list"][k])
 
     def test_with_constraint_b(self, simulated):
+        """Default (post-hoc) mode: H5 still satisfied at the end."""
         from prg.utils.h5_constraint import compute_B_from_h5
         xs, ys, _, _ = simulated
         Z = np.hstack([xs, ys])
@@ -338,6 +339,80 @@ class TestEMRun:
                 params["Delta_list"][k], params["Sigma_V_list"][k],
             )
             np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
+
+    def test_post_hoc_keeps_log_lik_monotone(self, simulated):
+        """
+        With constraint_each_iter=False (default), the EM iterations are
+        unconstrained — log-likelihood must remain non-decreasing even
+        when ``constraint`` is set.
+        """
+        xs, ys, _, _ = simulated
+        Z = np.hstack([xs, ys])
+        _, info = _em_run(
+            Z, K=2, q=1, s=1, init_seed=0,
+            constraint="b", delta_zero=False,
+            max_iter=20, tol=1e-8, verbose=False,
+            constraint_each_iter=False,
+        )
+        history = info["log_lik_history"]
+        for i in range(1, len(history)):
+            assert history[i] >= history[i - 1] - 1e-6, (
+                f"log L decreased at iter {i}: "
+                f"{history[i-1]:.4f} → {history[i]:.4f}"
+            )
+
+    def test_constraint_each_iter_b(self, simulated):
+        """
+        GEM mode: H5 must hold at the end, and the constraint is applied
+        during the loop (so log-lik may not be strictly monotone — only
+        check final feasibility).
+        """
+        from prg.utils.h5_constraint import compute_B_from_h5
+        xs, ys, _, _ = simulated
+        Z = np.hstack([xs, ys])
+        params, _ = _em_run(
+            Z, K=2, q=1, s=1, init_seed=0,
+            constraint="b", delta_zero=False,
+            max_iter=10, tol=1e-5, verbose=False,
+            constraint_each_iter=True,
+        )
+        for k in range(2):
+            B_check = compute_B_from_h5(
+                params["A_list"][k], params["C_list"][k],
+                params["D_list"][k], params["Sigma_U_list"][k],
+                params["Delta_list"][k], params["Sigma_V_list"][k],
+            )
+            np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
+
+    def test_post_hoc_vs_each_iter_differ(self, simulated):
+        """
+        The two modes generally produce different parameter estimates: in
+        post-hoc mode, EM converges to the unconstrained MLE (then gets
+        projected); in each-iter mode, the constraint shapes every M-step.
+        """
+        xs, ys, _, _ = simulated
+        Z = np.hstack([xs, ys])
+        p1, _ = _em_run(
+            Z, K=2, q=1, s=1, init_seed=0,
+            constraint="b", delta_zero=False,
+            max_iter=15, tol=1e-6, verbose=False,
+            constraint_each_iter=False,
+        )
+        p2, _ = _em_run(
+            Z, K=2, q=1, s=1, init_seed=0,
+            constraint="b", delta_zero=False,
+            max_iter=15, tol=1e-6, verbose=False,
+            constraint_each_iter=True,
+        )
+        # At least one regime's A-block should differ between the two paths
+        diffs = [
+            np.linalg.norm(p1["A_list"][k] - p2["A_list"][k])
+            for k in range(2)
+        ]
+        assert max(diffs) > 1e-6, (
+            "Post-hoc and each-iter modes produced identical estimates; "
+            "expected at least small numerical differences."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -387,10 +462,28 @@ class TestFitSemiSupervised:
         assert info["best_log_lik"] == info["all_log_liks"][0]
 
     def test_constraint_b_passes(self, simulated):
+        """Default (post-hoc) mode: H5 satisfied on the returned params."""
         xs, ys, _, _ = simulated
         params, info = fit_semi_supervised(
             xs, ys, K=2, constraint="b", n_inits=2,
             max_iter=15, seed=0,
+        )
+        from prg.utils.h5_constraint import compute_B_from_h5
+        for k in range(2):
+            B_check = compute_B_from_h5(
+                params["A_list"][k], params["C_list"][k],
+                params["D_list"][k], params["Sigma_U_list"][k],
+                params["Delta_list"][k], params["Sigma_V_list"][k],
+            )
+            np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
+
+    def test_constraint_each_iter_passes(self, simulated):
+        """GEM mode: H5 also satisfied (and applied at every iteration)."""
+        xs, ys, _, _ = simulated
+        params, info = fit_semi_supervised(
+            xs, ys, K=2, constraint="b",
+            constraint_each_iter=True,
+            n_inits=2, max_iter=15, seed=0,
         )
         from prg.utils.h5_constraint import compute_B_from_h5
         for k in range(2):
@@ -493,3 +586,34 @@ class TestCLI:
             self._run_main([
                 "/nonexistent/path.csv", "-K", "2",
             ])
+
+    def test_constraint_each_iter_flag(self, simulated, tmp_path):
+        """The --constraint-each-iter flag is accepted and produces a model."""
+        from prg.utils.h5_constraint import compute_B_from_h5
+        _, _, _, csv = simulated
+        out = tmp_path / "model_em_gem.py"
+        self._run_main([
+            str(csv), "-K", "2",
+            "--constraint", "b",
+            "--constraint-each-iter",
+            "--n-inits", "2", "--max-iter", "10", "--seed", "0",
+            "--output", str(out),
+        ])
+        assert out.exists()
+        sys.path.insert(0, str(tmp_path))
+        try:
+            mod = importlib.import_module("model_em_gem")
+            inst = mod.ModelEmGem()
+            p = inst.get_params()
+            for k in range(2):
+                B_check = compute_B_from_h5(
+                    p["A_list"][k], p["C_list"][k],
+                    p["D_list"][k], p["Sigma_U_list"][k],
+                    p["Delta_list"][k], p["Sigma_V_list"][k],
+                )
+                np.testing.assert_allclose(
+                    p["B_list"][k], B_check, atol=1e-8,
+                )
+        finally:
+            sys.path.pop(0)
+            sys.modules.pop("model_em_gem", None)

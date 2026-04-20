@@ -21,8 +21,14 @@ Parameters are estimated by **Expectation-Maximisation** (Baum-Welch):
 
   M-step   closed-form weighted updates of P, π₀, F(k), b(k), Σ_W(k)
            (weighted OLS with weights γ_{n+1}(k))
-           Optional H5 projection on A / B / Σ_U is applied at each M-step
-           (Generalized-EM — log-likelihood monotonicity not guaranteed).
+
+By default the optional H5 projection on A / B / Σ_U (and Δ=0) is applied
+**only once** on the converged parameters at the end of EM — log-likelihood
+remains monotonically non-decreasing during EM iterations.
+
+With ``--constraint-each-iter`` the projection is applied at *every*
+M-step (Generalized-EM): the constraint is satisfied throughout the
+optimisation but log-likelihood monotonicity is no longer guaranteed.
 
 Initialisation
 --------------
@@ -45,6 +51,8 @@ Options
     -K, --K                Number of regimes (required)
     --constraint {a,b,su}  H5 projection target (mutually exclusive)
     --delta-zero           Force Δ(k)=0 before the H5 step
+    --constraint-each-iter Apply the projection at every M-step (GEM mode);
+                           otherwise it is applied only once at the end of EM
     --n-inits              Number of random restarts (default 10)
     --max-iter             Maximum EM iterations per run (default 100)
     --tol                  Convergence tolerance on Δ log L (default 1e-5)
@@ -211,6 +219,59 @@ def _compute_xi(
 
 
 # ---------------------------------------------------------------------------
+# Constraint projection (delta_zero + H5) — shared by GEM and post-hoc paths
+# ---------------------------------------------------------------------------
+
+
+def _apply_constraints(
+    A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray,
+    SU: np.ndarray, Dt: np.ndarray, SV: np.ndarray,
+    q: int, s: int,
+    constraint: str | None,
+    delta_zero: bool,
+    where: str = "M-step",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+           np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Apply optional Δ=0 and H5 projection to one regime's blocks.
+
+    Used both inside the M-step (Generalized-EM) and as a one-shot
+    post-hoc projection on the final converged parameters.
+
+    Parameters
+    ----------
+    where : str — short tag inserted in warning messages ("M-step", "post-hoc").
+    """
+    if delta_zero:
+        Dt = np.zeros((q, s))
+    SU = _nearest_spd(SU)
+    SV = _nearest_spd(SV)
+
+    if constraint == "b":
+        from prg.utils.h5_constraint import compute_B_from_h5
+        try:
+            B = compute_B_from_h5(A, C, D, SU, Dt, SV)
+        except ValueError as exc:
+            _log.warning("H5 (B) failed in %s: %s — keeping unconstrained B.",
+                         where, exc)
+    elif constraint == "a":
+        from prg.utils.h5_constraint import compute_A_from_h5
+        try:
+            A = compute_A_from_h5(B, C, D, SU, Dt, SV)
+        except ValueError as exc:
+            _log.warning("H5 (A) failed in %s: %s — keeping unconstrained A.",
+                         where, exc)
+    elif constraint == "su":
+        from prg.utils.h5_constraint import compute_SU_from_h5
+        try:
+            SU = _nearest_spd(compute_SU_from_h5(A, B, C, D, Dt, SV))
+        except ValueError as exc:
+            _log.warning("H5 (Σ_U) failed in %s: %s — keeping unconstrained Σ_U.",
+                         where, exc)
+    return A, B, C, D, SU, Dt, SV
+
+
+# ---------------------------------------------------------------------------
 # Weighted M-step for one regime
 # ---------------------------------------------------------------------------
 
@@ -268,30 +329,9 @@ def _weighted_fit(
     Dt = SigW[:q, q:]
     SV = SigW[q:, q:]
 
-    if delta_zero:
-        Dt = np.zeros((q, s))
-
-    SU = _nearest_spd(SU)
-    SV = _nearest_spd(SV)
-
-    if constraint == "b":
-        from prg.utils.h5_constraint import compute_B_from_h5
-        try:
-            B = compute_B_from_h5(A, C, D, SU, Dt, SV)
-        except ValueError as exc:
-            _log.warning("H5 (B) failed in M-step: %s — keeping unconstrained B.", exc)
-    elif constraint == "a":
-        from prg.utils.h5_constraint import compute_A_from_h5
-        try:
-            A = compute_A_from_h5(B, C, D, SU, Dt, SV)
-        except ValueError as exc:
-            _log.warning("H5 (A) failed in M-step: %s — keeping unconstrained A.", exc)
-    elif constraint == "su":
-        from prg.utils.h5_constraint import compute_SU_from_h5
-        try:
-            SU = _nearest_spd(compute_SU_from_h5(A, B, C, D, Dt, SV))
-        except ValueError as exc:
-            _log.warning("H5 (Σ_U) failed in M-step: %s — keeping unconstrained Σ_U.", exc)
+    A, B, C, D, SU, Dt, SV = _apply_constraints(
+        A, B, C, D, SU, Dt, SV, q, s, constraint, delta_zero, where="M-step",
+    )
 
     return A, B, C, D, SU, Dt, SV, b
 
@@ -430,9 +470,18 @@ def _em_run(
     max_iter: int,
     tol: float,
     verbose: bool,
+    constraint_each_iter: bool = False,
 ) -> tuple[dict, dict]:
     """
     Single EM run from one k-means initialisation.
+
+    Parameters
+    ----------
+    constraint_each_iter : bool
+        If True, apply the constraint (Δ=0 and/or H5) at every M-step
+        (Generalized-EM, log-lik may not be monotone).
+        If False (default), run EM unconstrained and apply the constraint
+        once on the final converged parameters.
 
     Returns
     -------
@@ -499,12 +548,16 @@ def _em_run(
         pi0 = gamma[0] / gamma[0].sum()
 
         # F(k), b(k), Σ_W(k) — weighted per regime
+        # When constraint_each_iter is False, run unconstrained inside the
+        # EM loop; the constraint is applied once at the end.
+        ms_constraint = constraint if constraint_each_iter else None
+        ms_delta_zero = delta_zero if constraint_each_iter else False
         Z_curr = Z[:-1]
         Z_next = Z[1:]
         for k in range(K):
             w_k = gamma[1:, k]   # γ_{n+1}(k) for n=0..N-2
             A, B, C, D, SU, Dt, SV, b_k = _weighted_fit(
-                Z_curr, Z_next, w_k, q, s, constraint, delta_zero
+                Z_curr, Z_next, w_k, q, s, ms_constraint, ms_delta_zero
             )
             F_list[k]    = np.block([[A, B], [C, D]])
             SigW_list[k] = np.block([[SU, Dt], [Dt.T, SV]])
@@ -522,18 +575,35 @@ def _em_run(
                 Sigma_z0_list[k] = _nearest_spd(cov)
 
     # ----- Decompose final F / Σ_W into A,B,C,D / Σ_U,Δ,Σ_V -----
+    # When constraint_each_iter is False and (constraint or delta_zero) is
+    # set, apply the projection here, ONCE, on the converged parameters.
+    apply_post_hoc = (not constraint_each_iter) and (
+        constraint is not None or delta_zero
+    )
     A_list, B_list, C_list, D_list = [], [], [], []
     SU_list, Dt_list, SV_list      = [], [], []
     for k in range(K):
         F = F_list[k]
         S = SigW_list[k]
-        A_list.append(F[:q, :q])
-        B_list.append(F[:q, q:])
-        C_list.append(F[q:, :q])
-        D_list.append(F[q:, q:])
-        SU_list.append(S[:q, :q])
-        Dt_list.append(S[:q, q:])
-        SV_list.append(S[q:, q:])
+        A = F[:q, :q]
+        B = F[:q, q:]
+        C = F[q:, :q]
+        D = F[q:, q:]
+        SU = S[:q, :q]
+        Dt = S[:q, q:]
+        SV = S[q:, q:]
+        if apply_post_hoc:
+            A, B, C, D, SU, Dt, SV = _apply_constraints(
+                A, B, C, D, SU, Dt, SV, q, s,
+                constraint, delta_zero, where="post-hoc",
+            )
+        A_list.append(A)
+        B_list.append(B)
+        C_list.append(C)
+        D_list.append(D)
+        SU_list.append(SU)
+        Dt_list.append(Dt)
+        SV_list.append(SV)
 
     params = {
         "K": K, "q": q, "s": s,
@@ -597,6 +667,7 @@ def fit_semi_supervised(
     *,
     constraint: str | None = None,
     delta_zero: bool = False,
+    constraint_each_iter: bool = False,
     n_inits: int = 10,
     max_iter: int = 100,
     tol: float = 1e-5,
@@ -611,8 +682,13 @@ def fit_semi_supervised(
     xs, ys : ndarrays of shape (N, q) and (N, s)
     K      : int — number of regimes
     constraint : None | 'a' | 'b' | 'su'
-        Apply H5 projection at every M-step (Generalized-EM).
-    delta_zero : if True, force Δ(k)=0 before each H5 step.
+        H5 projection target.
+    delta_zero : if True, force Δ(k)=0 before the H5 step.
+    constraint_each_iter : bool, default False
+        If True, apply ``constraint`` and ``delta_zero`` at *every* M-step
+        (Generalized-EM — log-likelihood may not be monotone).
+        If False (default), EM runs unconstrained and the projection is
+        applied **once** on the converged parameters of the best run.
     n_inits  : number of independent EM runs from different k-means seeds.
     max_iter : maximum EM iterations per run.
     tol      : convergence threshold on |Δ log L|.
@@ -627,9 +703,12 @@ def fit_semi_supervised(
 
     Notes
     -----
-    The H5-constrained EM (`constraint != None`) is a *Generalized EM*: the
-    log-likelihood is *not* guaranteed to be monotonically non-decreasing.
-    Convergence is monitored on |Δ log L| (absolute value) instead.
+    With ``constraint_each_iter=True`` the procedure becomes a *Generalized
+    EM*: the log-likelihood is *not* guaranteed to be monotonically
+    non-decreasing.  Convergence is monitored on |Δ log L| (absolute value).
+    With the default ``constraint_each_iter=False``, the EM iterations are
+    standard (monotone log-likelihood) and the constraint is enforced as a
+    post-hoc projection — matching the supervised estimator's behaviour.
     """
     q = xs.shape[1]
     s = ys.shape[1]
@@ -651,6 +730,7 @@ def fit_semi_supervised(
             params, info = _em_run(
                 Z, K, q, s, s_init,
                 constraint, delta_zero, max_iter, tol, verbose,
+                constraint_each_iter=constraint_each_iter,
             )
         except (np.linalg.LinAlgError, ValueError) as exc:
             _log.warning("EM run %d failed (%s) — skipping.", run + 1, exc)
@@ -705,10 +785,15 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Number of regimes.")
     p.add_argument("--constraint", choices=["a", "b", "su"], default=None,
                    metavar="TARGET",
-                   help="Apply H5 projection at every M-step "
-                        "(GEM — log-likelihood may not be monotone).")
+                   help="H5 projection target.  By default applied once at "
+                        "the end of EM; with --constraint-each-iter applied "
+                        "at every M-step (GEM, log-lik may not be monotone).")
     p.add_argument("--delta-zero", action="store_true",
                    help="Force Δ(k)=0 before the H5 step.")
+    p.add_argument("--constraint-each-iter", action="store_true",
+                   dest="constraint_each_iter",
+                   help="Apply --constraint / --delta-zero at every M-step "
+                        "(Generalized-EM).  Default: apply once at the end.")
     p.add_argument("--n-inits", type=int, default=10, metavar="N",
                    help="Number of EM restarts.")
     p.add_argument("--max-iter", type=int, default=100, metavar="N",
@@ -758,6 +843,7 @@ def main() -> None:
             xs, ys, K,
             constraint=args.constraint,
             delta_zero=args.delta_zero,
+            constraint_each_iter=args.constraint_each_iter,
             n_inits=args.n_inits,
             max_iter=args.max_iter,
             tol=args.tol,

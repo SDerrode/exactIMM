@@ -22,31 +22,36 @@ class PlotPanel(QWidget):
 
     Layout (top → bottom):
       [0]                R_n   step plot (simulation only)
-      [1]                π_n(k) filtered regime posterior (shown after Filter)
-      [2 … 1+q]          X^i   hidden components
-      [2+q … 1+q+s]      Y^i   observed components
-      [2+q+s … 1+q+2s]   ν^i   filter innovations (shorter axes, after Filter)
+      [1 … q]            X^i   hidden components
+      [1+q … q+s]        Y^i   observed components
+      [1+q+s … q+2s]     ν^i   filter innovations (shorter axes, after Filter)
+
+    NOTE: the π_n(k) (filtered regime posterior) subplot has been
+    commented out — see ``_pi_offset = None`` below. The ``add_pi_overlay``
+    / ``clear_pi_overlay`` API is kept as a no-op so the main window code
+    that calls it does not need to change.
     """
 
     def __init__(self, q: int, s: int, parent=None):
         super().__init__(parent)
         self._q = q
         self._s = s
-        # Subplot index offsets for readable indexing
+        # Subplot index offsets for readable indexing.
+        # π_n(k) axis is hidden; _pi_offset is kept as None as a marker.
         self._r_offset     = 0
-        self._pi_offset    = 1
-        self._x_offset     = 2
-        self._y_offset     = 2 + q
-        self._innov_offset = 2 + q + s
+        self._pi_offset    = None      # was: 1  (π_n(k) plot — hidden)
+        self._x_offset     = 1         # was: 2
+        self._y_offset     = 1 + q     # was: 2 + q
+        self._innov_offset = 1 + q + s # was: 2 + q + s
         self._n_axes       = self._innov_offset + s
 
-        # π_n(k) and ν^i axes are 55 % the height of the regular axes
+        # ν^i axes are 55 % the height of the regular axes
         height_ratios = (
-            [1.0, 0.55]            # R_n, π_n(k)
+            [1.0]                  # R_n      (π_n(k) row removed)
             + [1.0] * (q + s)      # X^i, Y^i
             + [0.55] * s           # innovations
         )
-        fig_h = 2.2 * (1 + q + s) + 1.3 * (1 + s)
+        fig_h = 2.2 * (1 + q + s) + 1.3 * s
         self._fig = Figure(figsize=(7, fig_h), tight_layout=True)
         self._canvas = FigureCanvasQTAgg(self._fig)
         self._toolbar = NavigationToolbar2QT(self._canvas, self)
@@ -91,12 +96,12 @@ class PlotPanel(QWidget):
         ax_r.grid(True, linestyle=":", alpha=0.5)
         ax_r.set_title("GSS Simulation", fontsize=10)
 
-        # --- π_n(k) placeholder (empty until Filter runs) ---
-        ax_pi = self._axes[self._pi_offset]
-        ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
-        ax_pi.set_yticks([])
-        ax_pi.grid(True, linestyle=":", alpha=0.4)
-        ax_pi.tick_params(labelsize=7)
+        # --- π_n(k) placeholder (HIDDEN — see _pi_offset = None) ---
+        # ax_pi = self._axes[self._pi_offset]
+        # ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
+        # ax_pi.set_yticks([])
+        # ax_pi.grid(True, linestyle=":", alpha=0.4)
+        # ax_pi.tick_params(labelsize=7)
 
         # --- X^i components ---
         colours_x = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
@@ -181,44 +186,46 @@ class PlotPanel(QWidget):
         pis: np.ndarray,   # shape (N, K)
         K: int,
     ) -> None:
-        """Populate the dedicated π_n(k) subplot with one line per regime.
+        """No-op stub — π_n(k) subplot has been hidden.
 
-        R_n stays a clean step plot — π_n(k) has its own axis (range 0–1)
-        stacked directly below R_n, sharing the x-axis.
+        Kept so callers in main_window.py do not need to be changed.
+        Original implementation preserved below for future re-enablement.
         """
-        self.clear_pi_overlay()
-        ns_arr = np.asarray(ns)
-        ax_pi  = self._axes[self._pi_offset]
-        ax_pi.cla()
-
-        colours_pi = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-                      "#8c564b", "#e377c2"]
-        self._pi_artists: list = []
-        for k in range(K):
-            line, = ax_pi.plot(
-                ns_arr, pis[:, k],
-                color=colours_pi[k % len(colours_pi)],
-                linewidth=1.0, linestyle="-", alpha=0.9,
-                label=rf"$\pi_n({k})$",
-            )
-            self._pi_artists.append(line)
-        ax_pi.set_ylim(-0.05, 1.05)
-        ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
-        ax_pi.tick_params(labelsize=7)
-        ax_pi.grid(True, linestyle=":", alpha=0.4)
-        ax_pi.legend(fontsize=7, loc="center right", ncol=min(K, 4))
-        self._canvas.draw_idle()
+        self._pi_artists = []
+        # --- ORIGINAL IMPLEMENTATION (HIDDEN) ---
+        # self.clear_pi_overlay()
+        # ns_arr = np.asarray(ns)
+        # ax_pi  = self._axes[self._pi_offset]
+        # ax_pi.cla()
+        # colours_pi = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+        #               "#8c564b", "#e377c2"]
+        # self._pi_artists: list = []
+        # for k in range(K):
+        #     line, = ax_pi.plot(
+        #         ns_arr, pis[:, k],
+        #         color=colours_pi[k % len(colours_pi)],
+        #         linewidth=1.0, linestyle="-", alpha=0.9,
+        #         label=rf"$\pi_n({k})$",
+        #     )
+        #     self._pi_artists.append(line)
+        # ax_pi.set_ylim(-0.05, 1.05)
+        # ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
+        # ax_pi.tick_params(labelsize=7)
+        # ax_pi.grid(True, linestyle=":", alpha=0.4)
+        # ax_pi.legend(fontsize=7, loc="center right", ncol=min(K, 4))
+        # self._canvas.draw_idle()
 
     def clear_pi_overlay(self) -> None:
-        """Clear the π_n(k) subplot back to its empty placeholder."""
-        ax_pi = self._axes[self._pi_offset]
-        ax_pi.cla()
-        ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
-        ax_pi.set_yticks([])
-        ax_pi.grid(True, linestyle=":", alpha=0.4)
-        ax_pi.tick_params(labelsize=7)
+        """No-op stub — π_n(k) subplot has been hidden."""
         self._pi_artists = []
-        self._canvas.draw_idle()
+        # --- ORIGINAL IMPLEMENTATION (HIDDEN) ---
+        # ax_pi = self._axes[self._pi_offset]
+        # ax_pi.cla()
+        # ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
+        # ax_pi.set_yticks([])
+        # ax_pi.grid(True, linestyle=":", alpha=0.4)
+        # ax_pi.tick_params(labelsize=7)
+        # self._canvas.draw_idle()
 
     def update_innovations(
         self,
@@ -306,12 +313,12 @@ class PlotPanel(QWidget):
         ax_r.grid(True, linestyle=":", alpha=0.5)
         ax_r.set_title(f"GSS Monte Carlo  (M = {M})", fontsize=10)
 
-        # --- π_n(k) axis stays empty in MC mode ---
-        ax_pi = self._axes[self._pi_offset]
-        ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
-        ax_pi.set_yticks([])
-        ax_pi.grid(True, linestyle=":", alpha=0.4)
-        ax_pi.tick_params(labelsize=7)
+        # --- π_n(k) axis HIDDEN — see _pi_offset = None ---
+        # ax_pi = self._axes[self._pi_offset]
+        # ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
+        # ax_pi.set_yticks([])
+        # ax_pi.grid(True, linestyle=":", alpha=0.4)
+        # ax_pi.tick_params(labelsize=7)
 
         # --- X^i components: mean ± 2σ + median ---
         colours_x = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
@@ -442,11 +449,12 @@ class PlotPanel(QWidget):
         ax_r.grid(True, linestyle=":", alpha=0.4)
         ax_r.set_title("GSS Simulation", fontsize=10)
 
-        ax_pi = self._axes[self._pi_offset]
-        ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
-        ax_pi.set_yticks([])
-        ax_pi.grid(True, linestyle=":", alpha=0.4)
-        ax_pi.tick_params(labelsize=7)
+        # π_n(k) axis HIDDEN — see _pi_offset = None
+        # ax_pi = self._axes[self._pi_offset]
+        # ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
+        # ax_pi.set_yticks([])
+        # ax_pi.grid(True, linestyle=":", alpha=0.4)
+        # ax_pi.tick_params(labelsize=7)
 
         for i in range(self._q):
             ax = self._axes[self._x_offset + i]

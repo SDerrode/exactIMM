@@ -514,11 +514,13 @@ class PredYPanel(QWidget):
         self._s = s
 
         # Moments pré-calculés (fournis par le filtre après son exécution)
-        self._mu_Y_jk: list | None = None   # [K][K] ndarray (s,1)
-        self._M_t:     list | None = None   # [K][K] ndarray (s,s)
-        self._Gamma:   list | None = None   # [K][K] ndarray (s,s)
-        self._mu_Y:    list | None = None   # [K]    ndarray (s,1)
-        self._ys:      np.ndarray | None = None  # (N, s)
+        self._mu_Y_jk:  list | None = None   # [K][K] ndarray (s,1)
+        self._M_t:      list | None = None   # [K][K] ndarray (s,s)
+        self._Gamma:    list | None = None   # [K][K] ndarray (s,s)
+        self._mu_Y:     list | None = None   # [K]    ndarray (s,1)
+        self._M_simple: list | None = None   # [K][K] ndarray (s,s) — coeff signal 2
+        self._Gamma2:   list | None = None   # [K][K] ndarray (s,s) — cov. signal 2
+        self._ys:       np.ndarray | None = None  # (N, s)
 
         self._build_ui()
         self._draw_traj_empty()
@@ -641,18 +643,22 @@ class PredYPanel(QWidget):
 
     def set_data(
         self,
-        mu_Y_jk: list,
-        M_t:     list,
-        Gamma:   list,
-        mu_Y:    list,
-        ys:      np.ndarray,   # (N, s)
+        mu_Y_jk:  list,
+        M_t:      list,
+        Gamma:    list,
+        mu_Y:     list,
+        ys:       np.ndarray,   # (N, s)
+        M_simple: list | None = None,   # [K][K] ndarray (s,s) — coeff signal 2
+        Gamma2:   list | None = None,   # [K][K] ndarray (s,s) — cov. signal 2
     ) -> None:
         """Charge les moments du filtre et la trajectoire observée."""
-        self._mu_Y_jk = mu_Y_jk
-        self._M_t     = M_t
-        self._Gamma   = Gamma
-        self._mu_Y    = mu_Y
-        self._ys      = ys
+        self._mu_Y_jk  = mu_Y_jk
+        self._M_t      = M_t
+        self._Gamma    = Gamma
+        self._mu_Y     = mu_Y
+        self._M_simple = M_simple
+        self._Gamma2   = Gamma2
+        self._ys       = ys
         N = len(ys)
         # n ∈ {0…N-2} : y_n→ y_{n+1}
         self._n_spin.setRange(0, max(0, N - 2))
@@ -661,11 +667,13 @@ class PredYPanel(QWidget):
 
     def clear(self) -> None:
         """Remet le panneau à son état initial (pas de données)."""
-        self._mu_Y_jk = None
-        self._M_t     = None
-        self._Gamma   = None
-        self._mu_Y    = None
-        self._ys      = None
+        self._mu_Y_jk  = None
+        self._M_t      = None
+        self._Gamma    = None
+        self._mu_Y     = None
+        self._M_simple = None
+        self._Gamma2   = None
+        self._ys       = None
         self._draw_traj_empty()
         self._draw_density_empty()
 
@@ -678,9 +686,8 @@ class PredYPanel(QWidget):
         self._refresh_density()
 
     def _on_n_changed(self) -> None:
-        """Mis à jour de la densité + ligne verticale dans la trajectoire."""
+        """Mise à jour de la densité lorsque n change."""
         self._refresh_density()
-        self._update_traj_vline()
 
     def _on_src_toggled(self, _: bool) -> None:
         traj = self._src_traj.isChecked()
@@ -700,8 +707,22 @@ class PredYPanel(QWidget):
     # Sous-onglet 0 : Trajectoire
     # ------------------------------------------------------------------
 
+    _COL_SIG1 = "#1f77b4"   # bleu — signal 1  (H5 exact)
+    _COL_SIG2 = "#ff7f0e"   # orange — signal 2 (approx. sans H5)
+
     def _refresh_traj(self) -> None:
-        """Trace E[y_{n+1}|j,k,y_n] ± enveloppe sur toute la trajectoire."""
+        """Trace les deux signaux conditionnels sur toute la trajectoire.
+
+        Signal 1 — exact sous (H5) :
+            μ₁(n) = μ_Y_jk[j][k] + M_t[j][k] @ (y_n − μ_Y[j])
+            Cov₁  = Γ(j,k)  (constante)
+
+        Signal 2 — approximation sans (H5) :
+            μ₂(n) = M_simple[j][k] @ y_n
+            Cov₂  = Γ₂(j,k)  (constante)
+
+        Seule l'enveloppe ±2σ est tracée (pas de ±1σ). Pas de ligne verticale.
+        """
         if self._mu_Y_jk is None or self._ys is None:
             return
 
@@ -712,70 +733,68 @@ class PredYPanel(QWidget):
         N  = len(ys)
         ns = np.arange(N - 1)  # indices n = 0 … N-2
 
-        # Calcul vectorisé des moyennes conditionnelles
-        # diffs[n] = y_n - mu_Y[j]  → (N-1, s)
-        diffs = ys[:-1] - self._mu_Y[j].ravel()              # (N-1, s)
-        # means[n, i] = mu_Y_jk[j][k][i] + (M_t[j][k] @ diffs[n])[i]
-        means = self._mu_Y_jk[j][k].ravel() + (self._M_t[j][k] @ diffs.T).T  # (N-1, s)
-        # Écarts-types : diagonale de Γ(j,k), constants
-        sigmas = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))        # (s,)
+        # ── Signal 1 ────────────────────────────────────────────────────
+        diffs  = ys[:-1] - self._mu_Y[j].ravel()              # (N-1, s)
+        means1 = self._mu_Y_jk[j][k].ravel() + (self._M_t[j][k] @ diffs.T).T  # (N-1, s)
+        sigs1  = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))         # (s,)
+
+        # ── Signal 2 (si disponible) ────────────────────────────────────
+        has_sig2 = self._M_simple is not None and self._Gamma2 is not None
+        if has_sig2:
+            means2 = (self._M_simple[j][k] @ ys[:-1].T).T   # (N-1, s)
+            sigs2  = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))   # (s,)
+
         # y_{n+1} observé
         y_obs = ys[1:]   # (N-1, s)
 
         self._fig_traj.clf()
-        axes = self._fig_traj.subplots(s, 1, sharex=True) if s > 1 else [self._fig_traj.add_subplot(1, 1, 1)]
+        axes = (self._fig_traj.subplots(s, 1, sharex=True)
+                if s > 1 else [self._fig_traj.add_subplot(1, 1, 1)])
+
+        c1 = self._COL_SIG1
+        c2 = self._COL_SIG2
 
         for i in range(s):
-            ax  = axes[i]
-            c   = self._COLOURS[i % len(self._COLOURS)]
-            mu_i  = means[:, i]
-            sig_i = sigmas[i]
+            ax = axes[i]
 
-            # Enveloppe ±2σ (plus transparente)
-            ax.fill_between(ns, mu_i - 2 * sig_i, mu_i + 2 * sig_i,
-                            color=c, alpha=0.15, label=r"$\pm 2\sigma$")
-            # Enveloppe ±1σ
-            ax.fill_between(ns, mu_i - sig_i, mu_i + sig_i,
-                            color=c, alpha=0.30, label=r"$\pm 1\sigma$")
-            # Trajectoire de la moyenne
-            ax.plot(ns, mu_i, color=c, linewidth=1.5,
-                    label=rf"$\mathbb{{E}}[y^{i}_{{n+1}} \mid j={j},k={k}]$")
-            # y_{n+1} observé
+            # ── Signal 1 ────────────────────────────────────────────────
+            mu1_i  = means1[:, i]
+            sig1_i = sigs1[i]
+            ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i,
+                            color=c1, alpha=0.15, label=r"$\pm 2\sigma_1$")
+            ax.plot(ns, mu1_i, color=c1, linewidth=1.5,
+                    label=rf"$\mu_1$  (H5 exact, $j={j},k={k}$)")
+
+            # ── Signal 2 ────────────────────────────────────────────────
+            if has_sig2:
+                mu2_i  = means2[:, i]
+                sig2_i = sigs2[i]
+                ax.fill_between(ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i,
+                                color=c2, alpha=0.15, label=r"$\pm 2\sigma_2$")
+                ax.plot(ns, mu2_i, color=c2, linewidth=1.5,
+                        label=rf"$\mu_2$  (approx., $j={j},k={k}$)")
+
+            # ── y_{n+1} observé ─────────────────────────────────────────
             ax.plot(ns, y_obs[:, i], color="#333333", linewidth=0.8,
                     alpha=0.6, linestyle="-",
                     label=rf"$y^{i}_{{n+1}}$ observé")
 
-            # Ligne verticale pour n sélectionné dans l'onglet Densité
-            n_sel = self._n_spin.value()
-            ax.axvline(n_sel, color="#d62728", linewidth=1.0,
-                       linestyle="--", alpha=0.7, label=f"n = {n_sel}")
-
-            sig_txt = rf"$\sigma={sig_i:.3g}$ (cste)"
+            # Annotation des écarts-types (constants)
+            sig_txt = rf"$\sigma_1={sig1_i:.3g}$"
+            if has_sig2:
+                sig_txt += rf",  $\sigma_2={sigs2[i]:.3g}$"
+            sig_txt += "  (cstes)"
             ax.set_ylabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.set_title(sig_txt, fontsize=9, loc="right")
-            ax.legend(fontsize=8, loc="upper right",
-                      ncol=min(4, 2 + s))
+            ax.legend(fontsize=8, loc="upper right", ncol=min(4, 2 + s + int(has_sig2)))
             ax.grid(True, linestyle=":", alpha=0.4)
 
         axes[-1].set_xlabel(r"$n$", fontsize=10)
         self._fig_traj.suptitle(
-            rf"$\mathbb{{E}}[y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n]$"
-            r" $\pm\,1\sigma,\,2\sigma$   —   "
-            rf"$\Gamma({j},{k})$ constant",
+            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)$"
+            r"  —  enveloppes $\pm 2\sigma$",
             fontsize=10,
         )
-        self._canvas_traj.draw_idle()
-        # Stocker les axes pour la mise à jour légère de la vline
-        self._traj_axes   = axes
-        self._traj_vlines = [ax.get_lines()[-1] for ax in axes]
-
-    def _update_traj_vline(self) -> None:
-        """Déplace uniquement la ligne verticale n sans redessiner toute la figure."""
-        if not hasattr(self, "_traj_vlines") or self._mu_Y_jk is None:
-            return
-        n_sel = self._n_spin.value()
-        for vl in self._traj_vlines:
-            vl.set_xdata([n_sel, n_sel])
         self._canvas_traj.draw_idle()
 
     def _draw_traj_empty(self) -> None:

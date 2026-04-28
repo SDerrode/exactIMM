@@ -439,11 +439,35 @@ class _FilterWorker(QThread):
             # _precompute()). En mode "imm_general" on ne les définit pas : le slot
             # _on_filter_finished teste hasattr() et laisse l'onglet grisé.
             if hasattr(filt, "_mu_Y_jk"):
+                # ── Signal 2 : moments directs depuis les matrices du modèle ──
+                # μ₂(j,k) = (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n
+                # Γ₂(j,k) = Σ_{V,k} + C_k (Σ_{U,j} − Δ_j Σ_{V,j}^{-1} Δ_j^T) C_k^T
+                p   = self._params
+                K, q = p.K, p.q
+                nc  = p.noise_cov
+                M_simple  = [[None] * K for _ in range(K)]
+                Gamma2    = [[None] * K for _ in range(K)]
+                for j in range(K):
+                    SV_j     = nc.Sigma_V(j)                        # (s,s)
+                    SV_j_inv = np.linalg.inv(SV_j)
+                    D_j      = nc.Delta(j)                          # (q,s)
+                    SU_j     = nc.Sigma_U(j)                        # (q,q)
+                    Schur_j  = SU_j - D_j @ SV_j_inv @ D_j.T       # (q,q)
+                    for k in range(K):
+                        F_k = p.f_matrix.F(k)
+                        C_k = F_k[q:, :q]                           # (s,q)
+                        D_k = F_k[q:, q:]                           # (s,s)
+                        SV_k = nc.Sigma_V(k)                        # (s,s)
+                        M_simple[j][k] = D_k + C_k @ D_j @ SV_j_inv   # (s,s)
+                        Gamma2[j][k]   = SV_k + C_k @ Schur_j @ C_k.T # (s,s)
+
                 self.cond_moments: dict = {
                     "mu_Y_jk": filt._mu_Y_jk,
                     "M_t":     filt._M_t,
                     "Gamma":   filt._Gamma,
                     "mu_Y":    filt._mu_Y,
+                    "M_simple": M_simple,   # (s,s) matrice coeff. pour μ₂
+                    "Gamma2":   Gamma2,     # (s,s) covariance constante du signal 2
                 }
 
             self.finished.emit(
@@ -1389,7 +1413,9 @@ class GSSMainWindow(QMainWindow):
             cm = self._filter_worker.cond_moments
             _, _, _, ys, _ = self._state.data
             self._pred_y_panel.set_data(
-                cm["mu_Y_jk"], cm["M_t"], cm["Gamma"], cm["mu_Y"], ys
+                cm["mu_Y_jk"], cm["M_t"], cm["Gamma"], cm["mu_Y"], ys,
+                M_simple=cm.get("M_simple"),
+                Gamma2=cm.get("Gamma2"),
             )
             self._right_tabs.setTabEnabled(1, True)
 

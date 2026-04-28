@@ -630,13 +630,21 @@ class _MCWorker(QThread):
 # ---------------------------------------------------------------------------
 
 class _WaitDialog(QDialog):
-    """Modal wait dialog with progress bar.
+    """Modal wait dialog with progress bar and optional Cancel button.
 
     Defaults to indeterminate (busy) mode; `set_progress(m, M)` switches to
     a determinate percentage bar and updates it.
+
+    Parameters
+    ----------
+    message : str
+        Title and label text shown in the dialog.
+    on_cancel : callable | None
+        If provided, a Cancel button is shown. Clicking it calls *on_cancel()*
+        then closes the dialog.  Typically ``GSSMainWindow._on_reset``.
     """
 
-    def __init__(self, message: str = "Please wait…", parent=None):
+    def __init__(self, message: str = "Please wait…", on_cancel=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(message)
         self.setModal(True)
@@ -660,7 +668,20 @@ class _WaitDialog(QDialog):
         self._prog_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._prog_lbl.setStyleSheet("font-size: 10px; color: #555555;")
         layout.addWidget(self._prog_lbl)
-        self.setFixedSize(340, 130)
+
+        # D7: optional Cancel button
+        if on_cancel is not None:
+            btn_cancel = QPushButton("Cancel")
+            btn_cancel.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn_cancel.setStyleSheet(
+                "padding: 4px 16px; font-size: 11px;"
+            )
+            btn_cancel.clicked.connect(on_cancel)
+            btn_cancel.clicked.connect(self.reject)
+            layout.addWidget(btn_cancel, alignment=Qt.AlignmentFlag.AlignCenter)
+            self.setFixedSize(340, 165)
+        else:
+            self.setFixedSize(340, 130)
 
         self._t0 = time.perf_counter()
 
@@ -713,6 +734,7 @@ class GSSMainWindow(QMainWindow):
         self._filter_worker: _FilterWorker | None = None
         self._mc_worker: _MCWorker | None = None
         self._wait_dlg: _WaitDialog | None = None
+        self._op_t0: float = time.perf_counter()   # C4: initialised in constructor
 
         self.setWindowTitle(
             f"FofGss — GSS Simulator  (K={K}, q={q}, s={s})"
@@ -798,7 +820,8 @@ class GSSMainWindow(QMainWindow):
         self._seed_edit = QLineEdit()
         self._seed_edit.setPlaceholderText("empty = random")
         self._seed_edit.setMaximumWidth(120)
-        self._seed_edit.textChanged.connect(self._on_sim_params_changed)
+        self._seed_edit.textChanged.connect(self._on_seed_text_changed)   # A2: validate
+        self._seed_edit.editingFinished.connect(self._on_sim_params_changed)  # A1: not per-keystroke
         seed_row.addWidget(self._seed_edit)
         left_layout.addLayout(seed_row)
 
@@ -1056,8 +1079,8 @@ class GSSMainWindow(QMainWindow):
         self._right_tabs.setTabEnabled(1, False)
         self._right_tabs.setTabToolTip(
             1,
-            "Distribution conditionnelle gaussienne exacte p(y_{n+1} | r_n=j, r_{n+1}=k, y_n).\n"
-            "Disponible après filtrage.",
+            "Exact conditional Gaussian density p(y_{n+1} | r_n=j, r_{n+1}=k, y_n).\n"
+            "Available after filtering in 'Exact IMM – H5 required' mode.",
         )
 
         splitter.addWidget(self._right_tabs)
@@ -1117,6 +1140,20 @@ class GSSMainWindow(QMainWindow):
         if not self._state.has_data():
             return
         self._on_reset()
+
+    def _on_seed_text_changed(self, text: str) -> None:
+        """Show red border when seed text cannot be parsed as an integer (A2)."""
+        stripped = text.strip()
+        if not stripped:
+            self._seed_edit.setStyleSheet("")       # empty → random, neutral
+        else:
+            try:
+                int(stripped)
+                self._seed_edit.setStyleSheet("")   # valid integer
+            except ValueError:
+                self._seed_edit.setStyleSheet(
+                    "border: 1px solid #cc0000; background-color: #fff0f0;"
+                )
 
     def _on_reset(self) -> None:
         """Clear all simulation / filter results and reset the interface."""
@@ -1208,7 +1245,8 @@ class GSSMainWindow(QMainWindow):
         self._op_t0 = time.perf_counter()
         self.statusBar().showMessage(f"Simulating  N = {N}…")
 
-        self._wait_dlg = _WaitDialog(f"Simulating  N = {N}…", parent=self)
+        self._wait_dlg = _WaitDialog(
+            f"Simulating  N = {N}…", on_cancel=self._on_reset, parent=self)
         self._wait_dlg.show()
 
         self._worker = _SimWorker(params, N, seed, parent=self)
@@ -1239,7 +1277,8 @@ class GSSMainWindow(QMainWindow):
         self._op_t0 = time.perf_counter()
         self.statusBar().showMessage(f"Monte Carlo  M = {M}, N = {N}…")
 
-        self._wait_dlg = _WaitDialog(f"Monte Carlo  (M = {M})…", parent=self)
+        self._wait_dlg = _WaitDialog(
+            f"Monte Carlo  (M = {M})…", on_cancel=self._on_reset, parent=self)
         self._wait_dlg.show()
 
         self._mc_worker = _MCWorker(params, N, M, seed, parent=self)
@@ -1374,7 +1413,8 @@ class GSSMainWindow(QMainWindow):
             msg += "  ⚠ using parameters captured at last Simulate (GUI values differ)"
         self.statusBar().showMessage(msg)
 
-        self._wait_dlg = _WaitDialog("Filtering…", parent=self)
+        self._wait_dlg = _WaitDialog(
+            "Filtering…", on_cancel=self._on_reset, parent=self)
         self._wait_dlg.show()
 
         self._filter_worker = _FilterWorker(

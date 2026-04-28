@@ -436,73 +436,6 @@ class _InnovHistDialog(QDialog):
             QMessageBox.critical(self, "Export error", str(exc))
 
 
-class _MCHistDialog(QDialog):
-    """Non-modal dialog: marginal X distributions at a chosen time step."""
-
-    def __init__(self, xs_all: np.ndarray, parent=None):
-        # xs_all shape: (M, N, q)
-        super().__init__(parent)
-        self.setWindowTitle("Monte Carlo — X distributions")
-        self.setModal(False)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-
-        from matplotlib.backends.backend_qtagg import (
-            FigureCanvasQTAgg, NavigationToolbar2QT,
-        )
-        from matplotlib.figure import Figure
-        from scipy.stats import norm as _norm
-
-        self._xs_all = xs_all
-        self._norm   = _norm
-        M, N, q = xs_all.shape
-
-        layout = QVBoxLayout(self)
-
-        ctrl = QHBoxLayout()
-        ctrl.addWidget(QLabel("Time step  n ="))
-        self._n_spin = QSpinBox()
-        self._n_spin.setRange(0, N - 1)
-        self._n_spin.setValue(N - 1)
-        self._n_spin.setToolTip(f"Choose time step (0 … {N - 1})")
-        ctrl.addWidget(self._n_spin)
-        ctrl.addStretch()
-        layout.addLayout(ctrl)
-
-        self._fig    = Figure(figsize=(max(4, 3.5 * q), 3.8), tight_layout=True)
-        self._canvas = FigureCanvasQTAgg(self._fig)
-        toolbar      = NavigationToolbar2QT(self._canvas, self)
-
-        layout.addWidget(toolbar)
-        layout.addWidget(self._canvas)
-        self.resize(max(420, 340 * q), 460)
-
-        self._n_spin.valueChanged.connect(self._update)
-        self._update(N - 1)
-
-    def _update(self, n: int) -> None:
-        self._fig.clf()
-        M, N, q   = self._xs_all.shape
-        colours_x = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
-        from scipy.stats import norm as _norm
-        for i in range(q):
-            ax = self._fig.add_subplot(1, q, i + 1)
-            x  = self._xs_all[:, n, i]
-            ax.hist(x, bins=min(50, max(10, M // 10)), density=True,
-                    color=colours_x[i % len(colours_x)], alpha=0.70)
-            mu, sigma = float(x.mean()), float(x.std())
-            if sigma > 1e-10:
-                xg = np.linspace(x.min(), x.max(), 300)
-                ax.plot(xg, _norm.pdf(xg, mu, sigma),
-                        "k--", linewidth=1.5,
-                        label=f"N({mu:.2f}, {sigma:.2f}²)")
-                ax.legend(fontsize=8)
-            ax.set_title(rf"$X^{i}$  at  $n = {n}$   (M = {M})", fontsize=10)
-            ax.set_xlabel("value", fontsize=9)
-            ax.set_ylabel("density", fontsize=9)
-            ax.grid(True, linestyle=":", alpha=0.4)
-        self._canvas.draw_idle()
-
-
 # ---------------------------------------------------------------------------
 
 from prg.classes.FMatrix import FMatrix
@@ -528,11 +461,10 @@ from prg.gui.plot_panel import PlotPanel, PredYPanel
 class _SessionState:
     """Holds everything the UI may need to display about the current session.
 
-    Three independent slots:
+    Two independent slots:
 
-    * data       — produced by Simulate (single) or Load CSV
+    * data        — produced by Simulate (single) or Load CSV
     * innovations — produced by Filter, only meaningful with `data` AND `params`
-    * mc_xs_all  — produced by Monte-Carlo, independent of the above
 
     `params` and `params_signature` are captured at the moment Simulate /
     Load runs, NOT live from the widgets. The Filter step uses them as-is
@@ -544,7 +476,6 @@ class _SessionState:
     params: object | None = None           # GSSParams (avoids circular import)
     params_signature: tuple | None = None  # bytes signature of GUI at capture
     innovations: np.ndarray | None = None  # (N, s)
-    mc_xs_all: np.ndarray | None = None    # (M, N, q)
 
     # ----- Predicates --------------------------------------------------
 
@@ -553,9 +484,6 @@ class _SessionState:
 
     def has_filter(self) -> bool:
         return self.innovations is not None
-
-    def has_mc(self) -> bool:
-        return self.mc_xs_all is not None
 
     def can_filter(self) -> bool:
         return self.has_data() and self.params is not None
@@ -568,30 +496,18 @@ class _SessionState:
         self.params = None
         self.params_signature = None
         self.innovations = None
-        self.mc_xs_all = None
 
     def begin_simulation(self, params: object, signature: tuple | None) -> None:
         """About to launch a new Simulate: capture params, drop stale results."""
         self.params = params
         self.params_signature = signature
         self.innovations = None      # filter result no longer matches
-        # mc_xs_all stays — single Simulate doesn't invalidate previous MC
-
-    def begin_mc(self, params: object, signature: tuple | None) -> None:
-        """About to launch a new Monte Carlo run: capture params, drop results."""
-        self.params = params
-        self.params_signature = signature
-        self.innovations = None
-        self.mc_xs_all = None
 
     def store_data(self, ns, rs, xs, ys, seed) -> None:
         self.data = (ns, rs, xs, ys, seed)
 
     def store_innovations(self, innov: np.ndarray) -> None:
         self.innovations = innov
-
-    def store_mc(self, xs_all: np.ndarray) -> None:
-        self.mc_xs_all = xs_all
 
     def load_external(self, ns, rs, xs, ys, params: object,
                       signature: tuple | None) -> None:
@@ -600,7 +516,6 @@ class _SessionState:
         self.params = params
         self.params_signature = signature
         self.innovations = None
-        # mc_xs_all unaffected
 
 
 # ---------------------------------------------------------------------------
@@ -739,82 +654,6 @@ class _FilterWorker(QThread):
             self.error.emit(str(exc))
 
 
-class _MCWorker(QThread):
-    """Run M independent GSSSimulator trajectories and compute statistics."""
-
-    # mean_xs (N,q), std_xs (N,q), median_xs (N,q),
-    # mean_ys (N,s), std_ys (N,s), median_ys (N,s),
-    # regime_freqs (N,K), ns list[int]
-    finished = pyqtSignal(object, object, object, object, object, object, object, list)
-    progress = pyqtSignal(int, int)   # (m_done, M_total)
-    error    = pyqtSignal(str)
-
-    def __init__(
-        self,
-        params: GSSParams,
-        N: int,
-        M: int,
-        seed: int | None,
-        parent=None,
-    ):
-        super().__init__(parent)
-        self._params = params
-        self._N      = N
-        self._M      = M
-        self._seed   = seed
-        self.xs_all: np.ndarray | None = None   # (M, N, q), set after run()
-
-    def run(self) -> None:
-        try:
-            M, N = self._M, self._N
-            K = self._params.K
-            q = self._params.q
-            s = self._params.s
-
-            xs_all = np.zeros((M, N, q))
-            ys_all = np.zeros((M, N, s))
-            rs_all = np.zeros((M, N), dtype=int)
-            ns_ref: list[int] = []
-
-            for m in range(M):
-                if self.isInterruptionRequested():
-                    return                       # silent abort between trajectories
-                seed_m = (self._seed + m) if self._seed is not None else None
-                sim = GSSSimulator(self._params, N=N, seed=seed_m)
-                ns_m, xs_m, ys_m, rs_m = [], [], [], []
-                for n, r, x, y in sim:
-                    ns_m.append(n)
-                    rs_m.append(r)
-                    xs_m.append(x.ravel())
-                    ys_m.append(y.ravel())
-                xs_all[m] = np.array(xs_m)
-                ys_all[m] = np.array(ys_m)
-                rs_all[m] = np.array(rs_m)
-                if not ns_ref:
-                    ns_ref = ns_m
-                self.progress.emit(m + 1, M)
-
-            self.xs_all = xs_all                         # keep for histogram dialog
-            mean_xs   = xs_all.mean(axis=0)              # (N, q)
-            std_xs    = xs_all.std(axis=0)               # (N, q)
-            median_xs = np.median(xs_all, axis=0)        # (N, q)
-            mean_ys   = ys_all.mean(axis=0)              # (N, s)
-            std_ys    = ys_all.std(axis=0)               # (N, s)
-            median_ys = np.median(ys_all, axis=0)        # (N, s)
-
-            # Fraction of runs in each regime at each step
-            regime_freqs = np.zeros((N, K))
-            for k in range(K):
-                regime_freqs[:, k] = (rs_all == k).mean(axis=0)
-
-            self.finished.emit(
-                mean_xs, std_xs, median_xs,
-                mean_ys, std_ys, median_ys,
-                regime_freqs, ns_ref,
-            )
-        except Exception as exc:   # noqa: BLE001
-            self.error.emit(str(exc))
-
 
 # ---------------------------------------------------------------------------
 # Wait dialog (modal, no close button)
@@ -923,7 +762,6 @@ class GSSMainWindow(QMainWindow):
 
         self._worker: _SimWorker | None = None
         self._filter_worker: _FilterWorker | None = None
-        self._mc_worker: _MCWorker | None = None
         self._wait_dlg: _WaitDialog | None = None
         self._op_t0: float = time.perf_counter()   # C4: initialised in constructor
 
@@ -1015,30 +853,6 @@ class GSSMainWindow(QMainWindow):
         self._seed_edit.editingFinished.connect(self._on_sim_params_changed)  # A1: not per-keystroke
         seed_row.addWidget(self._seed_edit)
         left_layout.addLayout(seed_row)
-
-        # Monte Carlo row — checkbox HIDDEN per user request.
-        # The widget is still created so the rest of the codebase
-        # (_run_simulate / _MCWorker / _on_mc_finished) keeps working
-        # unchanged; it simply stays unchecked and invisible, so MC mode
-        # is unreachable from the UI.
-        mc_row = QHBoxLayout()
-        self._mc_check = QCheckBox("Monte Carlo")
-        self._mc_check.setToolTip(
-            "Run M independent simulations and display mean ± 2σ trajectories."
-        )
-        self._mc_check.hide()                                # ← hidden
-        # mc_row.addWidget(self._mc_check)                   # ← not laid out
-        self._mc_spin = QSpinBox()
-        self._mc_spin.setRange(2, 5000)
-        self._mc_spin.setValue(50)
-        self._mc_spin.setSingleStep(10)
-        self._mc_spin.setMaximumWidth(90)
-        self._mc_spin.setToolTip("Number of Monte-Carlo runs")
-        self._mc_spin.hide()                                 # ← hidden too
-        # mc_row.addWidget(QLabel("M ="))
-        # mc_row.addWidget(self._mc_spin)
-        # mc_row.addStretch()
-        # left_layout.addLayout(mc_row)
 
         # Auto-filter row
         auto_row = QHBoxLayout()
@@ -1147,14 +961,6 @@ class GSSMainWindow(QMainWindow):
         )
         self._btn_innov_hist.clicked.connect(self._on_innov_hist)
 
-        self._btn_mc_hist = QPushButton("📊 X distributions…")
-        self._btn_mc_hist.setFixedHeight(36)
-        self._btn_mc_hist.setEnabled(False)
-        self._btn_mc_hist.setToolTip(
-            "Show marginal distribution of X at a chosen time step (MC mode)."
-        )
-        self._btn_mc_hist.clicked.connect(self._on_mc_hist)
-
         self._btn_reset = QPushButton("⟳  Reset")
         self._btn_reset.setFixedHeight(36)
         self._btn_reset.setToolTip("Clear all results and reset the plots  (Ctrl+Shift+R)")  # B7
@@ -1166,8 +972,7 @@ class GSSMainWindow(QMainWindow):
         btn_grid.addWidget(self._btn_load,        1, 1)
         btn_grid.addWidget(self._btn_export,      2, 0)
         btn_grid.addWidget(self._btn_export_plots,2, 1)
-        btn_grid.addWidget(self._btn_innov_hist,  3, 0)
-        btn_grid.addWidget(self._btn_mc_hist,     3, 1)
+        btn_grid.addWidget(self._btn_innov_hist,  3, 0, 1, 2)
         btn_grid.addWidget(self._btn_reset,       4, 0, 1, 2)
 
         left_layout.addLayout(btn_grid)
@@ -1397,7 +1202,6 @@ class GSSMainWindow(QMainWindow):
         self._btn_export.setEnabled(False)
         self._btn_export_plots.setEnabled(False)
         self._btn_innov_hist.setEnabled(False)
-        self._btn_mc_hist.setEnabled(False)
         self._sync_menu_actions()
         self._mse_frame.setVisible(False)
         self._innov_frame.setVisible(False)
@@ -1416,7 +1220,7 @@ class GSSMainWindow(QMainWindow):
         signal already queued on the event loop will be discarded by Qt
         instead of running our handlers and corrupting freshly-reset state.
         """
-        for attr in ("_worker", "_filter_worker", "_mc_worker"):
+        for attr in ("_worker", "_filter_worker"):
             w = getattr(self, attr, None)
             if w is None:
                 continue
@@ -1441,10 +1245,7 @@ class GSSMainWindow(QMainWindow):
             setattr(self, attr, None)
 
     def _on_simulate(self) -> None:
-        if self._mc_check.isChecked():
-            self._on_simulate_mc()
-        else:
-            self._on_simulate_single()
+        self._on_simulate_single()
 
     def _on_simulate_single(self) -> None:
         params = self._build_gss_params()
@@ -1477,41 +1278,6 @@ class GSSMainWindow(QMainWindow):
         self._worker.error.connect(self._on_sim_error)
         self._worker.start()
 
-    def _on_simulate_mc(self) -> None:
-        params = self._build_gss_params()
-        if params is None:
-            return
-
-        N    = self._n_spin.value()
-        M    = self._mc_spin.value()
-        seed = self._parse_seed()
-
-        self._state.begin_mc(params, self._params_signature())
-        self._refresh_filter_button_drift_indicator()
-        self._btn_simulate.setEnabled(False)
-        self._btn_save.setEnabled(False)
-        self._btn_filter.setEnabled(False)
-        self._btn_innov_hist.setEnabled(False)
-        self._btn_mc_hist.setEnabled(False)
-        self._sync_menu_actions()
-        self._mse_frame.setVisible(False)
-        self._innov_frame.setVisible(False)
-        self._set_status("")
-        self._op_t0 = time.perf_counter()
-        self.statusBar().showMessage(f"Monte Carlo  M = {M}, N = {N}…")
-
-        self._wait_dlg = _WaitDialog(
-            f"Monte Carlo  (M = {M})…", on_cancel=self._on_reset, parent=self)
-        self._wait_dlg.show()
-
-        self._mc_worker = _MCWorker(params, N, M, seed, parent=self)
-        self._mc_worker.finished.connect(self._on_mc_finished)
-        self._mc_worker.error.connect(self._on_mc_error)
-        self._mc_worker.progress.connect(
-            lambda m, tot, dlg=self._wait_dlg: dlg.set_progress(m, tot)
-        )
-        self._mc_worker.start()
-
     def _on_sim_finished(
         self,
         ns: list[int],
@@ -1542,7 +1308,7 @@ class GSSMainWindow(QMainWindow):
             f"Simulation complete — N = {len(ns)} steps in {elapsed:.2f}s.", 6000
         )
 
-        # Auto-filter chaining (single mode only; MC handled separately)
+        # Auto-filter chaining
         if self._auto_filter_check.isChecked() and self._state.can_filter():
             self._on_filter()
 
@@ -1555,59 +1321,6 @@ class GSSMainWindow(QMainWindow):
 
         self._set_status(f"Error: {msg}", error=True)
         self.statusBar().showMessage(f"Simulation error: {msg}", 8000)
-        self._refresh_simulate_button()
-
-    def _on_mc_finished(
-        self,
-        mean_xs:      np.ndarray,   # (N, q)
-        std_xs:       np.ndarray,   # (N, q)
-        median_xs:    np.ndarray,   # (N, q)
-        mean_ys:      np.ndarray,   # (N, s)
-        std_ys:       np.ndarray,   # (N, s)
-        median_ys:    np.ndarray,   # (N, s)
-        regime_freqs: np.ndarray,   # (N, K)
-        ns:           list,
-    ) -> None:
-        if self.sender() is not self._mc_worker:
-            return
-        if self._wait_dlg:
-            self._wait_dlg.accept()
-            self._wait_dlg = None
-
-        M = self._mc_spin.value()
-        if self._mc_worker is not None and self._mc_worker.xs_all is not None:
-            self._state.store_mc(self._mc_worker.xs_all)
-        self._plot_panel.update_mc_plots(
-            ns, mean_xs, std_xs, median_xs,
-            mean_ys, std_ys, median_ys,
-            regime_freqs, self._K, M,
-        )
-
-        # MC mode: no single trajectory — Filter / Save CSV not meaningful
-        self._btn_filter.setEnabled(False)
-        self._btn_save.setEnabled(False)
-        self._btn_export_plots.setEnabled(True)
-        self._btn_mc_hist.setEnabled(self._state.has_mc())
-        self._sync_menu_actions()
-
-        elapsed = time.perf_counter() - getattr(self, "_op_t0", time.perf_counter())
-        msg = (
-            f"Monte Carlo complete — M = {M}, N = {self._n_spin.value()} "
-            f"steps in {elapsed:.2f}s."
-        )
-        self._set_status(msg)
-        self.statusBar().showMessage(msg, 8000)
-        self._refresh_simulate_button()
-
-    def _on_mc_error(self, msg: str) -> None:
-        if self.sender() is not self._mc_worker:
-            return
-        if self._wait_dlg:
-            self._wait_dlg.reject()
-            self._wait_dlg = None
-
-        self._set_status(f"Monte Carlo error: {msg}", error=True)
-        self.statusBar().showMessage(f"Monte Carlo error: {msg}", 8000)
         self._refresh_simulate_button()
 
     def _on_filter(self) -> None:
@@ -2137,12 +1850,6 @@ class GSSMainWindow(QMainWindow):
         self._act_innov_hist.triggered.connect(self._on_innov_hist)
         view_menu.addAction(self._act_innov_hist)
 
-        self._act_mc_hist = QAction("MC &X distributions…", self)
-        self._act_mc_hist.setShortcut(QKeySequence("Ctrl+Shift+X"))
-        self._act_mc_hist.setStatusTip("Show marginal distribution of X at a chosen time step")
-        self._act_mc_hist.setEnabled(False)
-        self._act_mc_hist.triggered.connect(self._on_mc_hist)
-        view_menu.addAction(self._act_mc_hist)
 
     def _build_status_bar(self) -> None:
         """Permanent status bar: ephemeral messages + session summary."""
@@ -2156,8 +1863,6 @@ class GSSMainWindow(QMainWindow):
 
         # Wire signals that change session parameters to refresh the summary
         self._n_spin.valueChanged.connect(self._refresh_session_summary)
-        self._mc_spin.valueChanged.connect(self._refresh_session_summary)
-        self._mc_check.toggled.connect(self._refresh_session_summary)
         self._seed_edit.textChanged.connect(self._refresh_session_summary)
         self._auto_filter_check.toggled.connect(self._refresh_session_summary)
         self._joseph_check.toggled.connect(self._refresh_session_summary)
@@ -2170,14 +1875,12 @@ class GSSMainWindow(QMainWindow):
         if not hasattr(self, "_sb_session_lbl"):
             return
         seed = self._seed_edit.text().strip() or "random"
-        mc   = f"M={self._mc_spin.value()}" if self._mc_check.isChecked() else "MC off"
         auto = "auto-filter" if self._auto_filter_check.isChecked() else ""
         mode = self._mode_combo.currentData()
         mode_short = "H5-exact" if mode == "h5_exact" else "IMM-general"
         parts = [
             f"K={self._K}·q={self._q}·s={self._s}",
             f"N={self._n_spin.value()}",
-            mc,
             f"seed={seed}",
             f"filter={mode_short}",
         ]
@@ -2196,11 +1899,8 @@ class GSSMainWindow(QMainWindow):
 
     def _load_settings(self) -> None:
         s = self._settings()
-        # N and Monte-Carlo state are intentionally NOT restored: every
-        # launch starts with the safe defaults set in the constructor
-        # (N=1000, MC unchecked), so a previous heavy session can't make
-        # the next launch sluggish or unexpectedly run a long MC.
-        self._mc_spin.setValue(int(s.value("M", self._mc_spin.value())))
+        # N is intentionally not restored: every launch starts with N=1000
+        # so a previous large-N session can't make the next launch sluggish.
         seed = s.value("seed", self._seed_edit.text())
         if seed is not None:
             self._seed_edit.setText(str(seed))
@@ -2226,8 +1926,7 @@ class GSSMainWindow(QMainWindow):
 
     def _save_settings(self) -> None:
         s = self._settings()
-        # N and mc_on intentionally not saved — see _load_settings.
-        s.setValue("M", self._mc_spin.value())
+        # N intentionally not saved — see _load_settings.
         s.setValue("seed", self._seed_edit.text())
         s.setValue("auto_filter", self._auto_filter_check.isChecked())
         s.setValue("joseph", self._joseph_check.isChecked())
@@ -2237,6 +1936,7 @@ class GSSMainWindow(QMainWindow):
         # Clean up legacy keys from previous versions so they can't resurface
         s.remove("N")
         s.remove("mc_on")
+        s.remove("M")
 
     def closeEvent(self, event) -> None:                            # noqa: N802
         self._cancel_active_workers()
@@ -2281,13 +1981,6 @@ class GSSMainWindow(QMainWindow):
         )
         dlg.show()
 
-    def _on_mc_hist(self) -> None:
-        """Open MC X-distribution histogram dialog."""
-        if not self._state.has_mc():
-            return
-        dlg = _MCHistDialog(self._state.mc_xs_all, parent=self)
-        dlg.show()
-
     def _refresh_simulate_button(self) -> None:
         valid = self._param_panel.is_valid() and self._p_widget.is_valid()
         self._btn_simulate.setEnabled(valid)
@@ -2312,7 +2005,6 @@ class GSSMainWindow(QMainWindow):
         self._act_export.setEnabled(self._btn_export.isEnabled())
         self._act_export_plots.setEnabled(self._btn_export_plots.isEnabled())
         self._act_innov_hist.setEnabled(self._btn_innov_hist.isEnabled())
-        self._act_mc_hist.setEnabled(self._btn_mc_hist.isEnabled())
 
     def _set_status(self, msg: str, *, error: bool = False) -> None:
         """Update the left-panel status label with appropriate styling (A10).

@@ -520,6 +520,7 @@ class PredYPanel(QWidget):
         self._mu_Y:     list | None = None   # [K]    ndarray (s,1)
         self._M_simple: list | None = None   # [K][K] ndarray (s,s) — coeff signal 2
         self._Gamma2:   list | None = None   # [K][K] ndarray (s,s) — cov. signal 2
+        self._b_Y:      list | None = None   # [K]    ndarray (s,1) — biais signal 2
         self._ys:       np.ndarray | None = None  # (N, s)
 
         self._build_ui()
@@ -655,6 +656,7 @@ class PredYPanel(QWidget):
         ys:       np.ndarray,   # (N, s)
         M_simple: list | None = None,   # [K][K] ndarray (s,s) — coeff signal 2
         Gamma2:   list | None = None,   # [K][K] ndarray (s,s) — cov. signal 2
+        b_Y:      list | None = None,   # [K]    ndarray (s,1) — biais signal 2
     ) -> None:
         """Charge les moments du filtre et la trajectoire observée."""
         self._mu_Y_jk  = mu_Y_jk
@@ -663,6 +665,7 @@ class PredYPanel(QWidget):
         self._mu_Y     = mu_Y
         self._M_simple = M_simple
         self._Gamma2   = Gamma2
+        self._b_Y      = b_Y
         self._ys       = ys
         N = len(ys)
         # n ∈ {0…N-2} : y_n→ y_{n+1}
@@ -678,6 +681,7 @@ class PredYPanel(QWidget):
         self._mu_Y     = None
         self._M_simple = None
         self._Gamma2   = None
+        self._b_Y      = None
         self._ys       = None
         self._draw_traj_empty()
         self._draw_density_empty()
@@ -723,7 +727,7 @@ class PredYPanel(QWidget):
             Cov₁  = Γ(j,k)  (constante)
 
         Signal 2 — approximation sans (H5) :
-            μ₂(n) = M_simple[j][k] @ y_n
+            μ₂(n) = b_Y[k] + M_simple[j][k] @ y_n
             Cov₂  = Γ₂(j,k)  (constante)
 
         Seule l'enveloppe ±2σ est tracée (pas de ±1σ). Pas de ligne verticale.
@@ -744,9 +748,12 @@ class PredYPanel(QWidget):
         sigs1  = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))         # (s,)
 
         # ── Signal 2 (si disponible) ────────────────────────────────────
-        has_sig2 = self._M_simple is not None and self._Gamma2 is not None
+        has_sig2 = (self._M_simple is not None
+                    and self._Gamma2   is not None
+                    and self._b_Y      is not None)
         if has_sig2:
-            means2 = (self._M_simple[j][k] @ ys[:-1].T).T   # (N-1, s)
+            b_k    = self._b_Y[k].ravel()                             # (s,)
+            means2 = b_k + (self._M_simple[j][k] @ ys[:-1].T).T     # (N-1, s)
             sigs2  = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))   # (s,)
 
         # y_{n+1} observé
@@ -838,9 +845,11 @@ class PredYPanel(QWidget):
         Gamma1 = self._Gamma[j][k]
 
         # Signal 2 — approximation (si disponible)
-        has_sig2 = self._M_simple is not None and self._Gamma2 is not None
-        mu2    = self._M_simple[j][k] @ y_n if has_sig2 else None
-        Gamma2 = self._Gamma2[j][k]         if has_sig2 else None
+        has_sig2 = (self._M_simple is not None
+                    and self._Gamma2   is not None
+                    and self._b_Y      is not None)
+        mu2    = self._b_Y[k] + self._M_simple[j][k] @ y_n if has_sig2 else None
+        Gamma2 = self._Gamma2[j][k]                         if has_sig2 else None
 
         self._fig_dens.clf()
         if self._s == 1:

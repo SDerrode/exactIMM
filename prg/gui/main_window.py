@@ -440,13 +440,14 @@ class _FilterWorker(QThread):
             # _on_filter_finished teste hasattr() et laisse l'onglet grisé.
             if hasattr(filt, "_mu_Y_jk"):
                 # ── Signal 2 : moments directs depuis les matrices du modèle ──
-                # μ₂(j,k) = (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n
+                # μ₂(j,k) = b_Y(k) + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n
                 # Γ₂(j,k) = Σ_{V,k} + C_k (Σ_{U,j} − Δ_j Σ_{V,j}^{-1} Δ_j^T) C_k^T
                 p   = self._params
                 K, q = p.K, p.q
                 nc  = p.noise_cov
                 M_simple  = [[None] * K for _ in range(K)]
                 Gamma2    = [[None] * K for _ in range(K)]
+                b_Y       = [p.b(k)[q:]  for k in range(K)]  # [K] ndarray (s,1)
                 for j in range(K):
                     SV_j     = nc.Sigma_V(j)                        # (s,s)
                     SV_j_inv = np.linalg.inv(SV_j)
@@ -468,6 +469,7 @@ class _FilterWorker(QThread):
                     "mu_Y":    filt._mu_Y,
                     "M_simple": M_simple,   # (s,s) matrice coeff. pour μ₂
                     "Gamma2":   Gamma2,     # (s,s) covariance constante du signal 2
+                    "b_Y":      b_Y,        # [K]   ndarray (s,1) — biais du signal 2
                 }
 
             self.finished.emit(
@@ -1418,6 +1420,7 @@ class GSSMainWindow(QMainWindow):
                 cm["mu_Y_jk"], cm["M_t"], cm["Gamma"], cm["mu_Y"], ys,
                 M_simple=cm.get("M_simple"),
                 Gamma2=cm.get("Gamma2"),
+                b_Y=cm.get("b_Y"),
             )
             self._right_tabs.setTabEnabled(1, True)
 

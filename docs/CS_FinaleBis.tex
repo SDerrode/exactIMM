@@ -173,6 +173,46 @@ avec $\pk{y_{n+1}}{y_n, r_n, r_{n+1}} \sim \Nc(M_{\rnn}\,y_n,\,\Gamma_{\rnn})$
     \tag{15}
 \end{align}
 
+{\color{blue}
+\noindent\textbf{Dérivation de (13)--(15) par la markovianité de $(\RN,\YN)$.}
+Puisque $(\RN,\YN)$ est markovien homogène, la loi $\pk{y_{n+1}}{r_n=j,\,r_{n+1}=k,\,y_n}$
+est la même pour tout $n$ ; on peut donc l'évaluer à $n=1$ en prenant $(Z_1 \mid r_1=j)$
+avec sa distribution marginale, appelée \emph{loi de bruit} :
+$(Z_1 \mid r_1=j) \sim \Nc\bigl(0,\,P(j)\bigr)$, avec $P(j) = \Vark{Z_1}{r_1=j}$.
+
+De $Z_2 = F_k\,Z_1 + W_2$, $W_2 \perp Z_1$ sachant $(r_1=j,\,r_2=k)$,
+on tire $\Covk{Z_2}{Z_1}{r_1=j,\,r_2=k} = F_k\,P(j)$.
+En posant $Y_i = [0,\,I]\,Z_i$ et $[C_k,\,D_k]$ la ligne $Y$ de $F_k$,
+l'extraction des blocs $Y$ donne :
+\begin{align*}
+  \Vark{Y_1}{r_1=j}
+    &= P_{YY}(j), \\
+  \Covk{Y_2}{Y_1}{r_1=j,\,r_2=k}
+    &= [C_k,\,D_k]\,F_k\,P(j)\,[0,\,I]\tp
+     = C_k\,P_{XY}(j) + D_k\,P_{YY}(j),
+\end{align*}
+d'où, par la formule du conditionnement gaussien :
+\[
+  M_{jk} = \bigl(C_k\,P_{XY}(j) + D_k\,P_{YY}(j)\bigr)\,P_{YY}(j)\inv,
+  \qquad
+  \Gamma_{jk} = P_{YY}(k) - M_{jk}\,P_{YY}(j)\,M_{jk}\tp,
+\]
+conformément à (14)--(15) pour tout $n$, les blocs $P_{XY}(j)$ et $P_{YY}(j)$
+étant ceux de $\Vark{Z_n}{r_n=j}$, fournis par les récursions (16)--(17) ci-après.
+
+{\color{green!60!black}
+Dans le cas biaisé (option B), les covariances centrées
+$\Sigma(j) := P(j) - \mu(j)\,\mu(j)\tp$ --- indépendantes de $n$ par (H4)+(H5) ---
+remplacent $P(j)$ dans les formules ci-dessus, ce qui donne $\widetilde{M}_{jk}$ et $\widetilde{\Gamma}_{jk}$.
+La moyenne conditionnelle gagne en outre un terme de biais :
+\[
+  \Ek{Y_{n+1}}{r_n=j,\,r_{n+1}=k,\,Y_n=y_n}
+  = \underbrace{[C_k,\,D_k]\,\mu_n(j) + b_{Y,k}}_{\mu_{Y,n+1}(j,k)}
+    + \widetilde{M}_{jk}\,\bigl(y_n - \mu_{Y,n}(j)\bigr),
+\]
+ce qui est exactement (13').}
+}% fin {\color{blue}}
+
 Les matrices de covariances $\Vark{Y_n}{r_n}$, $\Covk{Y_{n+1}}{Y_n}{\rnn}$, et
 $\Vark{Y_{n+1}}{r_{n+1}}$ dans (13)--(14) sont extraites des matrices
 $\Covk{Z_{n+1}}{Z_n}{\rnn}$ et $\Vark{Z_{n+1}}{r_{n+1}}$

@@ -30,9 +30,17 @@ Modes
                  moments of regime k;
       Step (IV)  combination using π_{n+1}(k).
 
-    This mode is mathematically exact under (H5) ⇔ ``B(k) = 0`` for all
-    ``k`` (no feedback of past observations into the hidden dynamics).
-    When (H5) is violated a ``RuntimeWarning`` is emitted at construction.
+    This mode is mathematically exact under (H5), which is the algebraic
+    constraint of paper eq. (4.4)
+
+        Δ(k)ᵀ A(k) + Σ_V(k) B(k)ᵀ = P(k) M(k)⁻¹ W(k)
+
+    tying together all 7 parameter matrices (A, B, C, D, Σ_U, Σ_V, Δ) of
+    each regime. (H5) is **not** equivalent to B(k) = 0 — given the other
+    six matrices, B(k) is uniquely determined by eq. (4.8); see
+    :mod:`prg.utils.h5_constraint`. When (H5) is violated a
+    ``RuntimeWarning`` is emitted at construction (relative residual
+    above ``H5_TOL``).
 
 ``mode="imm_general"`` — IMM-style recursion, no (H5) required
     The full F(k) = [[A_k, B_k], [C_k, D_k]] is used. Per-regime moments
@@ -40,7 +48,7 @@ Modes
     π_n (not the stationary π_∞), following the recursion of the
     companion paper CS_FinaleBis eqs (17ter), (17), (13')–(15), (18),
     (21')–(22). This matches the behaviour of ``fofgss ≤ v0.9.0`` and
-    is appropriate for non-(H5) models (``B(k) ≠ 0``).
+    is appropriate for any GSS model, in particular non-(H5) models.
 
 Joseph form (optional, h5_exact only)
 -------------------------------------
@@ -80,7 +88,9 @@ from prg.classes.GSSSimulator import GSSSimulator
 __all__ = ["GSSFilter", "FilterResult"]
 
 FILTER_MODES = ("h5_exact", "imm_general")
-H5_TOL       = 1e-10     # ‖B(k)‖∞ below this → (H5) holds
+# Relative residual ‖F(k)‖_F / max(‖Z(k)‖_F, 1) of the (H5) constraint
+# F(k) = Z(k) − P(k) M(k)⁻¹ W(k)  (paper eq. 4.4) below this → (H5) holds.
+H5_TOL       = 1e-8
 
 logger = logging.getLogger("fofgss.filter")
 
@@ -148,12 +158,16 @@ class GSSFilter:
 
         * ``"imm_general"`` (default) — IMM recursion with per-step
           moment propagation; no (H5) requirement. Matches
-          ``fofgss ≤ v0.9.0`` and is the correct choice for general
-          GSS models including those with ``B(k) ≠ 0``.
+          ``fofgss ≤ v0.9.0`` and is the correct choice for any GSS
+          model, in particular those that do not satisfy (H5).
         * ``"h5_exact"`` — exact IMM under hypothesis (H5), with
           stationary pre-computed regime moments. Requires (H5), i.e.
-          ``B(k) = 0`` for all ``k``; emits a ``RuntimeWarning`` at
-          construction if (H5) is violated.
+          the algebraic constraint of paper eq. (4.4) holds for every
+          regime k; emits a ``RuntimeWarning`` at construction when the
+          relative residual exceeds ``H5_TOL``. To enforce (H5)
+          automatically, use
+          :func:`prg.utils.h5_constraint.apply_h5_constraint`, which
+          recomputes B(k) from the other 6 matrices via eq. (4.8).
 
     Examples
     --------
@@ -202,18 +216,58 @@ class GSSFilter:
     # ------------------------------------------------------------------
 
     def _check_h5(self) -> None:
-        """Emit a RuntimeWarning if (H5) is violated (B(k) ≠ 0)."""
+        """Emit a RuntimeWarning if (H5) is violated.
+
+        (H5) is the algebraic constraint  Δᵀ A + Σ_V Bᵀ = P M⁻¹ W  of
+        paper eq. (4.4), tying together all 7 parameter matrices of each
+        regime. It is **not** equivalent to B(k) = 0. We evaluate the
+        relative Frobenius residual
+
+            r(k) = ‖Z(k) − P(k) M(k)⁻¹ W(k)‖_F / max(‖Z(k)‖_F, 1)
+
+        for each regime k and warn if  max_k r(k) > H5_TOL.
+        """
+        from prg.utils.h5_constraint import compute_h5_residual
+
         p = self._p
-        max_B = 0.0
+        max_rel = 0.0
+        worst_k = 0
         for k in range(p.K):
-            Bk = p.f_matrix.F(k)[:p.q, p.q:]         # upper-right block
-            max_B = max(max_B, float(np.abs(Bk).max()))
-        if max_B > H5_TOL:
+            A  = p.f_matrix.A(k)
+            B  = p.f_matrix.B(k)
+            C  = p.f_matrix.C(k)
+            D  = p.f_matrix.D(k)
+            SU = p.noise_cov.Sigma_U(k)
+            Dt = p.noise_cov.Delta(k)
+            SV = p.noise_cov.Sigma_V(k)
+            try:
+                F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
+            except np.linalg.LinAlgError:
+                # M(k) singular: cannot evaluate the constraint cleanly.
+                # Treat this as a violation so the user gets a warning.
+                warnings.warn(
+                    f"mode='h5_exact': could not evaluate the (H5) residual "
+                    f"for regime k={k} (M(k) is singular). The filter may be "
+                    f"biased. Use mode='imm_general' if in doubt.",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                continue
+            Z = Dt.T @ A + SV @ B.T
+            scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
+            rel   = float(np.linalg.norm(F, "fro")) / scale
+            if rel > max_rel:
+                max_rel = rel
+                worst_k = k
+        if max_rel > H5_TOL:
             warnings.warn(
-                f"mode='h5_exact' assumes (H5) — i.e. B(k) = 0 for all k — "
-                f"but the model has max|B(k)| = {max_B:.3g}. "
-                f"The filter will be biased. Use mode='imm_general' for "
-                f"non-(H5) models.",
+                f"mode='h5_exact' assumes (H5) — i.e. the algebraic constraint "
+                f"Δᵀ A + Σ_V Bᵀ = P M⁻¹ W (paper eq. 4.4) holds for every "
+                f"regime — but the model has max relative residual = "
+                f"{max_rel:.3g} (worst at k={worst_k}). The filter will be "
+                f"biased. Use mode='imm_general' for non-(H5) models, or "
+                f"apply prg.utils.h5_constraint.apply_h5_constraint to enforce "
+                f"(H5) by recomputing B(k) from the other 6 matrices.",
                 RuntimeWarning,
                 stacklevel=3,
             )

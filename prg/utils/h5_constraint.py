@@ -40,7 +40,57 @@ __all__ = [
     "compute_A_from_h5",
     "compute_SU_from_h5",
     "compute_C_from_h5",
+    "compute_h5_residual",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Residual of the (H5) algebraic constraint
+# ---------------------------------------------------------------------------
+
+def compute_h5_residual(
+    A:  np.ndarray,   # (q, q)
+    B:  np.ndarray,   # (q, s)
+    C:  np.ndarray,   # (s, q)
+    D:  np.ndarray,   # (s, s)
+    SU: np.ndarray,   # (q, q)  Σ_U
+    Dt: np.ndarray,   # (q, s)  Δ
+    SV: np.ndarray,   # (s, s)  Σ_V
+) -> np.ndarray:
+    """
+    Evaluate the (H5) algebraic constraint residual (paper eq. 4.4).
+
+    The constraint is
+
+        Δᵀ A + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ)
+
+    with the auxiliary matrices
+
+        P = Δᵀ Cᵀ + Σ_V Dᵀ          (s × s)
+        Q = C Σ_U + D Δᵀ            (s × q)
+        R = C Δ  + D Σ_V  (= Pᵀ)    (s × s)
+        M = Q Cᵀ + R Dᵀ + Σ_V       (s × s, symmetric, > 0 if Σ_U, Σ_V > 0)
+        W = Q Aᵀ + R Bᵀ + Δᵀ        (s × q)
+
+    Returns
+    -------
+    F : ndarray of shape (s, q)
+        The residual ``F = Z − P M⁻¹ W`` with ``Z = Δᵀ A + Σ_V Bᵀ``.
+        ``‖F‖ = 0`` ⇔ (H5) holds exactly.
+
+    Raises
+    ------
+    numpy.linalg.LinAlgError
+        If M is singular (cannot invert).
+    """
+    P = Dt.T @ C.T + SV @ D.T
+    Q = C  @ SU   + D  @ Dt.T
+    R = C  @ Dt   + D  @ SV
+    M = Q  @ C.T  + R  @ D.T  + SV
+    W = Q  @ A.T  + R  @ B.T  + Dt.T
+    Z = Dt.T @ A  + SV @ B.T
+    X = np.linalg.solve(M, W)        # X = M⁻¹ W
+    return Z - P @ X
 
 
 # ---------------------------------------------------------------------------

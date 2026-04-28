@@ -778,11 +778,13 @@ class GSSMainWindow(QMainWindow):
         self._mode_combo.addItem("Exact IMM under (H5)",            "h5_exact")
         self._mode_combo.setToolTip(
             "IMM general  — per-step moment propagation from the filtered π_n.\n"
-            "               Works for any GSS model (matches fofgss ≤ v0.9.0).\n"
-            "               Correct choice when B(k) ≠ 0.\n"
-            "Exact (H5)   — stationary pre-computed moments. Faster but exact\n"
-            "               only when B(k) = 0 for all k; emits a warning on\n"
-            "               non-(H5) models. See paper §3."
+            "               Approximate IMM filter. Works for any GSS model,\n"
+            "               with or without (H5) (matches fofgss ≤ v0.9.0).\n"
+            "Exact (H5)   — stationary pre-computed moments. Exact when (H5)\n"
+            "               holds: the algebraic constraint of paper eq. (4.4)\n"
+            "               linking A, B, C, D, Σ_U, Σ_V, Δ. Emits a warning\n"
+            "               when the residual exceeds the tolerance. Use\n"
+            "               'Apply (H5)' to enforce it (recomputes B(k))."
         )
         mode_row.addWidget(self._mode_combo)
         mode_row.addStretch()

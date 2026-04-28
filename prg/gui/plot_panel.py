@@ -946,10 +946,17 @@ class PredYPanel(QWidget):
             s2_0 = float(np.sqrt(max(float(Gamma2[0, 0]), 1e-12)))
             s2_1 = float(np.sqrt(max(float(Gamma2[1, 1]), 1e-12)))
 
-        def _marginal(ax, dim, m1v, s1v, m2v=None, s2v=None, xlabel=""):
+        yn_traj = self._src_traj.isChecked() and self._ys is not None
+        yn_0 = float(y_n[0, 0]) if yn_traj else None
+        yn_1 = float(y_n[1, 0]) if yn_traj else None
+
+        def _marginal(ax, dim, m1v, s1v, m2v=None, s2v=None, xlabel="", yn_val=None):
             lo = m1v - 4.5 * s1v; hi = m1v + 4.5 * s1v
             if m2v is not None:
                 lo = min(lo, m2v - 4.5 * s2v); hi = max(hi, m2v + 4.5 * s2v)
+            if yn_val is not None:
+                lo = min(lo, yn_val - 0.5 * abs(hi - lo))
+                hi = max(hi, yn_val + 0.5 * abs(hi - lo))
             x    = np.linspace(lo, hi, 400)
             pdf1 = _norm.pdf(x, m1v, s1v)
             ln1, = ax.plot(x, pdf1, color=c1, linewidth=2.0)
@@ -966,6 +973,11 @@ class PredYPanel(QWidget):
                 ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
                 left_h  += [ln2];  left_l  += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$"]
                 right_h += [ev2];  right_l += [rf"$\pm 2\sigma_2$"]
+            # ── Observation y_n[dim] (barre noire pointillée) ─────────────
+            if yn_val is not None:
+                yn_line = ax.axvline(yn_val, color="#333333", linewidth=1.2,
+                                     linestyle=":", alpha=0.85)
+                left_h += [yn_line]; left_l += [rf"$y^{dim}_n={yn_val:.4g}$"]
             ax.set_xlabel(xlabel, fontsize=10); ax.set_ylabel("densité", fontsize=9)
             ax.legend(left_h + right_h, left_l + right_l, fontsize=7, ncol=2)
             ax.grid(True, linestyle=":", alpha=0.4)
@@ -973,13 +985,13 @@ class PredYPanel(QWidget):
         ax0 = self._fig_dens.add_subplot(1, 3, 1)
         _marginal(ax0, 0, m1_0, s1_0,
                   m2_0 if has2 else None, s2_0 if has2 else None,
-                  xlabel=r"$y^0_{n+1}$")
+                  xlabel=r"$y^0_{n+1}$", yn_val=yn_0)
         ax0.set_title(rf"Marginale $y^0$", fontsize=9)
 
         ax1 = self._fig_dens.add_subplot(1, 3, 2)
         _marginal(ax1, 1, m1_1, s1_1,
                   m2_1 if has2 else None, s2_1 if has2 else None,
-                  xlabel=r"$y^1_{n+1}$")
+                  xlabel=r"$y^1_{n+1}$", yn_val=yn_1)
         ax1.set_title(rf"Marginale $y^1$", fontsize=9)
 
         ax2 = self._fig_dens.add_subplot(1, 3, 3)
@@ -1013,11 +1025,17 @@ class PredYPanel(QWidget):
                 pass
             ax2.scatter([m2_0], [m2_1], color=c2, s=50, zorder=5, marker="D",
                         label=rf"$\mu_2 = ({m2_0:.3g},\,{m2_1:.3g})$")
+        # ── Observation y_n (croix noire) ─────────────────────────────────
+        if yn_traj:
+            ax2.scatter([yn_0], [yn_1], color="#333333", s=80, zorder=6,
+                        marker="x", linewidths=2,
+                        label=rf"$y_n=({yn_0:.3g},\,{yn_1:.3g})$")
         ax2.set_xlabel(r"$y^0_{n+1}$", fontsize=10); ax2.set_ylabel(r"$y^1_{n+1}$", fontsize=10)
         ax2.set_title("Densité jointe", fontsize=9)
         ax2.legend(fontsize=8); ax2.grid(True, linestyle=":", alpha=0.3)
+        n_lbl = f"  n = {self._n_spin.value()}" if self._src_traj.isChecked() else ""
         self._fig_dens.suptitle(
-            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)$", fontsize=10)
+            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)${n_lbl}", fontsize=10)
 
     def _plot_nd(
         self,
@@ -1029,6 +1047,7 @@ class PredYPanel(QWidget):
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
         has2 = mu2 is not None
+        yn_traj = self._src_traj.isChecked() and self._ys is not None
         s = self._s; ncols = min(s, 3); nrows = (s + ncols - 1) // ncols
         for i in range(s):
             ax   = self._fig_dens.add_subplot(nrows, ncols, i + 1)
@@ -1040,6 +1059,7 @@ class PredYPanel(QWidget):
                 s2v = float(np.sqrt(max(float(Gamma2[i, i]), 1e-12)))
                 lo  = min(lo, m2v - 4.5 * s2v)
                 hi  = max(hi, m2v + 4.5 * s2v)
+            yn_val_i = float(y_n[i, 0]) if yn_traj else None
             x    = np.linspace(lo, hi, 400)
             pdf1 = _norm.pdf(x, m1v, s1v)
             ln1, = ax.plot(x, pdf1, color=c1, linewidth=2.0)
@@ -1056,13 +1076,19 @@ class PredYPanel(QWidget):
                 ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
                 left_h  += [ln2];  left_l  += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$"]
                 right_h += [ev2];  right_l += [rf"$\pm 2\sigma_2$"]
+            # ── Observation y_n[i] (barre noire pointillée) ───────────────
+            if yn_val_i is not None:
+                yn_line = ax.axvline(yn_val_i, color="#333333", linewidth=1.2,
+                                     linestyle=":", alpha=0.85)
+                left_h += [yn_line]; left_l += [rf"$y^{i}_n={yn_val_i:.4g}$"]
             ax.set_xlabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.set_ylabel("densité", fontsize=9)
             ax.set_title(rf"Marginale $y^{i}$", fontsize=9)
             ax.legend(left_h + right_h, left_l + right_l, fontsize=7, ncol=2)
             ax.grid(True, linestyle=":", alpha=0.4)
+        n_lbl = f"  n = {self._n_spin.value()}" if self._src_traj.isChecked() else ""
         self._fig_dens.suptitle(
-            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)$  [marginales]",
+            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)${n_lbl}  [marginales]",
             fontsize=10)
 
     def _draw_density_empty(self) -> None:

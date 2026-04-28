@@ -260,6 +260,51 @@ class _StateTab(QWidget):
         )
 
     # ------------------------------------------------------------------
+    # Constraint state — public accessors (D3)
+    # ------------------------------------------------------------------
+
+    def get_active_h5_constraint(self) -> str | None:
+        """Return the active H5 constraint name ("A", "B", "C", "SU") or None."""
+        if self._constraint_A_check.isChecked():   return "A"
+        if self._constraint_B_check.isChecked():   return "B"
+        if self._constraint_C_check.isChecked():   return "C"
+        if self._constraint_SU_check.isChecked():  return "SU"
+        return None
+
+    def get_delta_active(self) -> bool:
+        """Return True if the Δ=0 constraint is currently active."""
+        return self._constraint_delta_check.isChecked()
+
+    def apply_constraint(self, h5: str | None, delta: bool) -> None:
+        """Programmatically set the H5 constraint and Δ=0 flag (D3).
+
+        Mirrors the user clicking the appropriate checkboxes so that all
+        the recompute and constraint_toggled logic fires normally.
+
+        Parameters
+        ----------
+        h5    : "A", "B", "C", "SU", or None (no H5 constraint).
+        delta : whether the Δ=0 constraint should be active.
+        """
+        # 1. Δ=0 — independent of the H5 constraint
+        if self._constraint_delta_check.isChecked() != delta:
+            self._constraint_delta_check.setChecked(delta)
+        # 2. Uncheck all H5 checkboxes that should be off
+        _h5_map = {
+            "A":  self._constraint_A_check,
+            "B":  self._constraint_B_check,
+            "C":  self._constraint_C_check,
+            "SU": self._constraint_SU_check,
+        }
+        for name, chk in _h5_map.items():
+            if name != h5 and chk.isChecked():
+                chk.setChecked(False)
+        # 3. Check the target (if any) — triggers _on_*_toggled → recompute
+        if h5 is not None and h5 in _h5_map:
+            if not _h5_map[h5].isChecked():
+                _h5_map[h5].setChecked(True)
+
+    # ------------------------------------------------------------------
     # Constraint toggle handlers
     # ------------------------------------------------------------------
 
@@ -725,6 +770,22 @@ class ParamPanel(QWidget):
             self._tabs.addTab(scroll, f"State {k}")
             self._state_tabs.append(tab)
 
+        # D3: "Apply H5 to all states" button (only meaningful when K > 1)
+        if K > 1:
+            apply_row = QHBoxLayout()
+            self._btn_apply_h5_all = QPushButton("Apply H5 constraint to all states →")
+            self._btn_apply_h5_all.setFixedHeight(26)
+            self._btn_apply_h5_all.setToolTip(
+                "Copy the active H5 constraint (Constraint on A / B / C / Σ_U)\n"
+                "and the Δ=0 flag from the currently visible state tab to ALL\n"
+                "other tabs.  Each target tab recomputes its constrained block\n"
+                "from its own current parameter values."
+            )
+            self._btn_apply_h5_all.clicked.connect(self._on_apply_h5_all)
+            apply_row.addStretch()
+            apply_row.addWidget(self._btn_apply_h5_all)
+            layout.addLayout(apply_row)
+
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
@@ -794,3 +855,25 @@ class ParamPanel(QWidget):
 
     def _on_tab_validity(self, _: bool) -> None:
         self.validity_changed.emit(self.is_valid())
+
+    def _on_apply_h5_all(self) -> None:
+        """Copy the active H5 + Δ=0 constraints from the current tab to all others (D3)."""
+        src_k = self._tabs.currentIndex()
+        if src_k < 0 or src_k >= self._K:
+            return
+        src = self._state_tabs[src_k]
+        h5    = src.get_active_h5_constraint()
+        delta = src.get_delta_active()
+        # If nothing is active in the source tab, let the user know and bail.
+        if h5 is None and not delta:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Apply H5 to all states",
+                "No H5 constraint or Δ=0 is active on the current tab.\n"
+                "Select a constraint first, then click this button.",
+            )
+            return
+        for k, tab in enumerate(self._state_tabs):
+            if k != src_k:
+                tab.apply_constraint(h5, delta)

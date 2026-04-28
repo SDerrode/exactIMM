@@ -207,19 +207,20 @@ def _stationary_dist(P: np.ndarray) -> np.ndarray | None:
 # ---------------------------------------------------------------------------
 
 class _InnovHistDialog(QDialog):
-    """Non-modal dialog: innovation histograms + theoretical Gaussian mixture.
+    """Non-modal dialog: innovation histograms, ACF, and scatter (D4/D5/D12).
 
-    When *mix_params* is supplied (h5_exact mode), the black curve is the
-    stationary mixture density
+    Tabs
+    ----
+    • Histograms — raw innovation distributions + theoretical Gaussian mixture
+      (h5_exact mode) or best-fit N (imm_general mode).
+    • ACF        — sample autocorrelation function per component with
+                   Ljung-Box 95 % confidence bands (±1.96 / √N).
+    • Scatter    — pairwise scatter plot (only shown when s ≥ 2).
 
-        p(ν) = Σ_{j,k} w_{jk} N(ν ; δ_{jk}, Γ_{jk})
-
-    where w_{jk} = π_∞(j) P(j,k), δ_{jk} = μ_{Y,jk} − Σ w μ_{Y} is the
-    deviation of the component mean from the mixture mean, and Γ_{jk} is
-    the conditional innovation covariance (Schur complement).
-
-    Without mix_params (imm_general mode), a best-fit N(μ̂, σ̂²) is shown
-    as a fallback reference.
+    When *mix_params* is supplied (h5_exact mode), the histogram shows:
+        p(ν) = Σ_{j,k} w_{jk} N(ν ; δ̃_{jk}, Γ_{jk})
+    where δ̃_{jk} = μ_{Y,jk}[i] − Σ_{k'} P(j,k') μ_{Y,jk'}[i] is the
+    within-previous-regime centred component mean.
     """
 
     def __init__(
@@ -229,9 +230,10 @@ class _InnovHistDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Innovation histograms")
+        self.setWindowTitle("Innovation diagnostics")
         self.setModal(False)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._innovations = innovations
 
         from matplotlib.backends.backend_qtagg import (
             FigureCanvasQTAgg, NavigationToolbar2QT,
@@ -240,15 +242,27 @@ class _InnovHistDialog(QDialog):
         from scipy.stats import norm as _norm
 
         s      = innovations.shape[1]
+        N      = innovations.shape[0]
         layout = QVBoxLayout(self)
 
-        fig     = Figure(figsize=(max(4, 3.5 * s), 3.8), tight_layout=True)
-        canvas  = FigureCanvasQTAgg(fig)
-        toolbar = NavigationToolbar2QT(canvas, self)
+        inner_tabs = QTabWidget()
+        layout.addWidget(inner_tabs)
 
         colours = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+
+        # ─────────────────────────────────────────────────────────────
+        # Tab 0: Histograms
+        # ─────────────────────────────────────────────────────────────
+        hist_w = QWidget()
+        hist_l = QVBoxLayout(hist_w)
+        hist_l.setContentsMargins(0, 0, 0, 0)
+        fig_h   = Figure(figsize=(max(4, 3.5 * s), 3.8), tight_layout=True)
+        can_h   = FigureCanvasQTAgg(fig_h)
+        hist_l.addWidget(NavigationToolbar2QT(can_h, hist_w))
+        hist_l.addWidget(can_h)
+
         for i in range(s):
-            ax = fig.add_subplot(1, s, i + 1)
+            ax = fig_h.add_subplot(1, s, i + 1)
             x  = innovations[:, i]
             ax.hist(x, bins=40, density=True,
                     color=colours[i % len(colours)], alpha=0.70,
@@ -259,15 +273,11 @@ class _InnovHistDialog(QDialog):
             xg  = np.linspace(float(x.min()) - pad, float(x.max()) + pad, 400)
 
             if mix_params is not None:
-                # ── Theoretical Gaussian mixture ────────────────────────────
+                # ── Theoretical Gaussian mixture ──────────────────────────
                 # p(ν) = Σ_{j,k} w_{jk} N(ν ; δ̃_{jk}, Γ_{jk})
                 #
                 # δ̃_{jk} = μ_{Y,jk}[i] − Σ_{k'} P(j,k') μ_{Y,jk'}[i]
-                #         = μ_{Y,jk}[i] − [Σ_{k'} w[j,k'] μ_{Y,jk'}[i]] / π_∞(j)
-                #
-                # This centring is correct for the innovation: it represents
-                # the deviation of component (j,k) from the predicted mean
-                # when the previous regime is j (dominant filter weight).
+                #         = within-previous-regime centred mean
                 w     = mix_params["w"]        # (K, K) — already normalised
                 K_mix = w.shape[0]
                 Gam   = mix_params["Gamma"]    # [K][K] (s, s)
@@ -275,8 +285,7 @@ class _InnovHistDialog(QDialog):
 
                 pdf_mix = np.zeros_like(xg)
                 for j in range(K_mix):
-                    pi_j = max(float(w[j, :].sum()), 1e-12)   # = π_∞(j)
-                    # Within-previous-regime predicted mean: Σ_k P(j,k) μ_{Y,jk}[i]
+                    pi_j = max(float(w[j, :].sum()), 1e-12)
                     prev_mean_j_i = sum(
                         float(w[j, kk]) * float(muYjk[j][kk][i, 0])
                         for kk in range(K_mix)
@@ -285,7 +294,6 @@ class _InnovHistDialog(QDialog):
                         wjk = float(w[j, k])
                         if wjk < 1e-10:
                             continue
-                        # δ̃_{jk}: deviation from within-j predicted mean
                         delta = float(muYjk[j][k][i, 0]) - prev_mean_j_i
                         var_i = float(Gam[j][k][i, i])
                         sig   = float(np.sqrt(max(var_i, 1e-12)))
@@ -295,22 +303,138 @@ class _InnovHistDialog(QDialog):
                         label=rf"$\sum_{{jk}}w_{{jk}}\,\mathcal{{N}}(\tilde{{\delta}}_{{jk}},\Gamma_{{jk}})$"
                               f"  ({K_mix}² terms)")
             else:
-                # ── Fallback: best-fit single Gaussian ──────────────────────
+                # ── Fallback: best-fit single Gaussian ───────────────────
                 mu_e, sig_e = float(x.mean()), float(x.std())
                 if sig_e > 1e-10:
                     ax.plot(xg, _norm.pdf(xg, mu_e, sig_e),
                             "k--", linewidth=1.5,
                             label=f"N({mu_e:.3f}, {sig_e:.3f}²)")
 
-            ax.set_title(rf"$\nu^{i}$   (N = {len(x)})", fontsize=10)
+            ax.set_title(rf"$\nu^{i}$   (N = {N})", fontsize=10)
             ax.set_xlabel("value", fontsize=9)
             ax.set_ylabel("density", fontsize=9)
             ax.legend(fontsize=8)
             ax.grid(True, linestyle=":", alpha=0.4)
 
-        layout.addWidget(toolbar)
-        layout.addWidget(canvas)
-        self.resize(max(420, 340 * s), 420)
+        inner_tabs.addTab(hist_w, "Histograms")
+
+        # ─────────────────────────────────────────────────────────────
+        # Tab 1: ACF (D5)
+        # ─────────────────────────────────────────────────────────────
+        acf_w = QWidget()
+        acf_l = QVBoxLayout(acf_w)
+        acf_l.setContentsMargins(0, 0, 0, 0)
+        max_lag = min(40, max(5, N // 10))
+        fig_a   = Figure(figsize=(max(4, 3.5 * s), 3.2), tight_layout=True)
+        can_a   = FigureCanvasQTAgg(fig_a)
+        acf_l.addWidget(NavigationToolbar2QT(can_a, acf_w))
+        acf_l.addWidget(can_a)
+        conf95 = 1.96 / float(np.sqrt(N))
+
+        for i in range(s):
+            ax = fig_a.add_subplot(1, s, i + 1)
+            x  = innovations[:, i]
+            xc = x - x.mean()
+            c0 = float(np.dot(xc, xc)) / N
+            if c0 > 1e-30:
+                acf_vals = np.array([
+                    float(np.dot(xc[:N - lag], xc[lag:])) / (N * c0)
+                    for lag in range(1, max_lag + 1)
+                ])
+            else:
+                acf_vals = np.zeros(max_lag)
+            lags = np.arange(1, max_lag + 1)
+            ax.bar(lags, acf_vals, color=colours[i % len(colours)],
+                   alpha=0.75, width=0.8)
+            ax.axhline(0,       color="k",       linewidth=0.6)
+            ax.axhline( conf95, color="#999999",  linewidth=1.0,
+                        linestyle="--", label=f"±1.96/√N")
+            ax.axhline(-conf95, color="#999999",  linewidth=1.0,
+                        linestyle="--")
+            ax.set_xlim(0, max_lag + 1)
+            ax.set_ylim(-1.05, 1.05)
+            ax.set_xlabel("lag", fontsize=9)
+            ax.set_ylabel("ACF", fontsize=9)
+            ax.set_title(rf"ACF  $\nu^{i}$", fontsize=10)
+            ax.legend(fontsize=7)
+            ax.grid(True, linestyle=":", alpha=0.4)
+
+        inner_tabs.addTab(acf_w, "ACF")
+
+        # ─────────────────────────────────────────────────────────────
+        # Tab 2: Pairwise scatter (D4, only when s ≥ 2)
+        # ─────────────────────────────────────────────────────────────
+        if s >= 2:
+            sc_w = QWidget()
+            sc_l = QVBoxLayout(sc_w)
+            sc_l.setContentsMargins(0, 0, 0, 0)
+            n_pairs = s * (s - 1) // 2
+            ncols   = min(n_pairs, 3)
+            nrows   = (n_pairs + ncols - 1) // ncols
+            fig_s   = Figure(figsize=(max(4, 3.5 * ncols), 3.2 * nrows),
+                             tight_layout=True)
+            can_s   = FigureCanvasQTAgg(fig_s)
+            sc_l.addWidget(NavigationToolbar2QT(can_s, sc_w))
+            sc_l.addWidget(can_s)
+
+            idx = 1
+            for a_i in range(s):
+                for b_i in range(a_i + 1, s):
+                    ax = fig_s.add_subplot(nrows, ncols, idx)
+                    ax.scatter(innovations[:, a_i], innovations[:, b_i],
+                               s=4, alpha=0.40, color="#555555")
+                    rho = float(np.corrcoef(
+                        innovations[:, a_i], innovations[:, b_i]
+                    )[0, 1])
+                    ax.set_xlabel(rf"$\nu^{a_i}$", fontsize=9)
+                    ax.set_ylabel(rf"$\nu^{b_i}$", fontsize=9)
+                    ax.set_title(
+                        rf"$\nu^{a_i}$ vs $\nu^{b_i}$   ρ = {rho:+.3f}",
+                        fontsize=9,
+                    )
+                    ax.grid(True, linestyle=":", alpha=0.4)
+                    idx += 1
+
+            inner_tabs.addTab(sc_w, "Scatter")
+
+        # ─────────────────────────────────────────────────────────────
+        # Export CSV button (D12)
+        # ─────────────────────────────────────────────────────────────
+        export_row = QHBoxLayout()
+        btn_csv = QPushButton("Export innovations CSV…")
+        btn_csv.setFixedHeight(28)
+        btn_csv.clicked.connect(self._on_export_csv)
+        export_row.addStretch()
+        export_row.addWidget(btn_csv)
+        layout.addLayout(export_row)
+
+        self.resize(max(480, 360 * min(s, 3)), 480)
+
+    def _on_export_csv(self) -> None:
+        """Save innovation columns to a CSV file."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export innovations",
+            "innovations.csv",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            innov = self._innovations
+            s = innov.shape[1]
+            header = ["n"] + [f"nu_{i}" for i in range(s)]
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                import csv as _csv
+                w = _csv.writer(fh)
+                w.writerow(header)
+                for n, row in enumerate(innov):
+                    w.writerow([n] + list(row))
+            QMessageBox.information(
+                self, "Export OK",
+                f"Innovations saved to:\n{pathlib.Path(path).resolve()}",
+            )
+        except Exception as exc:   # noqa: BLE001
+            QMessageBox.critical(self, "Export error", str(exc))
 
 
 class _MCHistDialog(QDialog):

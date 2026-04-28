@@ -581,26 +581,31 @@ class PredYPanel(QWidget):
         dens_layout.setContentsMargins(4, 4, 4, 4)
         dens_layout.setSpacing(4)
 
-        # Contrôles y_n (propres à l'onglet Densité)
-        src_box = QGroupBox("Valeur de y_n")
-        src_layout = QVBoxLayout(src_box)
-        src_layout.setSpacing(4)
+        # Contrôles y_n — barre compacte (pas de QGroupBox pour éviter l'étirement)
+        ctrl_widget = QWidget()
+        ctrl_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        ctrl_layout = QVBoxLayout(ctrl_widget)
+        ctrl_layout.setContentsMargins(4, 2, 4, 2)
+        ctrl_layout.setSpacing(2)
 
         traj_row = QHBoxLayout()
-        self._src_traj = QRadioButton("Depuis la trajectoire, n =")
+        traj_row.setSpacing(6)
+        self._src_traj = QRadioButton("Traj.,  n =")
         self._src_traj.setChecked(True)
         traj_row.addWidget(self._src_traj)
         self._n_spin = QSpinBox()
         self._n_spin.setRange(0, 0)
         self._n_spin.setValue(0)
-        self._n_spin.setFixedWidth(80)
-        self._n_spin.setToolTip("Indice temporel n (y_n lue dans la trajectoire simulée)")
+        self._n_spin.setFixedWidth(70)
+        self._n_spin.setToolTip("Indice temporel n")
         traj_row.addWidget(self._n_spin)
         traj_row.addStretch()
-        src_layout.addLayout(traj_row)
+        ctrl_layout.addLayout(traj_row)
 
         free_row = QHBoxLayout()
-        self._src_free = QRadioButton("Valeur libre :")
+        free_row.setSpacing(6)
+        self._src_free = QRadioButton("Libre :")
         free_row.addWidget(self._src_free)
         self._yn_spins: list[QDoubleSpinBox] = []
         for i in range(s):
@@ -608,20 +613,20 @@ class PredYPanel(QWidget):
             sp  = QDoubleSpinBox()
             sp.setRange(-1e6, 1e6)
             sp.setValue(0.0)
-            sp.setDecimals(4)
-            sp.setFixedWidth(100)
+            sp.setDecimals(3)
+            sp.setFixedWidth(90)
             sp.setEnabled(False)
-            sp.setToolTip(f"Composante y^{i} de y_n (saisie libre)")
+            sp.setToolTip(f"Composante {i} de y_n (saisie libre)")
             free_row.addWidget(lbl)
             free_row.addWidget(sp)
             self._yn_spins.append(sp)
         free_row.addStretch()
-        src_layout.addLayout(free_row)
+        ctrl_layout.addLayout(free_row)
 
         self._src_group = QButtonGroup(self)
         self._src_group.addButton(self._src_traj, 0)
         self._src_group.addButton(self._src_free,  1)
-        dens_layout.addWidget(src_box)
+        dens_layout.addWidget(ctrl_widget)
 
         self._fig_dens    = Figure(tight_layout=True)
         self._canvas_dens = FigureCanvasQTAgg(self._fig_dens)
@@ -773,8 +778,8 @@ class PredYPanel(QWidget):
                 line2, = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
 
             # ── y_{n+1} observé ─────────────────────────────────────────
-            obs_line, = ax.plot(ns, y_obs[:, i], color="#333333", linewidth=0.8,
-                                alpha=0.6, linestyle="-")
+            obs_line, = ax.plot(ns, y_obs[:, i], color="#333333", linewidth=2.0,
+                                alpha=0.85, linestyle="-")
 
             # ── Légende 2 colonnes : gauche = espérances + obs,
             #                         droite = enveloppes ──────────────────
@@ -785,7 +790,7 @@ class PredYPanel(QWidget):
                 leg_h += [line2,                     env2]
                 leg_l += [rf"$\mu_2$ (approx.)",     rf"$\pm 2\sigma_2={sigs2[i]:.3g}$"]
             leg_h += [obs_line]
-            leg_l += [rf"$y^{i}_{{n+1}}$ observé"]
+            leg_l += [rf"$y^{i}$"]
             ax.legend(leg_h, leg_l, fontsize=8, loc="upper right", ncol=2)
 
             ax.set_ylabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
@@ -870,35 +875,40 @@ class PredYPanel(QWidget):
         ax = self._fig_dens.add_subplot(1, 1, 1)
 
         # ── Signal 1 ────────────────────────────────────────────────────
-        pdf1 = _norm.pdf(x, m1, sig1)
-        ax.plot(x, pdf1, color=c1, linewidth=2.0,
-                label=rf"$p_1$  H5 exact  ($\mu_1={m1:.4g}$, $\sigma_1={sig1:.4g}$)")
-        ax.fill_between(x, pdf1, where=(np.abs(x - m1) <= sig1),
-                        color=c1, alpha=0.30, label=r"$\pm 1\sigma_1$")
-        ax.fill_between(x, pdf1, where=(np.abs(x - m1) <= 2 * sig1),
-                        color=c1, alpha=0.15, label=r"$\pm 2\sigma_1$")
+        pdf1   = _norm.pdf(x, m1, sig1)
+        line1, = ax.plot(x, pdf1, color=c1, linewidth=2.0)
+        env1   = ax.fill_between(x, pdf1, where=(np.abs(x - m1) <= 2 * sig1),
+                                 color=c1, alpha=0.20)
         ax.axvline(m1, color=c1, linewidth=1.2, linestyle="--", alpha=0.8)
 
         # ── Signal 2 ────────────────────────────────────────────────────
-        if mu2 is not None:
-            pdf2 = _norm.pdf(x, m2, sig2)
-            ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--",
-                    label=rf"$p_2$  approx.  ($\mu_2={m2:.4g}$, $\sigma_2={sig2:.4g}$)")
-            ax.fill_between(x, pdf2, where=(np.abs(x - m2) <= sig2),
-                            color=c2, alpha=0.20, label=r"$\pm 1\sigma_2$")
-            ax.fill_between(x, pdf2, where=(np.abs(x - m2) <= 2 * sig2),
-                            color=c2, alpha=0.10, label=r"$\pm 2\sigma_2$")
+        if has2:
+            pdf2   = _norm.pdf(x, m2, sig2)
+            line2, = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
+            env2   = ax.fill_between(x, pdf2, where=(np.abs(x - m2) <= 2 * sig2),
+                                     color=c2, alpha=0.15)
             ax.axvline(m2, color=c2, linewidth=1.2, linestyle="--", alpha=0.8)
 
-        # ── y_n ─────────────────────────────────────────────────────────
+        # ── y^0 marker ──────────────────────────────────────────────────
+        yn_line = None
         if self._src_traj.isChecked() and self._ys is not None:
-            yn_val = float(y_n[0, 0])
-            ax.axvline(yn_val, color="#333333", linewidth=1.0,
-                       linestyle=":", alpha=0.8, label=rf"$y_n = {yn_val:.4g}$")
+            yn_val  = float(y_n[0, 0])
+            yn_line = ax.axvline(yn_val, color="#333333", linewidth=1.2,
+                                 linestyle=":", alpha=0.85)
+
+        # ── Légende 2 colonnes : gauche = courbes, droite = enveloppes ──
+        leg_h = [line1,                                        env1]
+        leg_l = [rf"$p_1$ H5 exact   $\mu_1={m1:.4g}$",      rf"$\pm 2\sigma_1={sig1:.4g}$"]
+        if has2:
+            leg_h += [line2,                                   env2]
+            leg_l += [rf"$p_2$ approx.   $\mu_2={m2:.4g}$",  rf"$\pm 2\sigma_2={sig2:.4g}$"]
+        if yn_line is not None:
+            leg_h += [yn_line]
+            leg_l += [rf"$y^0 = {yn_val:.4g}$"]
+        ax.legend(leg_h, leg_l, fontsize=9, ncol=2)
 
         ax.set_xlabel(r"$y^0_{n+1}$", fontsize=11)
         ax.set_ylabel("densité", fontsize=10)
-        ax.legend(fontsize=9)
         ax.grid(True, linestyle=":", alpha=0.4)
         n_lbl = f"  n = {self._n_spin.value()}" if self._src_traj.isChecked() else ""
         ax.set_title(
@@ -930,26 +940,27 @@ class PredYPanel(QWidget):
             lo = m1v - 4.5 * s1v; hi = m1v + 4.5 * s1v
             if m2v is not None:
                 lo = min(lo, m2v - 4.5 * s2v); hi = max(hi, m2v + 4.5 * s2v)
-            x   = np.linspace(lo, hi, 400)
-            pdf = _norm.pdf(x, m1v, s1v)
-            ax.plot(x, pdf, color=c1, linewidth=2.0,
-                    label=rf"$p_1$  ($\mu={m1v:.3g}$, $\sigma={s1v:.3g}$)")
-            ax.fill_between(x, pdf, where=(np.abs(x - m1v) <= s1v),
-                            color=c1, alpha=0.30, label=r"$\pm 1\sigma_1$")
-            ax.fill_between(x, pdf, where=(np.abs(x - m1v) <= 2 * s1v),
-                            color=c1, alpha=0.15, label=r"$\pm 2\sigma_1$")
+            x    = np.linspace(lo, hi, 400)
+            pdf1 = _norm.pdf(x, m1v, s1v)
+            ln1, = ax.plot(x, pdf1, color=c1, linewidth=2.0)
+            ev1  = ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v),
+                                   color=c1, alpha=0.20)
             ax.axvline(m1v, color=c1, linewidth=1.0, linestyle="--", alpha=0.8)
+            leg_h = [ln1,                                      ev1]
+            leg_l = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$",
+                     rf"$\pm 2\sigma_1$"]
             if m2v is not None:
                 pdf2 = _norm.pdf(x, m2v, s2v)
-                ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--",
-                        label=rf"$p_2$  ($\mu={m2v:.3g}$, $\sigma={s2v:.3g}$)")
-                ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= s2v),
-                                color=c2, alpha=0.20, label=r"$\pm 1\sigma_2$")
-                ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
-                                color=c2, alpha=0.10, label=r"$\pm 2\sigma_2$")
+                ln2, = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
+                ev2  = ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
+                                       color=c2, alpha=0.15)
                 ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
+                leg_h += [ln2,                                 ev2]
+                leg_l += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$",
+                          rf"$\pm 2\sigma_2$"]
             ax.set_xlabel(xlabel, fontsize=10); ax.set_ylabel("densité", fontsize=9)
-            ax.legend(fontsize=7); ax.grid(True, linestyle=":", alpha=0.4)
+            ax.legend(leg_h, leg_l, fontsize=7, ncol=2)
+            ax.grid(True, linestyle=":", alpha=0.4)
 
         ax0 = self._fig_dens.add_subplot(1, 3, 1)
         _marginal(ax0, 0, m1_0, s1_0,
@@ -1023,26 +1034,27 @@ class PredYPanel(QWidget):
                 hi  = max(hi, m2v + 4.5 * s2v)
             x    = np.linspace(lo, hi, 400)
             pdf1 = _norm.pdf(x, m1v, s1v)
-            ax.plot(x, pdf1, color=c1, linewidth=2.0,
-                    label=rf"$p_1$  ($\mu={m1v:.3g}$, $\sigma={s1v:.3g}$)")
-            ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= s1v),
-                            color=c1, alpha=0.30, label=r"$\pm 1\sigma_1$")
-            ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v),
-                            color=c1, alpha=0.15, label=r"$\pm 2\sigma_1$")
+            ln1, = ax.plot(x, pdf1, color=c1, linewidth=2.0)
+            ev1  = ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v),
+                                   color=c1, alpha=0.20)
             ax.axvline(m1v, color=c1, linewidth=1.0, linestyle="--", alpha=0.8)
+            leg_h = [ln1,                                      ev1]
+            leg_l = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$",
+                     rf"$\pm 2\sigma_1$"]
             if has2:
                 pdf2 = _norm.pdf(x, m2v, s2v)
-                ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--",
-                        label=rf"$p_2$  ($\mu={m2v:.3g}$, $\sigma={s2v:.3g}$)")
-                ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= s2v),
-                                color=c2, alpha=0.20, label=r"$\pm 1\sigma_2$")
-                ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
-                                color=c2, alpha=0.10, label=r"$\pm 2\sigma_2$")
+                ln2, = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
+                ev2  = ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
+                                       color=c2, alpha=0.15)
                 ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
+                leg_h += [ln2,                                 ev2]
+                leg_l += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$",
+                          rf"$\pm 2\sigma_2$"]
             ax.set_xlabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.set_ylabel("densité", fontsize=9)
             ax.set_title(rf"Marginale $y^{i}$", fontsize=9)
-            ax.legend(fontsize=7); ax.grid(True, linestyle=":", alpha=0.4)
+            ax.legend(leg_h, leg_l, fontsize=7, ncol=2)
+            ax.grid(True, linestyle=":", alpha=0.4)
         self._fig_dens.suptitle(
             rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)$  [marginales]",
             fontsize=10)

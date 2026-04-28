@@ -95,10 +95,8 @@ def _shape_diagnostics(x: np.ndarray) -> tuple[float, float, float, float]:
     - Jarque–Bera (JB)   : combined test, JB ~ χ²(2) under H₀ "Gaussian".
                            Computed via SciPy's reference implementation.
 
-    For a Gaussian Switching System the marginal innovation is theoretically
-    a *mixture of Gaussians* conditional on the regime, so non-zero kurtosis
-    (and a small JB p-value) is expected even for a correctly-tuned filter.
-    Use S and K as the primary indicator and JB as a sanity check.
+    Applied to *standardised* innovations these diagnostics are meaningful for
+    GSS models: if S ≈ 0 and K ≈ 0 the filter is well-calibrated.
     """
     n = len(x)
     if n < 4:
@@ -120,6 +118,71 @@ def _shape_diagnostics(x: np.ndarray) -> tuple[float, float, float, float]:
         JB = n * (S ** 2 / 6.0 + Kurt ** 2 / 24.0)
         p  = float(1.0 - _chi2_dist.cdf(JB, df=2))
     return S, Kurt, JB, p
+
+
+# ---------------------------------------------------------------------------
+# Innovation standardisation (A12 / D1)
+# ---------------------------------------------------------------------------
+
+
+def _standardise_innovations(
+    innovations: np.ndarray,
+    mix_w: np.ndarray | None,
+    Gamma: list | None,
+    mu_Y_jk: list | None,
+) -> np.ndarray:
+    """
+    Whiten innovations by the (approximate) marginal innovation covariance S.
+
+    Two modes:
+
+    * h5_exact (all three extra arguments provided):
+      S = Σ_{j,k} w_{jk} [Γ(j,k) + δ_{jk} δ_{jk}ᵀ]
+      where δ_{jk} = μ_{Y,jk} − Σ w μ_{Y} is the deviation of the
+      component mean from the mixture mean.  S is the *stationary*
+      marginal innovation covariance.
+
+    * imm_general (extra arguments None):
+      S is estimated from the sample covariance of the innovations.
+
+    Returns  ν̃ = L⁻¹ ν   (shape same as *innovations*), where S = L Lᵀ.
+    Under a well-calibrated filter each ν̃ᵢ is approximately N(0, 1).
+    """
+    s = innovations.shape[1]
+
+    if mix_w is not None and Gamma is not None and mu_Y_jk is not None:
+        # Stationary marginal covariance
+        K_mix = mix_w.shape[0]
+        mu_marg = np.zeros((s, 1))
+        for j in range(K_mix):
+            for k in range(K_mix):
+                mu_marg += float(mix_w[j, k]) * mu_Y_jk[j][k]
+
+        S = np.zeros((s, s))
+        for j in range(K_mix):
+            for k in range(K_mix):
+                w = float(mix_w[j, k])
+                if w < 1e-12:
+                    continue
+                delta = mu_Y_jk[j][k] - mu_marg       # (s, 1)
+                S += w * (Gamma[j][k] + delta @ delta.T)
+    else:
+        # Sample covariance fallback (imm_general mode)
+        raw = innovations.T    # (s, N)
+        S = np.cov(raw) if s > 1 else np.array([[float(np.var(innovations[:, 0]))]])
+
+    # Cholesky + solve: ν̃ = L⁻¹ ν  →  each column has unit variance
+    try:
+        L = np.linalg.cholesky(_sym_reg(S, 1e-10))
+        return np.linalg.solve(L, innovations.T).T   # (N, s)
+    except np.linalg.LinAlgError:
+        return innovations   # give up and return raw
+
+
+def _sym_reg(M: np.ndarray, eps: float = 1e-10) -> np.ndarray:
+    """Return (M + Mᵀ)/2 + eps·I  (symmetrised + regularised)."""
+    n = M.shape[0]
+    return 0.5 * (M + M.T) + eps * np.eye(n)
 
 
 # ---------------------------------------------------------------------------
@@ -1017,10 +1080,13 @@ class GSSMainWindow(QMainWindow):
         innov_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         innov_title.setStyleSheet("font-size: 10px; font-weight: bold;")
         innov_title.setToolTip(
-            "Ljung-Box: whiteness (no autocorrelation up to lag h).\n"
-            "Shape:    sample skewness S and excess kurtosis K.\n"
-            "          For a GSS, the innovation is a mixture of Gaussians,\n"
-            "          so K ≠ 0 is expected even when the filter is correct."
+            "Ljung-Box: whiteness test on raw innovations\n"
+            "           (no autocorrelation up to lag h).\n"
+            "Shape:    skewness S and excess kurtosis K of STANDARDISED\n"
+            "           innovations ν̃ = S^{-1/2} ν.\n"
+            "           (h5_exact: whitened by stationary Γ mixture;\n"
+            "            imm_general: whitened by sample covariance)\n"
+            "           For a well-tuned filter: |S|≈0, |K|≈0."
         )
         innov_layout.addWidget(innov_title)
 
@@ -1536,9 +1602,34 @@ class GSSMainWindow(QMainWindow):
             8000,
         )
 
-        # ── Innovation diagnostics: Ljung-Box + Jarque-Bera ────────────
+        # ── Innovation diagnostics: Ljung-Box + shape of standardised ν̃ ────
+        # Compute standardised innovations once (A12 / D1):
+        #   h5_exact  → whiten by stationary marginal covariance Σ w_{jk} Γ_{jk}
+        #   imm_general → whiten by sample covariance
+        _mix_w    = None
+        _Gamma_cm = None
+        _muY_jk   = None
+        if (
+            self._filter_worker is not None
+            and hasattr(self._filter_worker, "cond_moments")
+        ):
+            cm_diag = self._filter_worker.cond_moments
+            if all(k in cm_diag for k in ("mix_w", "Gamma", "mu_Y_jk")):
+                _mix_w    = cm_diag["mix_w"]
+                _Gamma_cm = cm_diag["Gamma"]
+                _muY_jk   = cm_diag["mu_Y_jk"]
+
+        try:
+            innov_std = _standardise_innovations(
+                innovations, _mix_w, _Gamma_cm, _muY_jk
+            )
+        except Exception:   # noqa: BLE001
+            innov_std = innovations   # safe fallback
+
+        std_mode = "h5 S" if _mix_w is not None else "sample S"
+
         for i in range(self._s):
-            # Ljung-Box
+            # Ljung-Box on raw innovation (autocorrelation test is scale-independent)
             _, p_lb, h_lb = _ljung_box(innovations[:, i])
             if p_lb > 0.10:
                 style, icon, verdict = _PILL_OK,   "✓", "white"
@@ -1554,10 +1645,8 @@ class GSSMainWindow(QMainWindow):
                 f"Ljung-Box: Q stat with h = {h_lb} lags.\n"
                 f"p = {p_lb:.4g} (p > 0.10 ⇒ white noise)."
             )
-            # Shape diagnostics (skewness + excess kurtosis + JB)
-            S, K, JB, p_jb = _shape_diagnostics(innovations[:, i])
-            # Verdict driven by the moments themselves (more robust than JB
-            # p-value for GSS innovations, which are mixtures of Gaussians).
+            # Shape diagnostics on STANDARDISED innovation
+            S, K, JB, p_jb = _shape_diagnostics(innov_std[:, i])
             sk_ok = abs(S) < 0.25 and abs(K) < 0.50
             sk_wn = abs(S) < 0.50 and abs(K) < 1.00
             if sk_ok:
@@ -1571,12 +1660,13 @@ class GSSMainWindow(QMainWindow):
             )
             self._innov_jb_badges[i].setStyleSheet(style)
             self._innov_jb_badges[i].setToolTip(
+                f"Standardised innovation ν̃  ({std_mode})\n"
                 f"Skewness  S = {S:+.4f}   (target ≈ 0)\n"
                 f"Excess kurtosis  K = {K:+.4f}   (target ≈ 0 for Gaussian)\n"
                 f"Jarque-Bera  JB = {JB:.3f}   p = {p_jb:.4g}\n"
-                "Note: GSS innovations are theoretically a mixture of Gaussians\n"
-                "(conditional on the regime), so K ≠ 0 is expected even for a\n"
-                "correctly-tuned filter. Use S and K as the primary indicator."
+                "Standardisation removes the scale-mixing effect of regime\n"
+                "switching, so S ≈ 0 and K ≈ 0 are achievable for a\n"
+                "well-calibrated filter."
             )
         self._innov_frame.setVisible(True)
 

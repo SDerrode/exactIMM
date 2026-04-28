@@ -424,8 +424,7 @@ class _InnovHistDialog(QDialog):
             s = innov.shape[1]
             header = ["n"] + [f"nu_{i}" for i in range(s)]
             with open(path, "w", newline="", encoding="utf-8") as fh:
-                import csv as _csv
-                w = _csv.writer(fh)
+                w = csv.writer(fh)
                 w.writerow(header)
                 for n, row in enumerate(innov):
                     w.writerow([n] + list(row))
@@ -1045,8 +1044,11 @@ class GSSMainWindow(QMainWindow):
         auto_row = QHBoxLayout()
         self._auto_filter_check = QCheckBox("Auto-filter after simulate")
         self._auto_filter_check.setToolTip(
-            "When enabled, the filter is launched automatically at the end of a\n"
-            "single simulation (no effect in Monte-Carlo mode)."
+            "When enabled, the filter runs automatically after every single simulation.\n"
+            "The filter uses the parameters captured at simulate time — editing the\n"
+            "widgets afterwards does not affect the auto-filter run.\n"
+            "The Filter mode (IMM / H5) and Joseph form settings below apply as usual.\n"
+            "No effect in Monte-Carlo mode."
         )
         auto_row.addWidget(self._auto_filter_check)
         auto_row.addStretch()
@@ -1105,37 +1107,43 @@ class GSSMainWindow(QMainWindow):
 
         self._btn_simulate = QPushButton("Simulate")
         self._btn_simulate.setFixedHeight(36)
+        self._btn_simulate.setToolTip("Run a new simulation  (Ctrl+R)")           # B2
         self._btn_simulate.clicked.connect(self._on_simulate)
 
         self._btn_filter = QPushButton("Filter")
         self._btn_filter.setFixedHeight(36)
         self._btn_filter.setEnabled(False)
+        self._btn_filter.setToolTip("Run the optimal filter on the simulation  (Ctrl+F)")  # B3
         self._btn_filter.clicked.connect(self._on_filter)
 
         self._btn_save = QPushButton("Save CSV")
         self._btn_save.setFixedHeight(36)
         self._btn_save.setEnabled(False)
+        self._btn_save.setToolTip("Save simulation data to a CSV file  (Ctrl+S)")  # B4
         self._btn_save.clicked.connect(self._on_save)
 
         self._btn_load = QPushButton("Load CSV…")
         self._btn_load.setFixedHeight(36)
+        self._btn_load.setToolTip("Load a previously saved simulation CSV  (Ctrl+O)")  # B5
         self._btn_load.clicked.connect(self._on_load_data)
 
         self._btn_export = QPushButton("Export model…")
         self._btn_export.setFixedHeight(36)
         self._btn_export.setEnabled(False)
+        self._btn_export.setToolTip("Export current parameters as a Python model file  (Ctrl+E)")  # B6
         self._btn_export.clicked.connect(self._on_export_model)
 
         self._btn_export_plots = QPushButton("Export plots…")
         self._btn_export_plots.setFixedHeight(36)
         self._btn_export_plots.setEnabled(False)
+        self._btn_export_plots.setToolTip("Save current plots to PDF / PNG / SVG  (Ctrl+Shift+E)")  # B6
         self._btn_export_plots.clicked.connect(self._on_export_plots)
 
         self._btn_innov_hist = QPushButton("📊 Innovation histograms…")
         self._btn_innov_hist.setFixedHeight(36)
         self._btn_innov_hist.setEnabled(False)
         self._btn_innov_hist.setToolTip(
-            "Show histogram of each innovation component + Gaussian fit."
+            "Show innovation histograms, ACF, and scatter plots.  (Ctrl+I)"  # A8
         )
         self._btn_innov_hist.clicked.connect(self._on_innov_hist)
 
@@ -1149,6 +1157,7 @@ class GSSMainWindow(QMainWindow):
 
         self._btn_reset = QPushButton("⟳  Reset")
         self._btn_reset.setFixedHeight(36)
+        self._btn_reset.setToolTip("Clear all results and reset the plots  (Ctrl+Shift+R)")  # B7
         self._btn_reset.clicked.connect(self._on_reset)
 
         btn_grid.addWidget(self._btn_simulate,    0, 0)
@@ -1162,6 +1171,14 @@ class GSSMainWindow(QMainWindow):
         btn_grid.addWidget(self._btn_reset,       4, 0, 1, 2)
 
         left_layout.addLayout(btn_grid)
+
+        # B1: keyboard shortcut hint — small one-liner for discoverability
+        _sc_hint = QLabel(
+            "Ctrl+R Simulate  ·  Ctrl+F Filter  ·  Ctrl+I Innovations  ·  Ctrl+Shift+R Reset"
+        )
+        _sc_hint.setStyleSheet("font-size: 9px; color: #888888; padding: 1px 0;")
+        _sc_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(_sc_hint)
 
         # Thin separator between buttons and result panels (B11)
         sep = QFrame()
@@ -1185,9 +1202,13 @@ class GSSMainWindow(QMainWindow):
         self._loglik_label = QLabel("")
         self._loglik_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._loglik_label.setToolTip(
-            "Total log-likelihood log p(y_{1:N}) = Σ log p(y_n|y_{1:n-1}).\n"
-            "Useful for model selection (BIC/AIC).\n"
-            "Mean value per step shown in parentheses."
+            "Total log-likelihood  log L = Σₙ log p(yₙ | y₁:ₙ₋₁)  (nats).\n"
+            "Mean per step:  ℓ̄ = log L / N.\n\n"
+            "Model-selection criteria (smaller = better fit adjusted for complexity):\n"
+            "  BIC = −2 log L + d · log N\n"
+            "  AIC = −2 log L + 2d\n"
+            "where d = number of free parameters.\n\n"
+            "Under the true model, ℓ̄ → −h  (entropy rate) as N → ∞."
         )
         mse_layout.addWidget(self._loglik_label)
 
@@ -1257,7 +1278,7 @@ class GSSMainWindow(QMainWindow):
 
         self._status_bar = QLabel("")
         self._status_bar.setWordWrap(True)
-        self._status_bar.setStyleSheet("color: #cc0000; font-size: 10px;")
+        self._status_bar.setStyleSheet("font-size: 10px; color: #444444;")  # A10: neutral default
         left_layout.addWidget(self._status_bar)
 
         splitter.addWidget(left)
@@ -1380,7 +1401,7 @@ class GSSMainWindow(QMainWindow):
         self._sync_menu_actions()
         self._mse_frame.setVisible(False)
         self._innov_frame.setVisible(False)
-        self._status_bar.setText("")
+        self._set_status("")
         self._plot_panel.clear()
         # Réinitialiser et désactiver l'onglet p(y_{n+1} | …)
         self._pred_y_panel.clear()
@@ -1443,7 +1464,7 @@ class GSSMainWindow(QMainWindow):
         self._mse_frame.setVisible(False)
         self._innov_frame.setVisible(False)
         self._plot_panel.clear_filter_overlay()
-        self._status_bar.setText("")
+        self._set_status("")
         self._op_t0 = time.perf_counter()
         self.statusBar().showMessage(f"Simulating  N = {N}…")
 
@@ -1475,7 +1496,7 @@ class GSSMainWindow(QMainWindow):
         self._sync_menu_actions()
         self._mse_frame.setVisible(False)
         self._innov_frame.setVisible(False)
-        self._status_bar.setText("")
+        self._set_status("")
         self._op_t0 = time.perf_counter()
         self.statusBar().showMessage(f"Monte Carlo  M = {M}, N = {N}…")
 
@@ -1532,7 +1553,7 @@ class GSSMainWindow(QMainWindow):
             self._wait_dlg.reject()
             self._wait_dlg = None
 
-        self._status_bar.setText(f"Error: {msg}")
+        self._set_status(f"Error: {msg}", error=True)
         self.statusBar().showMessage(f"Simulation error: {msg}", 8000)
         self._refresh_simulate_button()
 
@@ -1574,7 +1595,7 @@ class GSSMainWindow(QMainWindow):
             f"Monte Carlo complete — M = {M}, N = {self._n_spin.value()} "
             f"steps in {elapsed:.2f}s."
         )
-        self._status_bar.setText(msg)
+        self._set_status(msg)
         self.statusBar().showMessage(msg, 8000)
         self._refresh_simulate_button()
 
@@ -1585,7 +1606,7 @@ class GSSMainWindow(QMainWindow):
             self._wait_dlg.reject()
             self._wait_dlg = None
 
-        self._status_bar.setText(f"Monte Carlo error: {msg}")
+        self._set_status(f"Monte Carlo error: {msg}", error=True)
         self.statusBar().showMessage(f"Monte Carlo error: {msg}", 8000)
         self._refresh_simulate_button()
 
@@ -1608,7 +1629,7 @@ class GSSMainWindow(QMainWindow):
         self._btn_filter.setEnabled(False)
         self._sync_menu_actions()
         self._mse_frame.setVisible(False)
-        self._status_bar.setText("")
+        self._set_status("")
         self._op_t0 = time.perf_counter()
         msg = f"Filtering  N = {len(ys)}…"
         if params_drifted:
@@ -1778,12 +1799,26 @@ class GSSMainWindow(QMainWindow):
 
         std_mode = "h5 S" if _mix_w is not None else "sample S"
 
+        # D2: Bonferroni correction — running 2·s independent tests (s LB + s shape).
+        # Per-test significance level = α / (2·s) so the family-wise error rate ≤ α=0.05.
+        n_tests   = max(1, 2 * self._s)
+        alpha_fam = 0.05                             # target FWER
+        alpha_lb  = alpha_fam / n_tests              # per LB test
+        alpha_sk  = alpha_fam / n_tests              # per shape test
+        # "warn" zone = [alpha, 2·alpha]; "ok" zone = (2·alpha, 1]
+        thresh_lb_ok   = 2.0 * alpha_lb
+        thresh_lb_warn = alpha_lb
+        bonf_note = (
+            f"Bonferroni-corrected threshold: α_per = {alpha_lb:.4g} "
+            f"(family-wise α={alpha_fam}, {n_tests} tests)."
+        )
+
         for i in range(self._s):
             # Ljung-Box on raw innovation (autocorrelation test is scale-independent)
             _, p_lb, h_lb = _ljung_box(innovations[:, i])
-            if p_lb > 0.10:
+            if p_lb > thresh_lb_ok:
                 style, icon, verdict = _PILL_OK,   "✓", "white"
-            elif p_lb > 0.05:
+            elif p_lb > thresh_lb_warn:
                 style, icon, verdict = _PILL_WARN, "~", "border"
             else:
                 style, icon, verdict = _PILL_ERR,  "✗", "autocor."
@@ -1793,7 +1828,8 @@ class GSSMainWindow(QMainWindow):
             self._innov_lb_badges[i].setStyleSheet(style)
             self._innov_lb_badges[i].setToolTip(
                 f"Ljung-Box: Q stat with h = {h_lb} lags.\n"
-                f"p = {p_lb:.4g} (p > 0.10 ⇒ white noise)."
+                f"p = {p_lb:.4g}   (OK if p > {thresh_lb_ok:.4g}).\n"
+                f"{bonf_note}"
             )
             # Shape diagnostics on STANDARDISED innovation
             S, K, JB, p_jb = _shape_diagnostics(innov_std[:, i])
@@ -1816,7 +1852,7 @@ class GSSMainWindow(QMainWindow):
                 f"Jarque-Bera  JB = {JB:.3f}   p = {p_jb:.4g}\n"
                 "Standardisation removes the scale-mixing effect of regime\n"
                 "switching, so S ≈ 0 and K ≈ 0 are achievable for a\n"
-                "well-calibrated filter."
+                f"well-calibrated filter.\n{bonf_note}"
             )
         self._innov_frame.setVisible(True)
 
@@ -1827,13 +1863,21 @@ class GSSMainWindow(QMainWindow):
             self._wait_dlg.reject()
             self._wait_dlg = None
 
-        self._status_bar.setText(f"Filter error: {msg}")
+        self._set_status(f"Filter error: {msg}", error=True)
         self.statusBar().showMessage(f"Filter error: {msg}", 8000)
         self._btn_filter.setEnabled(True)
         self._sync_menu_actions()
 
     def _on_export_model(self) -> None:
         """Open a save-file dialog and write a ready-to-use Python model file."""
+        # A14: guard against exporting with invalid parameters
+        if not (self._param_panel.is_valid() and self._p_widget.is_valid()):
+            QMessageBox.warning(
+                self, "Invalid parameters",
+                "One or more parameters are currently invalid.\n"
+                "Fix all highlighted cells before exporting the model.",
+            )
+            return
         default_name = (
             f"model_gss_K{self._K}_q{self._q}_s{self._s}_custom.py"
         )
@@ -2008,7 +2052,7 @@ class GSSMainWindow(QMainWindow):
         info = f"Loaded {len(ns)} steps from '{pathlib.Path(path).name}'"
         if not has_x:
             info += "  (no ground-truth X)"
-        self._status_bar.setText(info)
+        self._set_status(info)
         self.statusBar().showMessage(info, 6000)
 
     # ------------------------------------------------------------------
@@ -2250,14 +2294,12 @@ class GSSMainWindow(QMainWindow):
         self._btn_export.setEnabled(valid)
         if valid:
             self._btn_simulate.setStyleSheet("")
-            self._status_bar.setText("")
+            self._set_status("")
         else:
             self._btn_simulate.setStyleSheet(
                 "border: 2px solid #cc0000; color: #cc0000;"
             )
-            self._status_bar.setText(
-                "Invalid parameter(s) — fix before simulating."
-            )
+            self._set_status("Invalid parameter(s) — fix before simulating.", error=True)
         self._sync_menu_actions()
 
     def _sync_menu_actions(self) -> None:
@@ -2271,6 +2313,18 @@ class GSSMainWindow(QMainWindow):
         self._act_export_plots.setEnabled(self._btn_export_plots.isEnabled())
         self._act_innov_hist.setEnabled(self._btn_innov_hist.isEnabled())
         self._act_mc_hist.setEnabled(self._btn_mc_hist.isEnabled())
+
+    def _set_status(self, msg: str, *, error: bool = False) -> None:
+        """Update the left-panel status label with appropriate styling (A10).
+
+        Parameters
+        ----------
+        msg   : message text (empty string clears the label).
+        error : if True, use red error styling; if False, use neutral grey.
+        """
+        self._status_bar.setText(msg)
+        color = "#cc0000" if error else "#444444"
+        self._status_bar.setStyleSheet(f"font-size: 10px; color: {color};")
 
     def _parse_seed(self) -> int | None:
         text = self._seed_edit.text().strip()
@@ -2316,7 +2370,7 @@ class GSSMainWindow(QMainWindow):
         b_list = self._param_panel.get_b_list()
         P = self._p_widget.get_matrix()
         if F_list is None or Sigma_W_list is None or mu_z0_list is None or b_list is None or P is None:
-            self._status_bar.setText("Invalid parameter(s).")
+            self._set_status("Invalid parameter(s).", error=True)
             return None
 
         # Decompose Sigma_W(k) into blocks Sigma_U, Delta, Sigma_V
@@ -2347,7 +2401,7 @@ class GSSMainWindow(QMainWindow):
                 b_list=b_list,          # from GUI
             )
         except Exception as exc:  # noqa: BLE001
-            self._status_bar.setText(f"Parameter error: {exc}")
+            self._set_status(f"Parameter error: {exc}", error=True)
             return None
 
         return params
@@ -2480,22 +2534,36 @@ class GSSMainWindow(QMainWindow):
         return "\n".join(lines)
 
     def _load_model(self, model) -> None:
-        """Pre-fill tables from a BaseGSSModel instance."""
-        p = model.get_params()
-        K, q, s = p["K"], p["q"], p["s"]
+        """Pre-fill tables from a BaseGSSModel instance.
 
-        # Build block noise cov to get full Σ_W
-        nc = GSSNoiseCovariance(K, q, s, p["Sigma_U_list"], p["Delta_list"], p["Sigma_V_list"])
-        fm = FMatrix(K, q, s, p["A_list"], p["B_list"], p["C_list"], p["D_list"])
+        Signals on ``_param_panel`` and ``_p_widget`` are blocked during the
+        bulk update so that validity / value signals don't fire repeatedly for
+        each individual state — preventing the double-refresh of the Simulate
+        button and the flicker of intermediate validity states (A11 / A16).
+        Callers must invoke ``_refresh_simulate_button()`` after this method.
+        """
+        # A11 / A16: block validity/value signals during bulk loading
+        self._param_panel.blockSignals(True)
+        self._p_widget.blockSignals(True)
+        try:
+            p = model.get_params()
+            K, q, s = p["K"], p["q"], p["s"]
 
-        mu_list = p.get("mu_z0_list")
-        b_list  = p.get("b_list")
-        for k in range(K):
-            mu = np.asarray(mu_list[k]) if mu_list is not None else None
-            b  = np.asarray(b_list[k])  if b_list  is not None else None
-            self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu, b)
+            # Build block noise cov to get full Σ_W
+            nc = GSSNoiseCovariance(K, q, s, p["Sigma_U_list"], p["Delta_list"], p["Sigma_V_list"])
+            fm = FMatrix(K, q, s, p["A_list"], p["B_list"], p["C_list"], p["D_list"])
 
-        if p.get("P") is not None:
-            self._P = np.asarray(p["P"])
-            self._p_widget.set_matrix(self._P)
-            self._update_stationary_display()
+            mu_list = p.get("mu_z0_list")
+            b_list  = p.get("b_list")
+            for k in range(K):
+                mu = np.asarray(mu_list[k]) if mu_list is not None else None
+                b  = np.asarray(b_list[k])  if b_list  is not None else None
+                self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu, b)
+
+            if p.get("P") is not None:
+                self._P = np.asarray(p["P"])
+                self._p_widget.set_matrix(self._P)
+                self._update_stationary_display()
+        finally:
+            self._param_panel.blockSignals(False)
+            self._p_widget.blockSignals(False)

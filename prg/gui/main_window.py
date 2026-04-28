@@ -646,6 +646,7 @@ class _FilterWorker(QThread):
 
     # E_xs (N,q), Var_xs (N,q), pis (N,K), innovations (N,s), log_lik_total (float)
     finished = pyqtSignal(object, object, object, object, float)
+    progress = pyqtSignal(int, int)   # (n_done, N_total) — D8
     error = pyqtSignal(str)
 
     def __init__(
@@ -670,10 +671,14 @@ class _FilterWorker(QThread):
             pis_list:     list[np.ndarray] = []
             innov_list:   list[np.ndarray] = []
             log_lik_total: float = 0.0
+            N = len(self._ys)
+            PROGRESS_EVERY = max(1, N // 50)   # D8: ~50 progress updates
             CHECK_EVERY = 256
             for i, y_row in enumerate(self._ys):
                 if (i & (CHECK_EVERY - 1)) == 0 and self.isInterruptionRequested():
                     return
+                if i % PROGRESS_EVERY == 0:
+                    self.progress.emit(i, N)
                 res = filt.step(y_row.reshape(-1, 1))
                 E_xs_list.append(res.E_x.ravel())
                 Var_xs_list.append(res.Var_x.diagonal())
@@ -682,12 +687,12 @@ class _FilterWorker(QThread):
                 if np.isfinite(res.log_lik):
                     log_lik_total += float(res.log_lik)
 
-            # Expose les moments pré-calculés pour l'onglet p(y_{n+1}|r_n,r_{n+1},y_n).
-            # Ces attributs n'existent qu'en mode "h5_exact" (ils sont produits par
-            # _precompute()). En mode "imm_general" on ne les définit pas : le slot
-            # _on_filter_finished teste hasattr() et laisse l'onglet grisé.
+            # Expose pre-computed moments for the p(y_{n+1}|r_n,r_{n+1},y_n) tab.
+            # These attributes only exist in "h5_exact" mode (produced by _precompute()).
+            # In "imm_general" mode they are absent: _on_filter_finished checks hasattr()
+            # and leaves the tab grayed out.
             if hasattr(filt, "_mu_Y_jk"):
-                # ── Signal 2 : moments directs depuis les matrices du modèle ──
+                # ── Signal 2: direct moments from the model matrices ──────────
                 # μ₂(j,k) = b_Y(k) + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n
                 # Γ₂(j,k) = Σ_{V,k} + C_k (Σ_{U,j} − Δ_j Σ_{V,j}^{-1} Δ_j^T) C_k^T
                 p   = self._params
@@ -710,7 +715,7 @@ class _FilterWorker(QThread):
                         M_simple[j][k] = D_k + C_k @ D_j @ SV_j_inv   # (s,s)
                         Gamma2[j][k]   = SV_k + C_k @ Schur_j @ C_k.T # (s,s)
 
-                # Poids stationnaires w_{jk} = π_∞(j) P(j,k)  (K,K)
+                # Stationary mixture weights w_{jk} = π_∞(j) P(j,k)  (K,K)
                 mix_w = filt._pi_inf[:, None] * p.P
 
                 self.cond_moments: dict = {
@@ -718,10 +723,10 @@ class _FilterWorker(QThread):
                     "M_t":     filt._M_t,
                     "Gamma":   filt._Gamma,
                     "mu_Y":    filt._mu_Y,
-                    "M_simple": M_simple,   # (s,s) matrice coeff. pour μ₂
-                    "Gamma2":   Gamma2,     # (s,s) covariance constante du signal 2
-                    "b_Y":      b_Y,        # [K]   ndarray (s,1) — biais du signal 2
-                    "mix_w":    mix_w,      # (K,K) poids mélange théorique
+                    "M_simple": M_simple,   # (s,s) signal 2 coefficient matrix
+                    "Gamma2":   Gamma2,     # (s,s) signal 2 constant covariance
+                    "b_Y":      b_Y,        # [K]   ndarray (s,1) — signal 2 bias
+                    "mix_w":    mix_w,      # (K,K) stationary mixture weights
                 }
 
             self.finished.emit(
@@ -1622,6 +1627,11 @@ class GSSMainWindow(QMainWindow):
         )
         self._filter_worker.finished.connect(self._on_filter_finished)  # type: ignore[arg-type]
         self._filter_worker.error.connect(self._on_filter_error)
+        # D8: wire progress → wait dialog progress bar
+        if self._wait_dlg is not None:
+            self._filter_worker.progress.connect(
+                lambda n, tot, dlg=self._wait_dlg: dlg.set_progress(n, tot)
+            )
         self._filter_worker.start()
 
     def _on_filter_finished(
@@ -1720,7 +1730,7 @@ class GSSMainWindow(QMainWindow):
         self._btn_innov_hist.setEnabled(True)
         self._sync_menu_actions()
 
-        # ── Onglet p(y_{n+1} | r_n, r_{n+1}, y_n) ──────────────────────
+        # ── Tab: p(y_{n+1} | r_n, r_{n+1}, y_n) ───────────────────────────
         if (
             self._filter_worker is not None
             and hasattr(self._filter_worker, "cond_moments")

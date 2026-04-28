@@ -862,10 +862,11 @@ class PredYPanel(QWidget):
 
         m1   = float(mu1[0, 0])
         sig1 = float(np.sqrt(max(float(Gamma1[0, 0]), 1e-12)))
+        has2 = mu2 is not None
 
         # x range : union des ±4.5σ des deux signaux
         x_lo, x_hi = m1 - 4.5 * sig1, m1 + 4.5 * sig1
-        if mu2 is not None:
+        if has2:
             m2   = float(mu2[0, 0])
             sig2 = float(np.sqrt(max(float(Gamma2[0, 0]), 1e-12)))
             x_lo = min(x_lo, m2 - 4.5 * sig2)

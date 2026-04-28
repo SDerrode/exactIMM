@@ -233,18 +233,43 @@ avec
 \end{equation}
 et les marginales $\pu{r_n}$ calculées classiquement.
 
+\smallskip
+\noindent\textit{Remarque.} Les récursions (16)--(17) supposent $\mu_n \equiv 0$
+(ou, de manière équivalente, que $\Vark{Z_n}{r_n} = \Ek{Z_n Z_n\tp}{r_n}$).
+Le cas général avec biais est traité dans l'option B ci-après.
+
 {\color{green!60!black}
 \smallskip
 \noindent\textbf{Option B — moyenne non nulle.}
-Si $\mu_n(r) := \Ek{Z_n}{r_n=r} \neq 0$, les seconds moments $\Vark{Z_n}{r_n}$
-seront notés $P_n(r_n)$ et les covariances \emph{centrées} $\Sigma_n(r_n) := P_n(r_n) - \mu_n(r_n)\,\mu_n(r_n)\tp$
-remplacent les seconds moments dans toutes les formules de conditionnement.
-Les moyennes marginales se propagent en parallèle des seconds moments (17) :
+Si $\mu_n(r) := \Ek{Z_n}{r_n=r} \neq 0$, on distingue soigneusement
+les \emph{seconds moments} $P_n(r_n) := \Ek{Z_n Z_n\tp}{r_n}$
+des \emph{covariances centrées} $\Sigma_n(r_n) := P_n(r_n) - \mu_n(r_n)\,\mu_n(r_n)\tp = \Vark{Z_n}{r_n}$.
+Ce sont les covariances centrées $\Sigma_n$ qui remplacent les seconds moments dans
+toutes les formules de conditionnement gaussien.
+
+Les moyennes marginales et les seconds moments se propagent conjointement.
+Pour la moyenne (récursion de la moyenne) :
 \begin{equation}
   \mu_{n+1}(r_{n+1}) \;=\; F_{r_{n+1}}\!\sum_{r_n} \pk{r_n}{r_{n+1}}\,\mu_n(r_n)
   {\color{magenta}\;+\; b_{r_{n+1}}}.
   \tag{17ter}
 \end{equation}
+Pour les seconds moments (récursion correcte, qui généralise (17) au cas biaisé) :
+\begin{equation}
+  P_{n+1}(k)
+  \;=\; F_k\!\left[\sum_{r_n}\pk{r_n}{r_{n+1}=k}P_n(r_n)\right]\!F_k\tp
+    + F_k\,m_k\,b_k\tp + b_k\,m_k\tp F_k\tp + b_k\,b_k\tp
+    + \Vark{W_{n+1}}{r_{n+1}=k},
+  \tag{17quater}
+\end{equation}
+avec $m_k := \sum_{r_n}\pk{r_n}{r_{n+1}=k}\,\mu_n(r_n)$.
+La covariance centrée s'en déduit par $\Sigma_{n+1}(k) = P_{n+1}(k) - \mu_{n+1}(k)\,\mu_{n+1}(k)\tp$.
+
+\noindent\textit{Note.} L'équation (17) — qui utilise $\Vark{Z_n}{r_n}$ des deux côtés — est
+incorrecte en option B car elle omet le terme de variance inter-régimes
+$F_k\bigl[\sum_{r_n}\pk{r_n}{k}(\mu_n(r_n)-m_k)(\mu_n(r_n)-m_k)\tp\bigr]F_k\tp$.
+La récursion (17quater) sur les seconds moments $P_n$, suivie du calcul de $\Sigma_n$,
+évite cette difficulté et est celle implémentée dans le code.
 En particulier, l'équation (13) se corrige en
 \begin{equation}
   \pk{y_{n+1}}{y_n,\,\rnn}
@@ -351,19 +376,20 @@ qui implique $\pk{x_{n+1}}{w_{1:n+1}} = \pk{x_{n+1}}{w_{n+1}}$, d'où (19) et (2
 }% fin {\color{blue}}
 
 \bigskip
-\noindent\textbf{En résumé, le filtrage est le suivant :}
+\noindent\textbf{En résumé, le filtrage optimal sous (H1)--(H3)+(H5) est le suivant :}
 
 \medskip
 Soient $\pk{r_n}{\yn}$, $\Ek{Z_n}{r_n, \yn}$,
 $\Vark{Z_n}{\yn} = \Vark{Z_n}{y_n}$ données
 (qui donnent donc également $\Ek{X_n}{r_n, y_n}$ et $\Vark{X_n}{\yn}$).
-{\color{green!60!black}En option B, l'état inclut aussi $\mu_n(r_n) = \Ek{Z_n}{r_n}$ pour chaque $r_n$.}
+{\color{green!60!black}En option B, l'état inclut aussi $\mu_n(r_n) = \Ek{Z_n}{r_n}$ et
+$P_n(r_n) = \Ek{Z_n Z_n\tp}{r_n}$ pour chaque $r_n$.}
 
 \begin{itemize}
   \item[(i)] calcul de $\Covk{Z_{n+1}}{Z_n}{\rnn}$ et $\Vark{Z_{n+1}}{r_{n+1}}$
     avec (16)--(17), ensuite $\pk{r_{n+1}, y_{n+1}}{r_n, y_n}$ avec (12)--(15), et
     $\pk{r_{n+1}}{\ynp}$ avec (18) ;
-    {\color{green!60!black}[option B : calculer aussi $\mu_{n+1}(r_{n+1})$ par (17ter) {\color{magenta}(avec biais $b_{r_{n+1}}$)} et utiliser (13') à la place de (13)]}
+    {\color{green!60!black}[option B : calculer $\mu_{n+1}(r_{n+1})$ par (17ter) {\color{magenta}(avec biais $b_{r_{n+1}}$)}, $P_{n+1}(r_{n+1})$ par (17quater), puis $\Sigma_{n+1}=P_{n+1}-\mu_{n+1}\mu_{n+1}\tp$, et utiliser (13') à la place de (13)]}
   \item[(ii)] calcul de $\Ek{X_{n+1}}{r_{n+1}, \ynp}$
     (qui est égal à $\Ek{X_{n+1}}{r_{n+1}, y_{n+1}}$) et
     $\Vark{X_{n+1}}{r_{n+1}, \ynp}$
@@ -411,12 +437,40 @@ $\Vark{Z_n}{\yn} = \Vark{Z_n}{y_n}$ données
 \draw[arr] (R2) -- (R3);
 
 \end{tikzpicture}
-\caption{Calcul récursif du filtre optimal et de son erreur quadratique}
+\caption{Calcul récursif du filtre optimal (sous (H1)--(H3)+(H5)) et de la variance a posteriori $\Vark{X_{n+1}}{\ynp}$}
 \end{figure}
 
-Finalement, l'important est les récursions (16) et (17), qui permettent de calculer les lois
-des marginales $(X_n, R_n, Y_n)$ et la loi de $(\RN, \YN)$.
+Finalement, l'important est les récursions (16) et (17) [et (17quater) en option B], qui
+permettent de calculer les lois des marginales $(X_n, R_n, Y_n)$ et la loi de $(\RN, \YN)$.
 Ensuite (19) et (20) permettent de conclure.
+
+\medskip
+\noindent\textbf{Innovation du filtre.}
+La récursion (i)--(iii) produit à chaque pas une quantité utile pour le diagnostic :
+\begin{equation}
+  \nu_{n+1} \;:=\; Y_{n+1} - \hat{Y}_{n+1\mid n},
+  \qquad
+  \hat{Y}_{n+1\mid n}
+  \;=\; \sum_{r_n,\,r_{n+1}} \pi_n(r_n)\,\pk{r_{n+1}}{r_n}\,
+        \Ek{Y_{n+1}}{r_n,\,r_{n+1},\,Y_n},
+  \tag{Inn}
+\end{equation}
+où $\Ek{Y_{n+1}}{r_n=j,r_{n+1}=k,Y_n}$ est la moyenne conditionnelle de (13)
+[ou (13') en option B].
+Sous le modèle exact, $\nu_{n+1}$ est une suite de variables aléatoires
+non corrélées (mais \emph{non} identiquement distribuées : leur variance
+$S_{n+1} = \sum_{j,k}\pi_n(j)P(j,k)\bigl[\Gamma_{jk}+(\mu_{Y,jk}^{\mathrm{cond}}-\hat{Y}_{n+1\mid n})
+(\mu_{Y,jk}^{\mathrm{cond}}-\hat{Y}_{n+1\mid n})\tp\bigr]$
+dépend du régime courant).
+La densité marginale de $\nu_{n+1}$ est le mélange gaussien
+$p(\nu) = \sum_{j,k} w_{jk}\,\Nc(\nu;\,\tilde\delta_{jk},\,\Gamma_{jk})$
+avec $w_{jk}=\pi_\infty(j)P(j,k)$ et $\tilde\delta_{jk}
+= \mu_{Y,jk}^{\mathrm{cond}} - \sum_{k'} P(j,k')\mu_{Y,jk'}^{\mathrm{cond}}$
+(centrage intra-régime $j$).
+En pratique on évalue la blancheur de $\nu$ par le test de Ljung--Box
+(sur $\nu_n$ standardisées par $S_n^{1/2}$) et la
+gaussianité par le test de Jarque--Bera (qui doit \emph{rejeter} pour un GSS
+à séparation de régimes notable, car la densité marginale est un mélange).
 
 % -----------------------------------------------------------------------
 % Section 0 — Initialisation du filtre (n = 1)
@@ -593,8 +647,12 @@ notations compactes (subscript $r$ omis) :
   M = QC^T + RD^T + \Sigma_V.
   \tag{4.6}
 \end{equation}
-\textit{Remarque.} $R = P^T$ ($\Sigma_V$ symétrique) et $M = M^T \succ 0$ dès que
-$\Sigma_U, \Sigma_V \succ 0$.
+\textit{Remarque.} $R = P^T$ ($\Sigma_V$ symétrique) et $M = M^T \succeq 0$ dès que
+$\Sigma_U, \Sigma_V \succeq 0$.  Pour avoir $M \succ 0$ (nécessaire pour inverser $M$ et
+obtenir $L \succ 0$), il suffit que la covariance jointe
+$\begin{bmatrix}\Sigma_U & \Delta \\ \Delta^T & \Sigma_V\end{bmatrix}$
+soit définie positive, ce qui équivaut à $\Sigma_V \succ 0$ et
+$\Sigma_U - \Delta\,\Sigma_V^{-1}\Delta^T \succ 0$ (complément de Schur).
 
 \noindent L'équation (4.4) se réécrit $\Delta^T A + \Sigma_V B^T = PM^{-1}(QA^T + RB^T +
 \Delta^T)$. En regroupant les termes en $B^T$ dans le membre gauche :

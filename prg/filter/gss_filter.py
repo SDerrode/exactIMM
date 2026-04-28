@@ -44,11 +44,24 @@ Modes
 
 ``mode="imm_general"`` — IMM-style recursion, no (H5) required
     The full F(k) = [[A_k, B_k], [C_k, D_k]] is used. Per-regime moments
-    µ_n(r), P_n(r) are propagated **at each step** from the filtered
-    π_n (not the stationary π_∞), following the recursion of the
-    companion paper CS_FinaleBis eqs (17ter), (17), (13')–(15), (18),
-    (21')–(22). This matches the behaviour of ``fofgss ≤ v0.9.0`` and
-    is appropriate for any GSS model, in particular non-(H5) models.
+    µ_n(r), P_n(r) are propagated **at each step** following the recursion
+    of the companion paper CS_FinaleBis eqs (17ter), (17quater), (13')–(15),
+    (18), (21')–(22). This matches the behaviour of ``fofgss ≤ v0.9.0``
+    and is appropriate for any GSS model, in particular non-(H5) models.
+
+    **IMM approximation note.** The paper's recursion (17ter)/(17quater)
+    uses the *prior* marginal p(r_n) to form the time-reversed transition
+    p(r_n | r_{n+1}).  This implementation instead uses the *filtered*
+    posterior π_n = p(r_n | y_{1:n}) — i.e.
+
+        p(r_n=j | r_{n+1}=k, y_{1:n})  ∝  π_n(j) · P(j, k)
+
+    which is the standard IMM heuristic and more responsive to the data.
+    Concretely this means µ_n(r), P_n(r) are *prior* (observation-free)
+    quantities propagated via the IMM mixing weights rather than the
+    unconditional marginals of the paper.  The difference is negligible
+    when the chain is near-stationary but can be significant in transient
+    regimes.  For the exact (H5)-optimal filter use ``mode="h5_exact"``.
 
 Joseph form (optional, h5_exact only)
 -------------------------------------

@@ -197,32 +197,39 @@ class _InnovHistDialog(QDialog):
 
             if mix_params is not None:
                 # ── Theoretical Gaussian mixture ────────────────────────────
-                w     = mix_params["w"]        # (K, K)  — already normalised
+                # p(ν) = Σ_{j,k} w_{jk} N(ν ; δ̃_{jk}, Γ_{jk})
+                #
+                # δ̃_{jk} = μ_{Y,jk}[i] − Σ_{k'} P(j,k') μ_{Y,jk'}[i]
+                #         = μ_{Y,jk}[i] − [Σ_{k'} w[j,k'] μ_{Y,jk'}[i]] / π_∞(j)
+                #
+                # This centring is correct for the innovation: it represents
+                # the deviation of component (j,k) from the predicted mean
+                # when the previous regime is j (dominant filter weight).
+                w     = mix_params["w"]        # (K, K) — already normalised
                 K_mix = w.shape[0]
-                Gam   = mix_params["Gamma"]    # [K][K]  (s, s)
-                muYjk = mix_params["mu_Y_jk"]  # [K][K]  (s, 1)
-
-                # Mixture mean μ̄_i = Σ_{jk} w_{jk} μ_{Y,jk}[i]
-                mu_bar_i = sum(
-                    float(w[j, k]) * float(muYjk[j][k][i, 0])
-                    for j in range(K_mix) for k in range(K_mix)
-                )
+                Gam   = mix_params["Gamma"]    # [K][K] (s, s)
+                muYjk = mix_params["mu_Y_jk"]  # [K][K] (s, 1)
 
                 pdf_mix = np.zeros_like(xg)
                 for j in range(K_mix):
+                    pi_j = max(float(w[j, :].sum()), 1e-12)   # = π_∞(j)
+                    # Within-previous-regime predicted mean: Σ_k P(j,k) μ_{Y,jk}[i]
+                    prev_mean_j_i = sum(
+                        float(w[j, kk]) * float(muYjk[j][kk][i, 0])
+                        for kk in range(K_mix)
+                    ) / pi_j
                     for k in range(K_mix):
                         wjk = float(w[j, k])
                         if wjk < 1e-10:
                             continue
-                        # Centre: deviation from mixture mean
-                        delta = float(muYjk[j][k][i, 0]) - mu_bar_i
-                        # Within-component std (conditional innovation variance)
+                        # δ̃_{jk}: deviation from within-j predicted mean
+                        delta = float(muYjk[j][k][i, 0]) - prev_mean_j_i
                         var_i = float(Gam[j][k][i, i])
                         sig   = float(np.sqrt(max(var_i, 1e-12)))
                         pdf_mix += wjk * _norm.pdf(xg, delta, sig)
 
                 ax.plot(xg, pdf_mix, "k-", linewidth=1.8,
-                        label=rf"$\sum_{{jk}}w_{{jk}}\,\mathcal{{N}}(\delta_{{jk}},\Gamma_{{jk}})$"
+                        label=rf"$\sum_{{jk}}w_{{jk}}\,\mathcal{{N}}(\tilde{{\delta}}_{{jk}},\Gamma_{{jk}})$"
                               f"  ({K_mix}² terms)")
             else:
                 # ── Fallback: best-fit single Gaussian ──────────────────────

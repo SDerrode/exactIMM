@@ -1034,6 +1034,13 @@ class GSSMainWindow(QMainWindow):
 
         left_layout.addLayout(btn_grid)
 
+        # Thin separator between buttons and result panels (B11)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        sep.setStyleSheet("color: #cccccc;")
+        left_layout.addWidget(sep)
+
         # ── MSE display box ──────────────────────────────────────────
         self._mse_frame = QFrame()
         self._mse_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -1539,16 +1546,25 @@ class GSSMainWindow(QMainWindow):
             ratio   = rmse_global / sig_std
             if ratio < 0.20:
                 bg, fg, border = "#d4edda", "#155724", "#c3e6cb"   # green
+                quality_icon = "✓"
             elif ratio < 0.50:
                 bg, fg, border = "#fff3cd", "#856404", "#ffc107"   # amber
+                quality_icon = "~"
             else:
                 bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"   # red
+                quality_icon = "✗"
+            title_text = (
+                f"Filter quality  {quality_icon}"
+                f"  (RMSE/σ = {ratio:.2f})"
+            )
         else:
             # No ground truth: neutral styling, hide MSE/RMSE rows
             self._mse_global_label.setText("")
             self._rmse_label.setText("")
             bg, fg, border = "#eef2f7", "#333333", "#c8d0d8"
+            title_text = "Filter quality  (log L only)"
 
+        self._mse_title.setText(title_text)
         self._mse_frame.setStyleSheet(
             f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
             f" border-radius: 4px; }}"

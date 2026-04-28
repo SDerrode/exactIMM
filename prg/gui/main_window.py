@@ -404,16 +404,18 @@ class _FilterWorker(QThread):
         params: GSSParams,
         ys: np.ndarray,   # (N, s)
         joseph: bool = False,
+        mode:   str  = "imm_general",
         parent=None,
     ):
         super().__init__(parent)
         self._params = params
         self._ys = ys
         self._joseph = joseph
+        self._mode   = mode
 
     def run(self) -> None:
         try:
-            filt = GSSFilter(self._params, joseph=self._joseph)
+            filt = GSSFilter(self._params, joseph=self._joseph, mode=self._mode)
             E_xs_list:    list[np.ndarray] = []
             Var_xs_list:  list[np.ndarray] = []
             pis_list:     list[np.ndarray] = []
@@ -730,18 +732,45 @@ class GSSMainWindow(QMainWindow):
         auto_row.addStretch()
         left_layout.addLayout(auto_row)
 
-        # Joseph form row
+        # Filter-mode row
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Filter mode:"))
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItem("IMM general (no (H5) required)", "imm_general")
+        self._mode_combo.addItem("Exact IMM under (H5)",            "h5_exact")
+        self._mode_combo.setToolTip(
+            "IMM general  — per-step moment propagation from the filtered π_n.\n"
+            "               Works for any GSS model (matches fofgss ≤ v0.9.0).\n"
+            "               Correct choice when B(k) ≠ 0.\n"
+            "Exact (H5)   — stationary pre-computed moments. Faster but exact\n"
+            "               only when B(k) = 0 for all k; emits a warning on\n"
+            "               non-(H5) models. See paper §3."
+        )
+        mode_row.addWidget(self._mode_combo)
+        mode_row.addStretch()
+        left_layout.addLayout(mode_row)
+
+        # Joseph form row (only meaningful for h5_exact mode)
         joseph_row = QHBoxLayout()
         self._joseph_check = QCheckBox("Joseph form (covariance update)")
         self._joseph_check.setToolTip(
-            "If checked, the mode-conditional posterior covariance is computed\n"
-            "via the Joseph form (numerically stable, symmetric and PSD by\n"
-            "construction). Mathematically equivalent to the short form under\n"
-            "stationarity. See paper Appendix E."
+            "Only used in 'Exact IMM under (H5)' mode. When checked, the\n"
+            "mode-conditional posterior covariance is computed via the Joseph\n"
+            "form (numerically stable, symmetric and PSD by construction).\n"
+            "Mathematically equivalent to the short form under stationarity.\n"
+            "See paper Appendix E."
         )
         joseph_row.addWidget(self._joseph_check)
         joseph_row.addStretch()
         left_layout.addLayout(joseph_row)
+
+        # Gray out the Joseph checkbox unless mode is h5_exact
+        def _sync_joseph_enabled():
+            self._joseph_check.setEnabled(
+                self._mode_combo.currentData() == "h5_exact"
+            )
+        self._mode_combo.currentIndexChanged.connect(lambda _: _sync_joseph_enabled())
+        _sync_joseph_enabled()
 
         left_layout.addStretch()   # pushes buttons to the bottom of the panel
 
@@ -1222,6 +1251,7 @@ class GSSMainWindow(QMainWindow):
         self._filter_worker = _FilterWorker(
             self._state.params, ys,
             joseph=self._joseph_check.isChecked(),
+            mode=self._mode_combo.currentData(),
             parent=self,
         )
         self._filter_worker.finished.connect(self._on_filter_finished)  # type: ignore[arg-type]
@@ -1663,6 +1693,9 @@ class GSSMainWindow(QMainWindow):
         self._seed_edit.textChanged.connect(self._refresh_session_summary)
         self._auto_filter_check.toggled.connect(self._refresh_session_summary)
         self._joseph_check.toggled.connect(self._refresh_session_summary)
+        self._mode_combo.currentIndexChanged.connect(
+            lambda _: self._refresh_session_summary()
+        )
 
     def _refresh_session_summary(self) -> None:
         """Update the right-hand permanent label in the status bar."""
@@ -1671,14 +1704,19 @@ class GSSMainWindow(QMainWindow):
         seed = self._seed_edit.text().strip() or "random"
         mc   = f"M={self._mc_spin.value()}" if self._mc_check.isChecked() else "MC off"
         auto = "auto-filter" if self._auto_filter_check.isChecked() else ""
-        joseph = "Joseph" if self._joseph_check.isChecked() else "short"
+        mode = self._mode_combo.currentData()
+        mode_short = "H5-exact" if mode == "h5_exact" else "IMM-general"
         parts = [
             f"K={self._K}·q={self._q}·s={self._s}",
             f"N={self._n_spin.value()}",
             mc,
             f"seed={seed}",
-            f"cov={joseph}",
+            f"filter={mode_short}",
         ]
+        # Joseph flag is only meaningful in h5_exact mode
+        if mode == "h5_exact":
+            joseph = "Joseph" if self._joseph_check.isChecked() else "short"
+            parts.append(f"cov={joseph}")
         if auto:
             parts.append(auto)
         self._sb_session_lbl.setText("  |  ".join(parts))
@@ -1700,6 +1738,10 @@ class GSSMainWindow(QMainWindow):
             self._seed_edit.setText(str(seed))
         self._auto_filter_check.setChecked(s.value("auto_filter", False, type=bool))
         self._joseph_check.setChecked(s.value("joseph", False, type=bool))
+        saved_mode = s.value("filter_mode", "imm_general")
+        idx = self._mode_combo.findData(saved_mode)
+        if idx >= 0:
+            self._mode_combo.setCurrentIndex(idx)
 
         geom = s.value("geometry")
         if geom is not None:
@@ -1721,6 +1763,7 @@ class GSSMainWindow(QMainWindow):
         s.setValue("seed", self._seed_edit.text())
         s.setValue("auto_filter", self._auto_filter_check.isChecked())
         s.setValue("joseph", self._joseph_check.isChecked())
+        s.setValue("filter_mode", self._mode_combo.currentData())
         s.setValue("geometry", self.saveGeometry())
         s.setValue("splitter", self._splitter.saveState())
         # Clean up legacy keys from previous versions so they can't resurface

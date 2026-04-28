@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-04-20
+
+### Added
+
+- **Two filter modes** in ``GSSFilter``, selected by the new ``mode``
+  constructor argument:
+  - ``mode="imm_general"`` (new **default**) — IMM recursion with
+    per-step moment propagation; no (H5) requirement. Matches the
+    ``fofgss ≤ v0.9.0`` implementation; correct for models with
+    ``B(k) ≠ 0``.
+  - ``mode="h5_exact"`` — exact IMM under hypothesis (H5), with
+    stationary pre-computed regime moments (the v0.10.0 default).
+    Requires ``B(k) = 0`` for all ``k``; emits a ``RuntimeWarning``
+    at construction when (H5) is violated.
+- ``GSSFilter.mode`` read-only property.
+- **GUI**: filter-mode combo box ("IMM general" / "Exact IMM under
+  (H5)") with QSettings persistence and tooltip. The Joseph form
+  checkbox is automatically grayed out unless ``h5_exact`` is
+  selected (Joseph is only meaningful in that mode). The session
+  summary now shows ``filter=IMM-general`` or ``filter=H5-exact``
+  (and appends ``cov=Joseph``/``cov=short`` only when h5_exact).
+- ``TestFilterModes`` in ``tests/test_gss_filter.py``:
+  default-mode, explicit-h5, warning on non-(H5) model, no-warning
+  for imm_general, ``ValueError`` on unknown mode, and a regression
+  check that ``imm_general`` strictly beats ``h5_exact`` in MSE on
+  non-(H5) models.
+
+### Changed
+
+- **Default filter mode is ``imm_general``**, not ``h5_exact``. This
+  reverses the v0.10.0 default: all shipped models (including the
+  canonical ``model_gss_K2_q1_s1``) have ``B(k) ≠ 0`` and therefore
+  gave biased filter outputs under v0.10.0's default. Users who
+  specifically want the paper-exact h5 recursion must now opt in
+  with ``mode="h5_exact"``.
+- ``_FilterWorker`` (GUI) now takes a ``mode`` kwarg (default
+  ``"imm_general"``) forwarded to ``GSSFilter``.
+- ``TestJosephForm`` and ``TestStationaryMoments`` updated to
+  construct the filter with an explicit ``mode="h5_exact"`` (both
+  classes now carry a ``@pytest.mark.filterwarnings`` to silence the
+  expected (H5)-violation warning when the default fixture model
+  has ``B ≠ 0``).
+
+### Fixed
+
+- Filter now produces correct results on all shipped models (and
+  user-custom non-(H5) models) by default. Regression check on
+  ``model_gss_K2_q1_s1_custom1``: MSE drops from ≈ 34.8 (h5_exact
+  default) to ≈ 1.5 (imm_general default) — a 20× improvement.
+
 ## [0.10.0] — 2026-04-20
 
 ### Added

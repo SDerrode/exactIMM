@@ -371,13 +371,14 @@ class TestOptionB:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.filterwarnings("ignore:mode='h5_exact'.*:RuntimeWarning")
 class TestJosephForm:
-    """Joseph form is mathematically equivalent under stationarity."""
+    """Joseph form is mathematically equivalent under stationarity (h5_exact mode)."""
 
     def test_joseph_constructor(self, params):
         """The joseph flag is exposed via constructor and property."""
-        f_short  = GSSFilter(params)
-        f_joseph = GSSFilter(params, joseph=True)
+        f_short  = GSSFilter(params, mode="h5_exact")
+        f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
         assert f_short.joseph  is False
         assert f_joseph.joseph is True
         assert "joseph=True" in repr(f_joseph)
@@ -388,8 +389,8 @@ class TestJosephForm:
         per-regime posterior covariance (the centred Schur complement is
         the same matrix, computed two different ways).
         """
-        f_short  = GSSFilter(params)
-        f_joseph = GSSFilter(params, joseph=True)
+        f_short  = GSSFilter(params, mode="h5_exact")
+        f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
         for k in range(params.K):
             assert np.allclose(
                 f_short._P_post[k], f_joseph._P_post[k], atol=1e-9
@@ -403,8 +404,8 @@ class TestJosephForm:
         """
         rng = np.random.default_rng(2024)
         ys  = [rng.standard_normal((params.s, 1)) for _ in range(50)]
-        f_short  = GSSFilter(params)
-        f_joseph = GSSFilter(params, joseph=True)
+        f_short  = GSSFilter(params, mode="h5_exact")
+        f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
         for y in ys:
             r_s = f_short.step(y)
             r_j = f_joseph.step(y)
@@ -413,7 +414,7 @@ class TestJosephForm:
 
     def test_joseph_psd(self, params):
         """Joseph posterior covariance must be PSD by construction."""
-        filt = GSSFilter(params, joseph=True)
+        filt = GSSFilter(params, joseph=True, mode="h5_exact")
         rng  = np.random.default_rng(99)
         for _ in range(30):
             y   = rng.standard_normal((params.s, 1))
@@ -423,15 +424,16 @@ class TestJosephForm:
 
 
 # ---------------------------------------------------------------------------
-# Stationary moments (precomputation)
+# Stationary moments (precomputation, h5_exact mode only)
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.filterwarnings("ignore:mode='h5_exact'.*:RuntimeWarning")
 class TestStationaryMoments:
     """The pre-computed stationary moments satisfy the fixed-point equation."""
 
     def test_stationary_distribution_exposed(self, params):
-        filt = GSSFilter(params)
+        filt = GSSFilter(params, mode="h5_exact")
         pi_inf = filt.stationary_distribution
         assert pi_inf.shape == (params.K,)
         assert abs(pi_inf.sum() - 1.0) < 1e-12
@@ -439,16 +441,77 @@ class TestStationaryMoments:
 
     def test_stationary_distribution_invariant(self, params):
         """π_∞ P = π_∞."""
-        filt = GSSFilter(params)
+        filt = GSSFilter(params, mode="h5_exact")
         pi_inf = filt.stationary_distribution
         assert np.allclose(pi_inf @ params.P, pi_inf, atol=1e-10)
 
     def test_mu_fixed_point(self, params):
         """µ(k) = F_k Σ_j p_rev[j,k] µ(j) + b_k."""
-        filt = GSSFilter(params)
+        filt = GSSFilter(params, mode="h5_exact")
         K = params.K
         for k in range(K):
             F  = params.f_matrix.F(k)
             b  = params.b(k)
             mu_pred = F @ sum(filt._p_rev[j, k] * filt._mu_z[j] for j in range(K)) + b
             assert np.allclose(filt._mu_z[k], mu_pred, atol=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# Mode dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestFilterModes:
+    """GSSFilter dispatches between 'imm_general' (default) and 'h5_exact'."""
+
+    def test_default_mode_is_imm_general(self, params):
+        filt = GSSFilter(params)
+        assert filt.mode == "imm_general"
+        assert "mode='imm_general'" in repr(filt)
+
+    def test_explicit_h5_exact(self, params):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            filt = GSSFilter(params, mode="h5_exact")
+        assert filt.mode == "h5_exact"
+
+    def test_h5_warns_on_non_h5_model(self, params):
+        """Model_gss_K2_q1_s1 has B(k) != 0, so h5_exact must warn."""
+        import warnings
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            GSSFilter(params, mode="h5_exact")
+        runtime_ws = [w for w in ws if issubclass(w.category, RuntimeWarning)]
+        assert len(runtime_ws) >= 1
+        assert "B(k)" in str(runtime_ws[0].message)
+
+    def test_imm_general_no_warning(self, params):
+        import warnings
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            GSSFilter(params, mode="imm_general")
+        # imm_general must not emit the (H5) warning
+        h5_ws = [
+            w for w in ws
+            if issubclass(w.category, RuntimeWarning)
+            and "h5_exact" in str(w.message)
+        ]
+        assert h5_ws == []
+
+    def test_unknown_mode_raises(self, params):
+        with pytest.raises(ValueError, match="Unknown mode"):
+            GSSFilter(params, mode="nope")
+
+    def test_imm_general_matches_pre_v0_10_behavior(self, params):
+        """
+        imm_general on a non-(H5) model should track the true state well
+        (MSE much smaller than h5_exact's biased estimate).
+        """
+        import warnings
+        _, df_gen = GSSFilter(params, mode="imm_general").run(N=300, seed=11)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            _, df_h5  = GSSFilter(params, mode="h5_exact").run(N=300, seed=11)
+        # On a non-(H5) model, imm_general should have strictly lower MSE.
+        assert df_gen["sq_err"].mean() < df_h5["sq_err"].mean()

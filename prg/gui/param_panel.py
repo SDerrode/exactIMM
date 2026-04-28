@@ -9,22 +9,23 @@ Each tab (_StateTab) exposes:
   - F(k)     : MatrixTableWidget (no SPD check)
   - Σ_W(k)   : MatrixTableWidget (SPD check enabled)
 
-Constraint checkboxes (eq. 4.8)
----------------------------------
-The constraint (4.8) is a single equation in A, B, C, D, Σ_U, Δ, Σ_V.
-It can be solved for exactly one of {A, B, Σ_U} at a time — those three
+Constraint checkboxes (eq. 4.8 / 4.20)
+----------------------------------------
+The constraint is a single equation in A, B, C, D, Σ_U, Δ, Σ_V.
+It can be solved for exactly one of {A, B, C, Σ_U} at a time — those four
 are therefore mutually exclusive.
 
 Δ = 0 is an independent constraint (it zeros the off-diagonal block of
-Σ_W) and can coexist with any of {A, B, Σ_U}.  When Δ changes state,
+Σ_W) and can coexist with any of {A, B, C, Σ_U}.  When Δ changes state,
 the active H5 constraint is automatically re-evaluated with the new Δ.
 
 Valid combinations:
-  □ A alone       □ B alone       □ Σ_U alone
-  □ Δ=0 alone     □ Δ=0 + A       □ Δ=0 + B       □ Δ=0 + Σ_U
+  □ A alone  □ B alone  □ C alone  □ Σ_U alone
+  □ Δ=0 alone  □ Δ=0 + A  □ Δ=0 + B  □ Δ=0 + C  □ Δ=0 + Σ_U
 
   □ Constraint on A(k)   — A determined by B, C, D, Σ_U, Δ, Σ_V  (eq. 4.8)
   □ Constraint on B(k)   — B determined by A, C, D, Σ_U, Δ, Σ_V  (eq. 4.8)
+  □ Constraint on C(k)   — C determined by A, B, D, Σ_U, Δ, Σ_V  (eq. 4.20, iterative)
   □ Constraint on Σ_U(k) — Σ_U determined by A, B, C, D, Δ, Σ_V  (eq. 4.8)
   □ Δ = 0(k)             — off-diagonal block of Σ_W forced to zero (independent)
 
@@ -49,7 +50,9 @@ from PyQt6.QtWidgets import (
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
-from prg.utils.h5_constraint import compute_A_from_h5, compute_B_from_h5, compute_SU_from_h5
+from prg.utils.h5_constraint import (
+    compute_A_from_h5, compute_B_from_h5, compute_SU_from_h5, compute_C_from_h5,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +81,10 @@ class _StateTab(QWidget):
                "QCheckBox::indicator:checked   { border: 2px solid #6c3483;"
                "                                 background-color: #8e44ad; }"
                "QCheckBox::indicator:unchecked { border: 2px solid #6c3483; }"),
+        "C":  ("QCheckBox { color: #a04000; font-weight: bold; font-size: 11px; }"
+               "QCheckBox::indicator:checked   { border: 2px solid #a04000;"
+               "                                 background-color: #e67e22; }"
+               "QCheckBox::indicator:unchecked { border: 2px solid #a04000; }"),
         "delta": ("QCheckBox { color: #0e6655; font-weight: bold; font-size: 11px; }"
                   "QCheckBox::indicator:checked   { border: 2px solid #0e6655;"
                   "                                 background-color: #1abc9c; }"
@@ -93,6 +100,7 @@ class _StateTab(QWidget):
 
         self._saved_A:     np.ndarray | None = None  # for H5 constraint on A
         self._saved_B:     np.ndarray | None = None  # for H5 constraint on B
+        self._saved_C:     np.ndarray | None = None  # for H5 constraint on C
         self._saved_SU:    np.ndarray | None = None  # for H5 constraint on Σ_U
         self._saved_Delta: np.ndarray | None = None  # for Δ = 0 constraint
 
@@ -107,11 +115,13 @@ class _StateTab(QWidget):
 
         self._constraint_A_check     = QCheckBox(f"Constraint on A({k})")
         self._constraint_B_check     = QCheckBox(f"Constraint on B({k})")
+        self._constraint_C_check     = QCheckBox(f"Constraint on C({k})")
         self._constraint_SU_check    = QCheckBox(f"Constraint on Σ_U({k})")
         self._constraint_delta_check = QCheckBox("Δ = 0")
 
         for key, chk in [("A",     self._constraint_A_check),
                           ("B",     self._constraint_B_check),
+                          ("C",     self._constraint_C_check),
                           ("SU",    self._constraint_SU_check),
                           ("delta", self._constraint_delta_check)]:
             chk.setStyleSheet(self._CHK_STYLES[key])
@@ -196,6 +206,7 @@ class _StateTab(QWidget):
 
         self._constraint_A_check.toggled.connect(self._on_A_toggled)
         self._constraint_B_check.toggled.connect(self._on_B_toggled)
+        self._constraint_C_check.toggled.connect(self._on_C_toggled)
         self._constraint_SU_check.toggled.connect(self._on_SU_toggled)
         self._constraint_delta_check.toggled.connect(self._on_delta_toggled)
 
@@ -274,6 +285,17 @@ class _StateTab(QWidget):
         else:
             self._restore_B()
 
+    def _on_C_toggled(self, checked: bool) -> None:
+        if checked:
+            self._uncheck_h5_others(self._constraint_C_check)
+            F = self._f_widget.get_matrix()
+            if F is not None:
+                self._saved_C = F[self._q:, :self._q].copy()
+            self._recompute_C()
+            self.constraint_toggled.emit()
+        else:
+            self._restore_C()
+
     def _on_SU_toggled(self, checked: bool) -> None:
         if checked:
             self._uncheck_h5_others(self._constraint_SU_check)
@@ -306,6 +328,8 @@ class _StateTab(QWidget):
             self._recompute_A()
         elif self._constraint_B_check.isChecked():
             self._recompute_B()
+        elif self._constraint_C_check.isChecked():
+            self._recompute_C()
         elif self._constraint_SU_check.isChecked():
             self._recompute_SU()
         # Δ = 0 locks the off-diagonal, so no re-projection needed on value_changed.
@@ -392,6 +416,38 @@ class _StateTab(QWidget):
         self._sigma_widget.set_constraint_status(
             "✓  Σ_U satisfies constraint (4.8)", "color: #6c3483; font-size: 10px;")
 
+    def _recompute_C(self) -> None:
+        if not self._constraint_C_check.isChecked() or self._updating:
+            return
+        F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
+        if F is None or Sw is None:
+            return
+
+        q, s = self._q, self._s
+        # Use the current C block as warm start (preserves continuity during editing)
+        C_init = F[q:, :q].copy()
+
+        C_new = self._call_constraint(compute_C_from_h5, dict(
+            A=F[:q, :q], B=F[:q, q:], D=F[q:, q:],
+            SU=Sw[:q, :q], Dt=Sw[:q, q:], SV=Sw[q:, q:],
+            C_init=C_init,
+        ))
+        if C_new is None:
+            self._f_widget.set_constraint_status(
+                "✗  C — non-convergence / singular", "color: #cc0000; font-size: 10px;")
+            return
+
+        new_F = F.copy()
+        new_F[q:, :q] = C_new
+        self._updating = True
+        self._f_widget.set_matrix(new_F)
+        self._f_widget.set_block_editable(q, q + s, 0, q, False)
+        self._updating = False
+        self._f_widget.set_constraint_status(
+            "✓  C satisfies constraint (4.20) [iter]",
+            "color: #a04000; font-size: 10px;")
+        self._update_stability_badges()
+
     def _recompute_delta(self) -> None:
         """Set Δ(k) = 0 and lock both off-diagonal blocks of Σ_W.
 
@@ -464,6 +520,21 @@ class _StateTab(QWidget):
                 self._sigma_widget.set_matrix(restored)
                 self._updating = False
             self._saved_SU = None
+
+    def _restore_C(self) -> None:
+        q, s = self._q, self._s
+        self._f_widget.set_block_editable(q, q + s, 0, q, True)
+        self._f_widget.set_constraint_status("")
+        if self._saved_C is not None:
+            F = self._f_widget.get_matrix()
+            if F is not None:
+                restored = F.copy()
+                restored[q:, :q] = self._saved_C
+                self._updating = True
+                self._f_widget.set_matrix(restored)
+                self._updating = False
+            self._saved_C = None
+        self._update_stability_badges()
 
     def _restore_delta(self) -> None:
         q, s = self._q, self._s
@@ -562,13 +633,14 @@ class _StateTab(QWidget):
         self.constraint_toggled.emit()   # reset plots in main window
 
     def _uncheck_h5_others(self, keep: QCheckBox) -> None:
-        """Silently uncheck the other H5 checkboxes ({A, B, Σ_U}) except *keep*.
+        """Silently uncheck the other H5 checkboxes ({A, B, C, Σ_U}) except *keep*.
 
         Δ=0 is intentionally NOT touched — it can coexist with any H5 constraint.
         """
         for chk, restore in [
             (self._constraint_A_check,  self._restore_A),
             (self._constraint_B_check,  self._restore_B),
+            (self._constraint_C_check,  self._restore_C),
             (self._constraint_SU_check, self._restore_SU),
         ]:
             if chk is not keep and chk.isChecked():
@@ -578,11 +650,13 @@ class _StateTab(QWidget):
                 restore()
 
     def _retrigger_h5(self) -> None:
-        """Re-evaluate the active H5 constraint (A, B or Σ_U), if any."""
+        """Re-evaluate the active H5 constraint (A, B, C or Σ_U), if any."""
         if self._constraint_A_check.isChecked():
             self._recompute_A()
         elif self._constraint_B_check.isChecked():
             self._recompute_B()
+        elif self._constraint_C_check.isChecked():
+            self._recompute_C()
         elif self._constraint_SU_check.isChecked():
             self._recompute_SU()
 

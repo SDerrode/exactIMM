@@ -34,7 +34,13 @@ import numpy as np
 if TYPE_CHECKING:
     from prg.classes.GSSParams import GSSParams
 
-__all__ = ["apply_h5_constraint", "compute_B_from_h5", "compute_A_from_h5", "compute_SU_from_h5"]
+__all__ = [
+    "apply_h5_constraint",
+    "compute_B_from_h5",
+    "compute_A_from_h5",
+    "compute_SU_from_h5",
+    "compute_C_from_h5",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +237,141 @@ def compute_SU_from_h5(
         raise ValueError("Computed Σ_U is not positive definite.")
 
     return SU
+
+
+def compute_C_from_h5(
+    A:  np.ndarray,   # (q, q)
+    B:  np.ndarray,   # (q, s)
+    D:  np.ndarray,   # (s, s)
+    SU: np.ndarray,   # (q, q)  Σ_U
+    Dt: np.ndarray,   # (q, s)  Δ
+    SV: np.ndarray,   # (s, s)  Σ_V
+    *,
+    C_init: np.ndarray | None = None,
+    max_iter: int = 50,
+    tol: float = 1e-9,
+    lambda_relax: float = 0.5,
+) -> np.ndarray:
+    """
+    Compute C (s × q) from the H5 constraint (eq. 4.20) by fixed-point iteration.
+
+    Unlike A, B, and Σ_U — which give linear systems — the H5 constraint is
+    *quadratic* in C (eq. 4.20).  This function uses Scheme 2 (eq. 4.23/4.24):
+    at each iteration C is kept only in W = C K + W₀ while M̃ and P̃ are
+    frozen at the previous iterate, giving the linear system
+
+        P̃  C  K  =  M̃ Z − P̃ W₀
+
+    solved by lstsq and then relaxed:
+
+        C^(k+1)  ←  (1 − λ) C̃  +  λ C_lstsq
+
+    Convergence is monitored on the full non-linearised residual
+
+        F(C) = M(C) Z − P(C) W(C)
+
+    Initialising at C_init = 0 selects the branch closest to the CGOMSM
+    solution (C = 0 corresponds to hypothesis H4).
+
+    Parameters
+    ----------
+    A, B, D, SU, Dt, SV : ndarray
+        The six fixed matrices (shapes as in compute_B_from_h5).
+    C_init : ndarray of shape (s, q), optional
+        Initial iterate.  Default: zeros (CGOMSM branch).
+    max_iter : int
+        Maximum number of iterations (default 50).
+    tol : float
+        Convergence threshold on ‖F(C)‖_F / max(1, ‖Z‖_F) (default 1e-9).
+    lambda_relax : float
+        Relaxation factor ∈ (0, 1] (default 0.5).
+
+    Returns
+    -------
+    ndarray of shape (s, q)
+
+    Raises
+    ------
+    ValueError
+        If M̃ or the Kronecker system is ill-conditioned, if C is not
+        uniquely determined, or if the iteration does not converge.
+    """
+    q = A.shape[0]
+    s = D.shape[0]
+    C = np.zeros((s, q)) if C_init is None else np.array(C_init, dtype=float)
+
+    # Quantities constant in C
+    Z   = Dt.T @ A    + SV @ B.T                  # s × q  (= lhs of H5)
+    K   = SU  @ A.T  + Dt  @ B.T                  # q × q
+    W0  = D @ Dt.T @ A.T + D @ SV @ B.T + Dt.T   # s × q  (= W at C=0)
+    Z_norm = max(float(np.linalg.norm(Z, "fro")), 1.0)
+
+    def _residual(C_: np.ndarray) -> np.ndarray:
+        """F(C) = Z − P M⁻¹ W  (the H5 constraint in residual form)."""
+        Q_ = C_ @ SU + D @ Dt.T
+        R_ = C_ @ Dt + D @ SV
+        P_ = Dt.T @ C_.T + SV @ D.T
+        M_ = Q_ @ C_.T + R_ @ D.T + SV
+        W_ = Q_ @ A.T + R_ @ B.T + Dt.T
+        # Solve M_ X = W_  ⟹  X = M_⁻¹ W_
+        X, _, _, _ = np.linalg.lstsq(M_, W_, rcond=1e-12)
+        return Z - P_ @ X
+
+    res_norm = float(np.linalg.norm(_residual(C), "fro")) / Z_norm
+
+    for _it in range(max_iter):
+        if res_norm < tol:
+            break
+
+        # Freeze current C in M̃ and P̃; keep C in W = C K + W₀
+        Q_t = C @ SU + D @ Dt.T
+        R_t = C @ Dt + D @ SV
+        P_t = Dt.T @ C.T + SV @ D.T
+        M_t = Q_t @ C.T + R_t @ D.T + SV          # s × s
+
+        # G̃ = P̃ M̃⁻¹  (s × s), computed via lstsq for stability
+        # G̃ X = P_t  ⟺  M_t^T G̃^T = P_t^T
+        G_t = np.linalg.lstsq(M_t.T, P_t.T, rcond=1e-12)[0].T  # s × s
+
+        # T̃ = Z − G̃ W₀  (constant part of the rhs for this frozen iterate)
+        T_t = Z - G_t @ W0   # s × q
+
+        # Solve  G̃ C K = T̃  ⟺  (Kᵀ ⊗ G̃) vec(C) = vec(T̃)
+        KronMat = np.kron(K.T, G_t)               # (sq × sq)
+        rhs_vec = T_t.ravel(order="F")             # (sq,)
+        C_vec, _, rank, _ = np.linalg.lstsq(KronMat, rhs_vec, rcond=1e-12)
+
+        if rank < s * q:
+            raise ValueError(
+                f"Kronecker system is rank-deficient (rank={rank} < {s * q}) "
+                f"at iteration {_it}; C is not uniquely determined."
+            )
+
+        C_new = C_vec.reshape(s, q, order="F")
+
+        # Armijo-style line search: halve λ until residual decreases
+        lam = lambda_relax
+        for _ in range(8):
+            C_try = (1.0 - lam) * C + lam * C_new
+            res_try = float(np.linalg.norm(_residual(C_try), "fro")) / Z_norm
+            if res_try <= res_norm or lam < 1e-4:
+                break
+            lam *= 0.5
+
+        C = C_try
+        res_norm = res_try
+
+    if res_norm >= tol:
+        raise ValueError(
+            f"compute_C_from_h5 did not converge after {max_iter} iterations "
+            f"(residual = {res_norm:.3e} > tol = {tol:.3e}). "
+            "Try increasing max_iter, reducing lambda_relax, or providing C_init."
+        )
+
+    if not np.isfinite(C).all():
+        raise ValueError("C contains non-finite values after iteration.")
+
+    return C
 
 
 # ---------------------------------------------------------------------------

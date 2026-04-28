@@ -23,7 +23,9 @@ import pytest
 
 from prg.classes.GSSParams import GSSParams
 from prg.models.base_gss_model import BaseGSSModel
-from prg.utils.h5_constraint import apply_h5_constraint, compute_B_from_h5
+from prg.utils.h5_constraint import (
+    apply_h5_constraint, compute_B_from_h5, compute_C_from_h5,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +256,99 @@ def test_apply_h5_constraint_preserves_b_bias(params_K2_q1_s1):
             params_K2_q1_s1.b(k),
             err_msg=f"b(k={k}) was modified",
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests for compute_C_from_h5
+# ---------------------------------------------------------------------------
+
+
+def _residual_h5(A, C, D, SU, Dt, SV, B):
+    """Full residual F(C) = Z − P M⁻¹ W  (H5 constraint in residual form)."""
+    P = Dt.T @ C.T + SV @ D.T
+    Q = C @ SU + D @ Dt.T
+    R = C @ Dt + D @ SV
+    M = Q @ C.T + R @ D.T + SV
+    Z = Dt.T @ A + SV @ B.T
+    W = Q @ A.T + R @ B.T + Dt.T
+    X = np.linalg.solve(M, W)   # M⁻¹ W
+    return Z - P @ X
+
+
+def _make_consistent_inputs_with_C(q, s, rng):
+    """Return (A, B, C_true, D, SU, Dt, SV) where B was computed from H5 using
+    C_true, guaranteeing that C_true is a valid solution of compute_C_from_h5."""
+    A, C_true, D, SU, Dt, SV = _random_inputs(q, s, rng)
+    B = compute_B_from_h5(A, C_true, D, SU, Dt, SV)
+    return A, B, C_true, D, SU, Dt, SV
+
+
+def test_compute_C_output_shape(rng):
+    """C must have shape (s, q)."""
+    q, s = 2, 3
+    A, B, C_true, D, SU, Dt, SV = _make_consistent_inputs_with_C(q, s, rng)
+    # Warm-start from C_true so the iteration is already at a solution
+    C = compute_C_from_h5(A, B, D, SU, Dt, SV, C_init=C_true)
+    assert C.shape == (s, q), f"expected ({s}, {q}), got {C.shape}"
+
+
+def test_compute_C_satisfies_constraint(rng):
+    """C returned by compute_C_from_h5 (warm-started at C_true) must satisfy H5."""
+    q, s = 2, 3
+    A, B, C_true, D, SU, Dt, SV = _make_consistent_inputs_with_C(q, s, rng)
+    C = compute_C_from_h5(A, B, D, SU, Dt, SV, C_init=C_true)
+    res = _residual_h5(A, C, D, SU, Dt, SV, B)
+    assert np.linalg.norm(res, "fro") < 1e-8, (
+        f"H5 constraint not satisfied: residual = {np.linalg.norm(res, 'fro'):.3e}"
+    )
+
+
+def test_compute_C_zero_init_is_fixed_point_when_C0_zero(rng):
+    """When B is computed from H5 with C=0, compute_C_from_h5 initialized at 0
+    must return C ≈ 0 (C=0 is a fixed point of the iteration)."""
+    q, s = 2, 2
+    A  = rng.standard_normal((q, q)) * 0.4
+    D  = rng.standard_normal((s, s)) * 0.3
+    SU = _make_pd(q, rng)
+    Dt = rng.standard_normal((q, s)) * 0.1
+    SV = _make_pd(s, rng)
+    B  = compute_B_from_h5(A, np.zeros((s, q)), D, SU, Dt, SV)  # B consistent with C=0
+
+    C = compute_C_from_h5(A, B, D, SU, Dt, SV, C_init=np.zeros((s, q)))
+    assert np.linalg.norm(C, "fro") < 1e-6, (
+        f"Expected C ≈ 0 (fixed point), got ‖C‖_F = {np.linalg.norm(C, 'fro'):.3e}"
+    )
+
+
+def test_compute_C_singular_raises():
+    """compute_C_from_h5 must raise ValueError when P = 0 (D=0, Δ=0) but Z ≠ 0.
+
+    With D=0 and Δ=0: P = Δᵀ Cᵀ + Σ_V Dᵀ = 0 for any C (since both terms vanish).
+    Hence G̃ = P̃ M̃⁻¹ = 0, the Kronecker matrix is zero but the rhs Z ≠ 0, so
+    the system is inconsistent and rank-deficient → must raise ValueError.
+    """
+    q, s = 2, 2
+    rng2 = np.random.default_rng(7)
+    A   = rng2.standard_normal((q, q)) * 0.5
+    B   = rng2.standard_normal((q, s)) * 0.5   # B ≠ 0 ensures Z = SV B^T ≠ 0
+    D   = np.zeros((s, s))                      # forces P = 0
+    SU  = _make_pd(q, rng2)
+    Dt  = np.zeros((q, s))                      # forces P = 0
+    SV  = _make_pd(s, rng2)                     # M = SV > 0, non-singular
+
+    with pytest.raises(ValueError):
+        compute_C_from_h5(A, B, D, SU, Dt, SV)
+
+
+def test_compute_C_warm_start_is_fixed_point(rng):
+    """Starting exactly at a known solution (C_true) must return C ≈ C_true."""
+    q, s = 2, 3
+    A, B, C_true, D, SU, Dt, SV = _make_consistent_inputs_with_C(q, s, rng)
+    C = compute_C_from_h5(A, B, D, SU, Dt, SV, C_init=C_true, max_iter=5)
+    diff = np.linalg.norm(C - C_true, "fro")
+    assert diff < 1e-8, (
+        f"C_true is not a fixed point: ‖C - C_true‖_F = {diff:.3e}"
+    )
 
 
 def test_apply_h5_constraint_idempotent(params_K2_q1_s1):

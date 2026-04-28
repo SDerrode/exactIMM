@@ -781,17 +781,18 @@ class PredYPanel(QWidget):
             obs_line, = ax.plot(ns, y_obs[:, i], color="#333333", linewidth=2.0,
                                 alpha=0.85, linestyle="-")
 
-            # ── Légende 2 colonnes : gauche = espérances + obs,
-            #                         droite = enveloppes ──────────────────
-            # Ordre interleaved pour que ncol=2 aligne correctement les cols
-            leg_h = [line1,                          env1]
-            leg_l = [rf"$\mu_1$ (H5 exact)",         rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
+            # ── Légende 2 colonnes ──────────────────────────────────────────
+            # matplotlib remplit ncol=2 COLONNE PAR COLONNE :
+            # col 0 = handles[0:nrows],  col 1 = handles[nrows:2*nrows]
+            # → mettre tous les éléments gauche d'abord, puis tous ceux de droite.
+            left_h  = [line1];              left_l  = [rf"$\mu_1$ (H5 exact)"]
+            right_h = [env1];               right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
             if has_sig2:
-                leg_h += [line2,                     env2]
-                leg_l += [rf"$\mu_2$ (approx.)",     rf"$\pm 2\sigma_2={sigs2[i]:.3g}$"]
-            leg_h += [obs_line]
-            leg_l += [rf"$y^{i}$"]
-            ax.legend(leg_h, leg_l, fontsize=8, loc="upper right", ncol=2)
+                left_h  += [line2];         left_l  += [rf"$\mu_2$ (approx.)"]
+                right_h += [env2];          right_l += [rf"$\pm 2\sigma_2={sigs2[i]:.3g}$"]
+            left_h  += [obs_line];          left_l  += [rf"$y^{i}$"]
+            ax.legend(left_h + right_h, left_l + right_l,
+                      fontsize=8, loc="upper right", ncol=2)
 
             ax.set_ylabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.4)
@@ -897,16 +898,15 @@ class PredYPanel(QWidget):
             yn_line = ax.axvline(yn_val, color="#333333", linewidth=1.2,
                                  linestyle=":", alpha=0.85)
 
-        # ── Légende 2 colonnes : gauche = courbes, droite = enveloppes ──
-        leg_h = [line1,                                        env1]
-        leg_l = [rf"$p_1$ H5 exact   $\mu_1={m1:.4g}$",      rf"$\pm 2\sigma_1={sig1:.4g}$"]
+        # ── Légende 2 colonnes (remplissage colonne par colonne) ────────────
+        left_h  = [line1];              left_l  = [rf"$p_1$ H5 exact   $\mu_1={m1:.4g}$"]
+        right_h = [env1];               right_l = [rf"$\pm 2\sigma_1={sig1:.4g}$"]
         if has2:
-            leg_h += [line2,                                   env2]
-            leg_l += [rf"$p_2$ approx.   $\mu_2={m2:.4g}$",  rf"$\pm 2\sigma_2={sig2:.4g}$"]
+            left_h  += [line2];         left_l  += [rf"$p_2$ approx.   $\mu_2={m2:.4g}$"]
+            right_h += [env2];          right_l += [rf"$\pm 2\sigma_2={sig2:.4g}$"]
         if yn_line is not None:
-            leg_h += [yn_line]
-            leg_l += [rf"$y^0 = {yn_val:.4g}$"]
-        ax.legend(leg_h, leg_l, fontsize=9, ncol=2)
+            left_h  += [yn_line];       left_l  += [rf"$y^0 = {yn_val:.4g}$"]
+        ax.legend(left_h + right_h, left_l + right_l, fontsize=9, ncol=2)
 
         ax.set_xlabel(r"$y^0_{n+1}$", fontsize=11)
         ax.set_ylabel("densité", fontsize=10)
@@ -947,20 +947,18 @@ class PredYPanel(QWidget):
             ev1  = ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v),
                                    color=c1, alpha=0.20)
             ax.axvline(m1v, color=c1, linewidth=1.0, linestyle="--", alpha=0.8)
-            leg_h = [ln1,                                      ev1]
-            leg_l = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$",
-                     rf"$\pm 2\sigma_1$"]
+            left_h  = [ln1];  left_l  = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$"]
+            right_h = [ev1];  right_l = [rf"$\pm 2\sigma_1$"]
             if m2v is not None:
                 pdf2 = _norm.pdf(x, m2v, s2v)
                 ln2, = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
                 ev2  = ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
                                        color=c2, alpha=0.15)
                 ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
-                leg_h += [ln2,                                 ev2]
-                leg_l += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$",
-                          rf"$\pm 2\sigma_2$"]
+                left_h  += [ln2];  left_l  += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$"]
+                right_h += [ev2];  right_l += [rf"$\pm 2\sigma_2$"]
             ax.set_xlabel(xlabel, fontsize=10); ax.set_ylabel("densité", fontsize=9)
-            ax.legend(leg_h, leg_l, fontsize=7, ncol=2)
+            ax.legend(left_h + right_h, left_l + right_l, fontsize=7, ncol=2)
             ax.grid(True, linestyle=":", alpha=0.4)
 
         ax0 = self._fig_dens.add_subplot(1, 3, 1)
@@ -1039,22 +1037,20 @@ class PredYPanel(QWidget):
             ev1  = ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v),
                                    color=c1, alpha=0.20)
             ax.axvline(m1v, color=c1, linewidth=1.0, linestyle="--", alpha=0.8)
-            leg_h = [ln1,                                      ev1]
-            leg_l = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$",
-                     rf"$\pm 2\sigma_1$"]
+            left_h  = [ln1];  left_l  = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$"]
+            right_h = [ev1];  right_l = [rf"$\pm 2\sigma_1$"]
             if has2:
                 pdf2 = _norm.pdf(x, m2v, s2v)
                 ln2, = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
                 ev2  = ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
                                        color=c2, alpha=0.15)
                 ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
-                leg_h += [ln2,                                 ev2]
-                leg_l += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$",
-                          rf"$\pm 2\sigma_2$"]
+                left_h  += [ln2];  left_l  += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$"]
+                right_h += [ev2];  right_l += [rf"$\pm 2\sigma_2$"]
             ax.set_xlabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.set_ylabel("densité", fontsize=9)
             ax.set_title(rf"Marginale $y^{i}$", fontsize=9)
-            ax.legend(leg_h, leg_l, fontsize=7, ncol=2)
+            ax.legend(left_h + right_h, left_l + right_l, fontsize=7, ncol=2)
             ax.grid(True, linestyle=":", alpha=0.4)
         self._fig_dens.suptitle(
             rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)$  [marginales]",

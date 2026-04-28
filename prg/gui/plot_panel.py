@@ -760,33 +760,35 @@ class PredYPanel(QWidget):
             # ── Signal 1 ────────────────────────────────────────────────
             mu1_i  = means1[:, i]
             sig1_i = sigs1[i]
-            ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i,
-                            color=c1, alpha=0.15, label=r"$\pm 2\sigma_1$")
-            ax.plot(ns, mu1_i, color=c1, linewidth=1.5,
-                    label=rf"$\mu_1$  (H5 exact, $j={j},k={k}$)")
+            env1 = ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i,
+                                   color=c1, alpha=0.15)
+            line1, = ax.plot(ns, mu1_i, color=c1, linewidth=1.5)
 
             # ── Signal 2 ────────────────────────────────────────────────
             if has_sig2:
                 mu2_i  = means2[:, i]
                 sig2_i = sigs2[i]
-                ax.fill_between(ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i,
-                                color=c2, alpha=0.15, label=r"$\pm 2\sigma_2$")
-                ax.plot(ns, mu2_i, color=c2, linewidth=1.5,
-                        label=rf"$\mu_2$  (approx., $j={j},k={k}$)")
+                env2 = ax.fill_between(ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i,
+                                       color=c2, alpha=0.15)
+                line2, = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
 
             # ── y_{n+1} observé ─────────────────────────────────────────
-            ax.plot(ns, y_obs[:, i], color="#333333", linewidth=0.8,
-                    alpha=0.6, linestyle="-",
-                    label=rf"$y^{i}_{{n+1}}$ observé")
+            obs_line, = ax.plot(ns, y_obs[:, i], color="#333333", linewidth=0.8,
+                                alpha=0.6, linestyle="-")
 
-            # Annotation des écarts-types (constants)
-            sig_txt = rf"$\sigma_1={sig1_i:.3g}$"
+            # ── Légende 2 colonnes : gauche = espérances + obs,
+            #                         droite = enveloppes ──────────────────
+            # Ordre interleaved pour que ncol=2 aligne correctement les cols
+            leg_h = [line1,                          env1]
+            leg_l = [rf"$\mu_1$ (H5 exact)",         rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
             if has_sig2:
-                sig_txt += rf",  $\sigma_2={sigs2[i]:.3g}$"
-            sig_txt += "  (cstes)"
+                leg_h += [line2,                     env2]
+                leg_l += [rf"$\mu_2$ (approx.)",     rf"$\pm 2\sigma_2={sigs2[i]:.3g}$"]
+            leg_h += [obs_line]
+            leg_l += [rf"$y^{i}_{{n+1}}$ observé"]
+            ax.legend(leg_h, leg_l, fontsize=8, loc="upper right", ncol=2)
+
             ax.set_ylabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
-            ax.set_title(sig_txt, fontsize=9, loc="right")
-            ax.legend(fontsize=8, loc="upper right", ncol=min(4, 2 + s + int(has_sig2)))
             ax.grid(True, linestyle=":", alpha=0.4)
 
         axes[-1].set_xlabel(r"$n$", fontsize=10)
@@ -804,7 +806,7 @@ class PredYPanel(QWidget):
         ax.text(
             0.5, 0.5,
             "Lancez le filtre en mode\n"
-            "« Exact IMM under (H5) »\n"
+            "« Exact IMM - H5 required »\n"
             "pour afficher la trajectoire\n"
             r"$\mathbb{E}[y_{n+1} \mid r_n,\; r_{n+1},\; y_n]$",
             transform=ax.transAxes, ha="center", va="center",
@@ -818,110 +820,180 @@ class PredYPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _refresh_density(self) -> None:
-        """Recalcule et redessine la densité gaussienne pour le n courant."""
+        """Recalcule et redessine la (les) densité(s) gaussienne(s) pour le n courant."""
         if self._mu_Y_jk is None:
             return
         j = self._j_combo.currentIndex()
         k = self._k_combo.currentIndex()
-        y_n   = self._get_yn()
-        mu    = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_n - self._mu_Y[j])
-        Gamma = self._Gamma[j][k]
+        y_n = self._get_yn()
+
+        # Signal 1 — exact sous (H5)
+        mu1    = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_n - self._mu_Y[j])
+        Gamma1 = self._Gamma[j][k]
+
+        # Signal 2 — approximation (si disponible)
+        has_sig2 = self._M_simple is not None and self._Gamma2 is not None
+        mu2    = self._M_simple[j][k] @ y_n if has_sig2 else None
+        Gamma2 = self._Gamma2[j][k]         if has_sig2 else None
 
         self._fig_dens.clf()
         if self._s == 1:
-            self._plot_1d(mu, Gamma, j, k, y_n)
+            self._plot_1d(mu1, Gamma1, mu2, Gamma2, j, k, y_n)
         elif self._s == 2:
-            self._plot_2d(mu, Gamma, j, k, y_n)
+            self._plot_2d(mu1, Gamma1, mu2, Gamma2, j, k, y_n)
         else:
-            self._plot_nd(mu, Gamma, j, k, y_n)
+            self._plot_nd(mu1, Gamma1, mu2, Gamma2, j, k, y_n)
         self._canvas_dens.draw_idle()
 
     def _plot_1d(
         self,
-        mu: np.ndarray, Gamma: np.ndarray,
+        mu1: np.ndarray, Gamma1: np.ndarray,
+        mu2: np.ndarray | None, Gamma2: np.ndarray | None,
         j: int, k: int, y_n: np.ndarray,
     ) -> None:
         from scipy.stats import norm as _norm
-        m   = float(mu[0, 0])
-        sig = float(np.sqrt(max(float(Gamma[0, 0]), 1e-12)))
-        c   = self._COLOURS[0]
-        ax  = self._fig_dens.add_subplot(1, 1, 1)
-        x   = np.linspace(m - 4.5 * sig, m + 4.5 * sig, 500)
-        pdf = _norm.pdf(x, m, sig)
-        ax.plot(x, pdf, color=c, linewidth=2.0)
-        ax.fill_between(x, pdf, where=(np.abs(x - m) <= sig),
-                        color=c, alpha=0.30, label=r"$\pm 1\sigma$")
-        ax.fill_between(x, pdf, where=(np.abs(x - m) <= 2 * sig),
-                        color=c, alpha=0.15, label=r"$\pm 2\sigma$")
-        ax.axvline(m, color="#333333", linewidth=1.2, linestyle="--",
-                   label=rf"$\mu = {m:.4g}$")
+        c1 = self._COL_SIG1
+        c2 = self._COL_SIG2
+
+        m1   = float(mu1[0, 0])
+        sig1 = float(np.sqrt(max(float(Gamma1[0, 0]), 1e-12)))
+
+        # x range : union des ±4.5σ des deux signaux
+        x_lo, x_hi = m1 - 4.5 * sig1, m1 + 4.5 * sig1
+        if mu2 is not None:
+            m2   = float(mu2[0, 0])
+            sig2 = float(np.sqrt(max(float(Gamma2[0, 0]), 1e-12)))
+            x_lo = min(x_lo, m2 - 4.5 * sig2)
+            x_hi = max(x_hi, m2 + 4.5 * sig2)
+
+        x = np.linspace(x_lo, x_hi, 600)
+        ax = self._fig_dens.add_subplot(1, 1, 1)
+
+        # ── Signal 1 ────────────────────────────────────────────────────
+        pdf1 = _norm.pdf(x, m1, sig1)
+        ax.plot(x, pdf1, color=c1, linewidth=2.0,
+                label=rf"$p_1$  H5 exact  ($\mu_1={m1:.4g}$, $\sigma_1={sig1:.4g}$)")
+        ax.fill_between(x, pdf1, where=(np.abs(x - m1) <= sig1),
+                        color=c1, alpha=0.30, label=r"$\pm 1\sigma_1$")
+        ax.fill_between(x, pdf1, where=(np.abs(x - m1) <= 2 * sig1),
+                        color=c1, alpha=0.15, label=r"$\pm 2\sigma_1$")
+        ax.axvline(m1, color=c1, linewidth=1.2, linestyle="--", alpha=0.8)
+
+        # ── Signal 2 ────────────────────────────────────────────────────
+        if mu2 is not None:
+            pdf2 = _norm.pdf(x, m2, sig2)
+            ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--",
+                    label=rf"$p_2$  approx.  ($\mu_2={m2:.4g}$, $\sigma_2={sig2:.4g}$)")
+            ax.fill_between(x, pdf2, where=(np.abs(x - m2) <= sig2),
+                            color=c2, alpha=0.20, label=r"$\pm 1\sigma_2$")
+            ax.fill_between(x, pdf2, where=(np.abs(x - m2) <= 2 * sig2),
+                            color=c2, alpha=0.10, label=r"$\pm 2\sigma_2$")
+            ax.axvline(m2, color=c2, linewidth=1.2, linestyle="--", alpha=0.8)
+
+        # ── y_n ─────────────────────────────────────────────────────────
         if self._src_traj.isChecked() and self._ys is not None:
             yn_val = float(y_n[0, 0])
-            ax.axvline(yn_val, color="#ff7f0e", linewidth=1.0,
+            ax.axvline(yn_val, color="#333333", linewidth=1.0,
                        linestyle=":", alpha=0.8, label=rf"$y_n = {yn_val:.4g}$")
+
         ax.set_xlabel(r"$y^0_{n+1}$", fontsize=11)
         ax.set_ylabel("densité", fontsize=10)
         ax.legend(fontsize=9)
         ax.grid(True, linestyle=":", alpha=0.4)
         n_lbl = f"  n = {self._n_spin.value()}" if self._src_traj.isChecked() else ""
         ax.set_title(
-            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)${n_lbl}"
-            "\n" + rf"$\mu = {m:.4g}$,   $\sigma = {sig:.4g}$",
+            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)${n_lbl}",
             fontsize=10,
         )
 
     def _plot_2d(
         self,
-        mu: np.ndarray, Gamma: np.ndarray,
+        mu1: np.ndarray, Gamma1: np.ndarray,
+        mu2: np.ndarray | None, Gamma2: np.ndarray | None,
         j: int, k: int, y_n: np.ndarray,
     ) -> None:
         from scipy.stats import norm as _norm, multivariate_normal as _mvn
-        m0 = float(mu[0, 0]); m1 = float(mu[1, 0])
-        s0 = float(np.sqrt(max(float(Gamma[0, 0]), 1e-12)))
-        s1 = float(np.sqrt(max(float(Gamma[1, 1]), 1e-12)))
+        c1 = self._COL_SIG1
+        c2 = self._COL_SIG2
+
+        m1_0 = float(mu1[0, 0]); m1_1 = float(mu1[1, 0])
+        s1_0 = float(np.sqrt(max(float(Gamma1[0, 0]), 1e-12)))
+        s1_1 = float(np.sqrt(max(float(Gamma1[1, 1]), 1e-12)))
+
+        has2 = mu2 is not None
+        if has2:
+            m2_0 = float(mu2[0, 0]); m2_1 = float(mu2[1, 0])
+            s2_0 = float(np.sqrt(max(float(Gamma2[0, 0]), 1e-12)))
+            s2_1 = float(np.sqrt(max(float(Gamma2[1, 1]), 1e-12)))
+
+        def _marginal(ax, dim, m1v, s1v, m2v=None, s2v=None, xlabel=""):
+            lo = m1v - 4.5 * s1v; hi = m1v + 4.5 * s1v
+            if m2v is not None:
+                lo = min(lo, m2v - 4.5 * s2v); hi = max(hi, m2v + 4.5 * s2v)
+            x   = np.linspace(lo, hi, 400)
+            pdf = _norm.pdf(x, m1v, s1v)
+            ax.plot(x, pdf, color=c1, linewidth=2.0,
+                    label=rf"$p_1$  ($\mu={m1v:.3g}$, $\sigma={s1v:.3g}$)")
+            ax.fill_between(x, pdf, where=(np.abs(x - m1v) <= s1v),
+                            color=c1, alpha=0.30, label=r"$\pm 1\sigma_1$")
+            ax.fill_between(x, pdf, where=(np.abs(x - m1v) <= 2 * s1v),
+                            color=c1, alpha=0.15, label=r"$\pm 2\sigma_1$")
+            ax.axvline(m1v, color=c1, linewidth=1.0, linestyle="--", alpha=0.8)
+            if m2v is not None:
+                pdf2 = _norm.pdf(x, m2v, s2v)
+                ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--",
+                        label=rf"$p_2$  ($\mu={m2v:.3g}$, $\sigma={s2v:.3g}$)")
+                ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= s2v),
+                                color=c2, alpha=0.20, label=r"$\pm 1\sigma_2$")
+                ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
+                                color=c2, alpha=0.10, label=r"$\pm 2\sigma_2$")
+                ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
+            ax.set_xlabel(xlabel, fontsize=10); ax.set_ylabel("densité", fontsize=9)
+            ax.legend(fontsize=7); ax.grid(True, linestyle=":", alpha=0.4)
 
         ax0 = self._fig_dens.add_subplot(1, 3, 1)
-        x0  = np.linspace(m0 - 4.5 * s0, m0 + 4.5 * s0, 400)
-        pdf0 = _norm.pdf(x0, m0, s0)
-        c0   = self._COLOURS[0]
-        ax0.plot(x0, pdf0, color=c0, linewidth=2.0)
-        ax0.fill_between(x0, pdf0, where=(np.abs(x0 - m0) <= s0),
-                         color=c0, alpha=0.30, label=r"$\pm 1\sigma$")
-        ax0.fill_between(x0, pdf0, where=(np.abs(x0 - m0) <= 2 * s0),
-                         color=c0, alpha=0.15, label=r"$\pm 2\sigma$")
-        ax0.axvline(m0, color="#333333", linewidth=1.0, linestyle="--")
-        ax0.set_xlabel(r"$y^0_{n+1}$", fontsize=10); ax0.set_ylabel("densité", fontsize=9)
-        ax0.set_title(rf"Marginale $y^0$: $\mu={m0:.3g}$, $\sigma={s0:.3g}$", fontsize=9)
-        ax0.legend(fontsize=8); ax0.grid(True, linestyle=":", alpha=0.4)
+        _marginal(ax0, 0, m1_0, s1_0,
+                  m2_0 if has2 else None, s2_0 if has2 else None,
+                  xlabel=r"$y^0_{n+1}$")
+        ax0.set_title(rf"Marginale $y^0$", fontsize=9)
 
         ax1 = self._fig_dens.add_subplot(1, 3, 2)
-        x1  = np.linspace(m1 - 4.5 * s1, m1 + 4.5 * s1, 400)
-        pdf1 = _norm.pdf(x1, m1, s1)
-        c1   = self._COLOURS[1]
-        ax1.plot(x1, pdf1, color=c1, linewidth=2.0)
-        ax1.fill_between(x1, pdf1, where=(np.abs(x1 - m1) <= s1),
-                         color=c1, alpha=0.30, label=r"$\pm 1\sigma$")
-        ax1.fill_between(x1, pdf1, where=(np.abs(x1 - m1) <= 2 * s1),
-                         color=c1, alpha=0.15, label=r"$\pm 2\sigma$")
-        ax1.axvline(m1, color="#333333", linewidth=1.0, linestyle="--")
-        ax1.set_xlabel(r"$y^1_{n+1}$", fontsize=10); ax1.set_ylabel("densité", fontsize=9)
-        ax1.set_title(rf"Marginale $y^1$: $\mu={m1:.3g}$, $\sigma={s1:.3g}$", fontsize=9)
-        ax1.legend(fontsize=8); ax1.grid(True, linestyle=":", alpha=0.4)
+        _marginal(ax1, 1, m1_1, s1_1,
+                  m2_1 if has2 else None, s2_1 if has2 else None,
+                  xlabel=r"$y^1_{n+1}$")
+        ax1.set_title(rf"Marginale $y^1$", fontsize=9)
 
         ax2 = self._fig_dens.add_subplot(1, 3, 3)
-        gx  = np.linspace(m0 - 4 * s0, m0 + 4 * s0, 120)
-        gy  = np.linspace(m1 - 4 * s1, m1 + 4 * s1, 120)
+        # Signal 1 — contours bleus
+        gx = np.linspace(m1_0 - 4 * s1_0, m1_0 + 4 * s1_0, 100)
+        gy = np.linspace(m1_1 - 4 * s1_1, m1_1 + 4 * s1_1, 100)
+        if has2:
+            gx = np.linspace(min(m1_0 - 4*s1_0, m2_0 - 4*s2_0),
+                             max(m1_0 + 4*s1_0, m2_0 + 4*s2_0), 100)
+            gy = np.linspace(min(m1_1 - 4*s1_1, m2_1 - 4*s2_1),
+                             max(m1_1 + 4*s1_1, m2_1 + 4*s2_1), 100)
         XX, YY = np.meshgrid(gx, gy)
         pos = np.stack([XX, YY], axis=-1)
-        Gsym = (Gamma + Gamma.T) / 2
+        G1sym = (Gamma1 + Gamma1.T) / 2
         try:
-            ZZ = _mvn.pdf(pos, mean=[m0, m1], cov=Gsym)
-            ax2.contourf(XX, YY, ZZ, levels=10, cmap="RdPu", alpha=0.70)
-            ax2.contour(XX, YY, ZZ, levels=10, colors="k", alpha=0.25, linewidths=0.5)
+            ZZ1 = _mvn.pdf(pos, mean=[m1_0, m1_1], cov=G1sym)
+            ax2.contourf(XX, YY, ZZ1, levels=8, cmap="Blues", alpha=0.50)
+            ax2.contour(XX, YY, ZZ1, levels=8, colors=[c1], alpha=0.60, linewidths=0.8)
         except Exception:
             pass
-        ax2.scatter([m0], [m1], color="black", s=40, zorder=5,
-                    label=rf"$\mu = ({m0:.3g},\, {m1:.3g})$")
+        ax2.scatter([m1_0], [m1_1], color=c1, s=50, zorder=5,
+                    label=rf"$\mu_1 = ({m1_0:.3g},\,{m1_1:.3g})$")
+        # Signal 2 — contours oranges (superposés)
+        if has2:
+            G2sym = (Gamma2 + Gamma2.T) / 2
+            try:
+                ZZ2 = _mvn.pdf(pos, mean=[m2_0, m2_1], cov=G2sym)
+                ax2.contourf(XX, YY, ZZ2, levels=8, cmap="Oranges", alpha=0.35)
+                ax2.contour(XX, YY, ZZ2, levels=8, colors=[c2], alpha=0.70, linewidths=0.8)
+            except Exception:
+                pass
+            ax2.scatter([m2_0], [m2_1], color=c2, s=50, zorder=5, marker="D",
+                        label=rf"$\mu_2 = ({m2_0:.3g},\,{m2_1:.3g})$")
         ax2.set_xlabel(r"$y^0_{n+1}$", fontsize=10); ax2.set_ylabel(r"$y^1_{n+1}$", fontsize=10)
         ax2.set_title("Densité jointe", fontsize=9)
         ax2.legend(fontsize=8); ax2.grid(True, linestyle=":", alpha=0.3)
@@ -930,28 +1002,47 @@ class PredYPanel(QWidget):
 
     def _plot_nd(
         self,
-        mu: np.ndarray, Gamma: np.ndarray,
+        mu1: np.ndarray, Gamma1: np.ndarray,
+        mu2: np.ndarray | None, Gamma2: np.ndarray | None,
         j: int, k: int, y_n: np.ndarray,
     ) -> None:
         from scipy.stats import norm as _norm
+        c1 = self._COL_SIG1
+        c2 = self._COL_SIG2
+        has2 = mu2 is not None
         s = self._s; ncols = min(s, 3); nrows = (s + ncols - 1) // ncols
         for i in range(s):
-            ax  = self._fig_dens.add_subplot(nrows, ncols, i + 1)
-            m   = float(mu[i, 0])
-            sig = float(np.sqrt(max(float(Gamma[i, i]), 1e-12)))
-            c   = self._COLOURS[i % len(self._COLOURS)]
-            x   = np.linspace(m - 4.5 * sig, m + 4.5 * sig, 400)
-            pdf = _norm.pdf(x, m, sig)
-            ax.plot(x, pdf, color=c, linewidth=2.0)
-            ax.fill_between(x, pdf, where=(np.abs(x - m) <= sig),
-                            color=c, alpha=0.30, label=r"$\pm 1\sigma$")
-            ax.fill_between(x, pdf, where=(np.abs(x - m) <= 2 * sig),
-                            color=c, alpha=0.15, label=r"$\pm 2\sigma$")
-            ax.axvline(m, color="#333333", linewidth=1.0, linestyle="--")
+            ax   = self._fig_dens.add_subplot(nrows, ncols, i + 1)
+            m1v  = float(mu1[i, 0])
+            s1v  = float(np.sqrt(max(float(Gamma1[i, i]), 1e-12)))
+            lo, hi = m1v - 4.5 * s1v, m1v + 4.5 * s1v
+            if has2:
+                m2v = float(mu2[i, 0])
+                s2v = float(np.sqrt(max(float(Gamma2[i, i]), 1e-12)))
+                lo  = min(lo, m2v - 4.5 * s2v)
+                hi  = max(hi, m2v + 4.5 * s2v)
+            x    = np.linspace(lo, hi, 400)
+            pdf1 = _norm.pdf(x, m1v, s1v)
+            ax.plot(x, pdf1, color=c1, linewidth=2.0,
+                    label=rf"$p_1$  ($\mu={m1v:.3g}$, $\sigma={s1v:.3g}$)")
+            ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= s1v),
+                            color=c1, alpha=0.30, label=r"$\pm 1\sigma_1$")
+            ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v),
+                            color=c1, alpha=0.15, label=r"$\pm 2\sigma_1$")
+            ax.axvline(m1v, color=c1, linewidth=1.0, linestyle="--", alpha=0.8)
+            if has2:
+                pdf2 = _norm.pdf(x, m2v, s2v)
+                ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--",
+                        label=rf"$p_2$  ($\mu={m2v:.3g}$, $\sigma={s2v:.3g}$)")
+                ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= s2v),
+                                color=c2, alpha=0.20, label=r"$\pm 1\sigma_2$")
+                ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
+                                color=c2, alpha=0.10, label=r"$\pm 2\sigma_2$")
+                ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
             ax.set_xlabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.set_ylabel("densité", fontsize=9)
-            ax.set_title(rf"$y^{i}$: $\mu={m:.3g}$, $\sigma={sig:.3g}$", fontsize=9)
-            ax.legend(fontsize=8); ax.grid(True, linestyle=":", alpha=0.4)
+            ax.set_title(rf"Marginale $y^{i}$", fontsize=9)
+            ax.legend(fontsize=7); ax.grid(True, linestyle=":", alpha=0.4)
         self._fig_dens.suptitle(
             rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)$  [marginales]",
             fontsize=10)
@@ -962,7 +1053,7 @@ class PredYPanel(QWidget):
         ax.set_xticks([]); ax.set_yticks([])
         ax.text(0.5, 0.5,
                 "Lancez le filtre en mode\n"
-                "« Exact IMM under (H5) »\n"
+                "« Exact IMM - H5 required »\n"
                 "pour afficher\n"
                 r"$p(y_{n+1} \mid r_n,\; r_{n+1},\; y_n)$",
                 transform=ax.transAxes, ha="center", va="center",

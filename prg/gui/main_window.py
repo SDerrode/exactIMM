@@ -144,9 +144,27 @@ def _stationary_dist(P: np.ndarray) -> np.ndarray | None:
 # ---------------------------------------------------------------------------
 
 class _InnovHistDialog(QDialog):
-    """Non-modal dialog: innovation histograms + Gaussian fit."""
+    """Non-modal dialog: innovation histograms + theoretical Gaussian mixture.
 
-    def __init__(self, innovations: np.ndarray, parent=None):
+    When *mix_params* is supplied (h5_exact mode), the black curve is the
+    stationary mixture density
+
+        p(ν) = Σ_{j,k} w_{jk} N(ν ; δ_{jk}, Γ_{jk})
+
+    where w_{jk} = π_∞(j) P(j,k), δ_{jk} = μ_{Y,jk} − Σ w μ_{Y} is the
+    deviation of the component mean from the mixture mean, and Γ_{jk} is
+    the conditional innovation covariance (Schur complement).
+
+    Without mix_params (imm_general mode), a best-fit N(μ̂, σ̂²) is shown
+    as a fallback reference.
+    """
+
+    def __init__(
+        self,
+        innovations: np.ndarray,
+        mix_params: dict | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Innovation histograms")
         self.setModal(False)
@@ -172,12 +190,48 @@ class _InnovHistDialog(QDialog):
             ax.hist(x, bins=40, density=True,
                     color=colours[i % len(colours)], alpha=0.70,
                     label="empirical")
-            mu, sigma = float(x.mean()), float(x.std())
-            if sigma > 1e-10:
-                xg = np.linspace(x.min(), x.max(), 300)
-                ax.plot(xg, _norm.pdf(xg, mu, sigma),
-                        "k--", linewidth=1.5,
-                        label=f"N({mu:.3f}, {sigma:.3f}²)")
+
+            # x-grid slightly wider than the data range
+            pad = 0.5 * float(x.std()) if x.std() > 1e-10 else 0.5
+            xg  = np.linspace(float(x.min()) - pad, float(x.max()) + pad, 400)
+
+            if mix_params is not None:
+                # ── Theoretical Gaussian mixture ────────────────────────────
+                w     = mix_params["w"]        # (K, K)  — already normalised
+                K_mix = w.shape[0]
+                Gam   = mix_params["Gamma"]    # [K][K]  (s, s)
+                muYjk = mix_params["mu_Y_jk"]  # [K][K]  (s, 1)
+
+                # Mixture mean μ̄_i = Σ_{jk} w_{jk} μ_{Y,jk}[i]
+                mu_bar_i = sum(
+                    float(w[j, k]) * float(muYjk[j][k][i, 0])
+                    for j in range(K_mix) for k in range(K_mix)
+                )
+
+                pdf_mix = np.zeros_like(xg)
+                for j in range(K_mix):
+                    for k in range(K_mix):
+                        wjk = float(w[j, k])
+                        if wjk < 1e-10:
+                            continue
+                        # Centre: deviation from mixture mean
+                        delta = float(muYjk[j][k][i, 0]) - mu_bar_i
+                        # Within-component std (conditional innovation variance)
+                        var_i = float(Gam[j][k][i, i])
+                        sig   = float(np.sqrt(max(var_i, 1e-12)))
+                        pdf_mix += wjk * _norm.pdf(xg, delta, sig)
+
+                ax.plot(xg, pdf_mix, "k-", linewidth=1.8,
+                        label=rf"$\sum_{{jk}}w_{{jk}}\,\mathcal{{N}}(\delta_{{jk}},\Gamma_{{jk}})$"
+                              f"  ({K_mix}² terms)")
+            else:
+                # ── Fallback: best-fit single Gaussian ──────────────────────
+                mu_e, sig_e = float(x.mean()), float(x.std())
+                if sig_e > 1e-10:
+                    ax.plot(xg, _norm.pdf(xg, mu_e, sig_e),
+                            "k--", linewidth=1.5,
+                            label=f"N({mu_e:.3f}, {sig_e:.3f}²)")
+
             ax.set_title(rf"$\nu^{i}$   (N = {len(x)})", fontsize=10)
             ax.set_xlabel("value", fontsize=9)
             ax.set_ylabel("density", fontsize=9)
@@ -462,6 +516,9 @@ class _FilterWorker(QThread):
                         M_simple[j][k] = D_k + C_k @ D_j @ SV_j_inv   # (s,s)
                         Gamma2[j][k]   = SV_k + C_k @ Schur_j @ C_k.T # (s,s)
 
+                # Poids stationnaires w_{jk} = π_∞(j) P(j,k)  (K,K)
+                mix_w = filt._pi_inf[:, None] * p.P
+
                 self.cond_moments: dict = {
                     "mu_Y_jk": filt._mu_Y_jk,
                     "M_t":     filt._M_t,
@@ -470,6 +527,7 @@ class _FilterWorker(QThread):
                     "M_simple": M_simple,   # (s,s) matrice coeff. pour μ₂
                     "Gamma2":   Gamma2,     # (s,s) covariance constante du signal 2
                     "b_Y":      b_Y,        # [K]   ndarray (s,1) — biais du signal 2
+                    "mix_w":    mix_w,      # (K,K) poids mélange théorique
                 }
 
             self.finished.emit(
@@ -1875,7 +1933,21 @@ class GSSMainWindow(QMainWindow):
         """Open innovation histogram dialog."""
         if not self._state.has_filter():
             return
-        dlg = _InnovHistDialog(self._state.innovations, parent=self)
+        mix_params = None
+        if (
+            self._filter_worker is not None
+            and hasattr(self._filter_worker, "cond_moments")
+        ):
+            cm = self._filter_worker.cond_moments
+            if all(k in cm for k in ("mix_w", "Gamma", "mu_Y_jk")):
+                mix_params = {
+                    "w":       cm["mix_w"],      # (K,K)
+                    "Gamma":   cm["Gamma"],      # [K][K] (s,s)
+                    "mu_Y_jk": cm["mu_Y_jk"],   # [K][K] (s,1)
+                }
+        dlg = _InnovHistDialog(
+            self._state.innovations, mix_params=mix_params, parent=self,
+        )
         dlg.show()
 
     def _on_mc_hist(self) -> None:

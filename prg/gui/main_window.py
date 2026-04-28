@@ -43,6 +43,7 @@ from PyQt6.QtWidgets import (
     QLabel, QSpinBox, QLineEdit, QPushButton,
     QDialog, QMessageBox, QSizePolicy, QSplitter,
     QFileDialog, QFrame, QComboBox, QCheckBox, QProgressBar,
+    QTabWidget,
 )
 
 # ---------------------------------------------------------------------------
@@ -264,7 +265,7 @@ from prg.classes.NoiseCovariance import GSSNoiseCovariance
 from prg.models.presets import PRESETS
 from prg.gui.matrix_widget import StochasticMatrixWidget
 from prg.gui.param_panel import ParamPanel
-from prg.gui.plot_panel import PlotPanel
+from prg.gui.plot_panel import PlotPanel, PredYPanel
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +431,18 @@ class _FilterWorker(QThread):
                 innov_list.append(res.innovation.ravel())
                 if np.isfinite(res.log_lik):
                     log_lik_total += float(res.log_lik)
+
+            # Expose les moments pré-calculés (constants, indépendants de la
+            # trajectoire) pour l'onglet p(y_{n+1} | r_n, r_{n+1}, y_n).
+            # Stockés avant l'émission de finished pour garantir leur disponibilité
+            # dans le slot du thread principal.
+            self.cond_moments: dict = {
+                "mu_Y_jk": filt._mu_Y_jk,   # [K][K] ndarray (s,1) — moyenne conditionnelle
+                "M_t":     filt._M_t,        # [K][K] ndarray (s,s) — coeff. linéaire en y_n
+                "Gamma":   filt._Gamma,      # [K][K] ndarray (s,s) — covariance (cste)
+                "mu_Y":    filt._mu_Y,       # [K]    ndarray (s,1) — moyenne stationnaire Y
+            }
+
             self.finished.emit(
                 np.array(E_xs_list),
                 np.array(Var_xs_list),
@@ -901,12 +914,30 @@ class GSSMainWindow(QMainWindow):
 
         splitter.addWidget(left)
 
-        # ── right panel ──────────────────────────────────────────────
-        self._plot_panel = PlotPanel(q, s)
-        self._plot_panel.setSizePolicy(
+        # ── right panel — QTabWidget avec deux onglets ───────────────
+        self._right_tabs = QTabWidget()
+        self._right_tabs.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        splitter.addWidget(self._plot_panel)
+
+        # Onglet 0 : trajectoires simulation / filtre (inchangé)
+        self._plot_panel = PlotPanel(q, s)
+        self._right_tabs.addTab(self._plot_panel, "Simulation / Filtre")
+
+        # Onglet 1 : densité conditionnelle p(y_{n+1} | r_n, r_{n+1}, y_n)
+        self._pred_y_panel = PredYPanel(K, q, s)
+        self._right_tabs.addTab(
+            self._pred_y_panel,
+            "p(yₙ₊₁ | rₙ, rₙ₊₁, yₙ)",
+        )
+        self._right_tabs.setTabEnabled(1, False)
+        self._right_tabs.setTabToolTip(
+            1,
+            "Distribution conditionnelle gaussienne exacte p(y_{n+1} | r_n=j, r_{n+1}=k, y_n).\n"
+            "Disponible après filtrage.",
+        )
+
+        splitter.addWidget(self._right_tabs)
 
         # Left panel takes ~420px initially, right panel takes the rest
         splitter.setSizes([540, 800])
@@ -989,6 +1020,10 @@ class GSSMainWindow(QMainWindow):
         self._innov_frame.setVisible(False)
         self._status_bar.setText("")
         self._plot_panel.clear()
+        # Réinitialiser et désactiver l'onglet p(y_{n+1} | …)
+        self._pred_y_panel.clear()
+        self._right_tabs.setTabEnabled(1, False)
+        self._right_tabs.setCurrentIndex(0)
         self.statusBar().showMessage("Reset — ready.", 4000)
 
     def _cancel_active_workers(self) -> None:
@@ -1314,6 +1349,18 @@ class GSSMainWindow(QMainWindow):
         self._btn_filter.setEnabled(True)
         self._btn_innov_hist.setEnabled(True)
         self._sync_menu_actions()
+
+        # ── Onglet p(y_{n+1} | r_n, r_{n+1}, y_n) ──────────────────────
+        if (
+            self._filter_worker is not None
+            and hasattr(self._filter_worker, "cond_moments")
+        ):
+            cm = self._filter_worker.cond_moments
+            _, _, _, ys, _ = self._state.data
+            self._pred_y_panel.set_data(
+                cm["mu_Y_jk"], cm["M_t"], cm["Gamma"], cm["mu_Y"], ys
+            )
+            self._right_tabs.setTabEnabled(1, True)
 
         elapsed = time.perf_counter() - getattr(self, "_op_t0", time.perf_counter())
         self.statusBar().showMessage(

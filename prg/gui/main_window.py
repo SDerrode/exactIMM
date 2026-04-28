@@ -434,16 +434,17 @@ class _FilterWorker(QThread):
                 if np.isfinite(res.log_lik):
                     log_lik_total += float(res.log_lik)
 
-            # Expose les moments pré-calculés (constants, indépendants de la
-            # trajectoire) pour l'onglet p(y_{n+1} | r_n, r_{n+1}, y_n).
-            # Stockés avant l'émission de finished pour garantir leur disponibilité
-            # dans le slot du thread principal.
-            self.cond_moments: dict = {
-                "mu_Y_jk": filt._mu_Y_jk,   # [K][K] ndarray (s,1) — moyenne conditionnelle
-                "M_t":     filt._M_t,        # [K][K] ndarray (s,s) — coeff. linéaire en y_n
-                "Gamma":   filt._Gamma,      # [K][K] ndarray (s,s) — covariance (cste)
-                "mu_Y":    filt._mu_Y,       # [K]    ndarray (s,1) — moyenne stationnaire Y
-            }
+            # Expose les moments pré-calculés pour l'onglet p(y_{n+1}|r_n,r_{n+1},y_n).
+            # Ces attributs n'existent qu'en mode "h5_exact" (ils sont produits par
+            # _precompute()). En mode "imm_general" on ne les définit pas : le slot
+            # _on_filter_finished teste hasattr() et laisse l'onglet grisé.
+            if hasattr(filt, "_mu_Y_jk"):
+                self.cond_moments: dict = {
+                    "mu_Y_jk": filt._mu_Y_jk,
+                    "M_t":     filt._M_t,
+                    "Gamma":   filt._Gamma,
+                    "mu_Y":    filt._mu_Y,
+                }
 
             self.finished.emit(
                 np.array(E_xs_list),

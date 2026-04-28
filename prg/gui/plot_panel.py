@@ -846,11 +846,13 @@ class PredYPanel(QWidget):
         ax.set_yticks([])
         ax.text(
             0.5, 0.5,
-            "Lancez le filtre pour afficher\n"
+            "Lancez le filtre en mode\n"
+            "« Exact IMM under (H5) »\n"
+            "pour afficher\n"
             r"$p(y_{n+1} \mid r_n,\; r_{n+1},\; y_n)$",
             transform=ax.transAxes,
             ha="center", va="center",
-            fontsize=12, color="#999999", style="italic",
+            fontsize=11, color="#999999", style="italic",
         )
         ax.grid(True, linestyle=":", alpha=0.3)
         self._canvas.draw_idle()

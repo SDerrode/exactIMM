@@ -677,7 +677,7 @@ class GSSMainWindow(QMainWindow):
         preset_row.setSpacing(6)
         preset_row.addWidget(QLabel("Preset :"))
         self._preset_combo = QComboBox()
-        self._preset_combo.addItem("— choisir un modèle —")
+        self._preset_combo.addItem("— select a model —")
         for entry in PRESETS:
             self._preset_combo.addItem(entry.label)
             self._preset_combo.setItemData(
@@ -685,7 +685,7 @@ class GSSMainWindow(QMainWindow):
                 entry.tooltip,
                 Qt.ItemDataRole.ToolTipRole,
             )
-        self._preset_combo.setToolTip("Charger un modèle prédéfini")
+        self._preset_combo.setToolTip("Load a predefined model")
         self._preset_combo.activated.connect(self._on_preset_selected)
         preset_row.addWidget(self._preset_combo, stretch=1)
         left_layout.addLayout(preset_row)
@@ -1560,9 +1560,9 @@ class GSSMainWindow(QMainWindow):
         else:
             answer = QMessageBox.question(
                 self,
-                "Changement de dimensions",
-                f"Ce modèle requiert K={entry.K}, q={entry.q}, s={entry.s}.\n"
-                f"La fenêtre va être recréée. Continuer ?",
+                "Dimension change",
+                f"This model requires K={entry.K}, q={entry.q}, s={entry.s}.\n"
+                f"The window will be recreated. Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if answer == QMessageBox.StandardButton.Yes:

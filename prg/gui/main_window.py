@@ -243,6 +243,7 @@ class _InnovHistDialog(QDialog):
         self,
         innovations: np.ndarray,
         mix_params: dict | None = None,
+        pis:        np.ndarray | None = None,   # D11: (N, K) filtered posteriors
         parent=None,
     ):
         super().__init__(parent)
@@ -415,6 +416,63 @@ class _InnovHistDialog(QDialog):
                     idx += 1
 
             inner_tabs.addTab(sc_w, "Scatter")
+
+        # ─────────────────────────────────────────────────────────────
+        # Tab 3: Per-regime innovations (D11)
+        # ─────────────────────────────────────────────────────────────
+        if pis is not None and pis.ndim == 2 and pis.shape[0] == N:
+            K = pis.shape[1]
+            r_pred = np.argmax(pis, axis=1)          # (N,) predicted regime index
+            regime_colours = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+
+            preg_w = QWidget()
+            preg_l = QVBoxLayout(preg_w)
+            preg_l.setContentsMargins(2, 2, 2, 2)
+
+            nrows = K; ncols = s
+            fig_pr = Figure(
+                figsize=(max(4, 3.5 * ncols), max(2.5, 2.5 * nrows)),
+                tight_layout=True,
+            )
+            can_pr = FigureCanvasQTAgg(fig_pr)
+            can_pr.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+
+            for k in range(K):
+                mask    = r_pred == k
+                n_k     = int(mask.sum())
+                innov_k = innovations[mask]   # (N_k, s)
+                c       = regime_colours[k % len(regime_colours)]
+
+                for i in range(s):
+                    ax = fig_pr.add_subplot(nrows, ncols, k * ncols + i + 1)
+                    if n_k > 1:
+                        xi = innov_k[:, i]
+                        ax.hist(xi, bins=max(10, n_k // 20),
+                                density=True, color=c, alpha=0.5)
+                        xg = np.linspace(xi.min() - xi.std(),
+                                         xi.max() + xi.std(), 300)
+                        ax.plot(xg, _norm.pdf(xg, xi.mean(), max(xi.std(), 1e-9)),
+                                color=c, linewidth=1.5)
+                        _, p_lb, _ = _ljung_box(xi)
+                        S2, K2, _, p_jb = _shape_diagnostics(xi)
+                        ax.set_title(
+                            f"k={k}  ν^{i}   N_k={n_k}\n"
+                            f"LB p={p_lb:.3f}  S={S2:+.2f}  K={K2:+.2f}",
+                            fontsize=8,
+                        )
+                    else:
+                        ax.set_title(f"k={k}  ν^{i}   N_k={n_k}",
+                                     fontsize=8)
+                        ax.text(0.5, 0.5, "n/a", transform=ax.transAxes,
+                                ha="center", va="center",
+                                fontsize=9, color="#aaa")
+                    ax.set_xlabel(rf"$\nu^{i}$", fontsize=8)
+                    ax.grid(True, linestyle=":", alpha=0.4)
+                    ax.tick_params(labelsize=7)
+
+            preg_l.addWidget(NavigationToolbar2QT(can_pr, preg_w))
+            preg_l.addWidget(can_pr)
+            inner_tabs.addTab(preg_w, "Per-regime")
 
         # ─────────────────────────────────────────────────────────────
         # Export CSV button (D12)
@@ -1662,47 +1720,94 @@ class GSSMainWindow(QMainWindow):
         ns, rs, xs, ys, _ = self._state.data
         N = len(ns)
 
-        # Overlay filtered estimates + regime posterior + innovation sequence
+        # ── Store + plot overlays ─────────────────────────────────────
         self._state.store_innovations(innovations)
         self._state.store_filter_results(E_xs, Var_xs, pis, log_lik_total)  # D5
         self._plot_panel.add_filter_overlay(ns, E_xs, Var_xs)
         self._plot_panel.add_pi_overlay(ns, pis, self._K)
         self._plot_panel.update_innovations(ns, innovations)
 
-        # ── Filter quality frame — always visible after filter ───────
+        # ── Filter quality frame (C5: extracted helper) ───────────────
+        self._apply_filter_quality_frame(ns, xs, E_xs, log_lik_total)
+
+        self._btn_filter.setEnabled(True)
+        self._btn_innov_hist.setEnabled(True)
+        self._sync_menu_actions()
+
+        # ── Predicted-Y tab ──────────────────────────────────────────
+        if (
+            self._filter_worker is not None
+            and hasattr(self._filter_worker, "cond_moments")
+        ):
+            cm = self._filter_worker.cond_moments
+            _, _, _, ys, _ = self._state.data
+            self._pred_y_panel.set_data(
+                cm["mu_Y_jk"], cm["M_t"], cm["Gamma"], cm["mu_Y"], ys,
+                M_simple=cm.get("M_simple"),
+                Gamma2=cm.get("Gamma2"),
+                b_Y=cm.get("b_Y"),
+            )
+            self._right_tabs.setTabEnabled(1, True)
+
+        elapsed = time.perf_counter() - getattr(self, "_op_t0", time.perf_counter())
+        self.statusBar().showMessage(
+            f"Filter complete — N = {N}, log L = {log_lik_total:.4g}  "
+            f"({elapsed:.2f}s).",
+            8000,
+        )
+
+        # ── Innovation diagnostics (C5: extracted helper) ─────────────
+        _mix_w    = None
+        _Gamma_cm = None
+        _muY_jk   = None
+        if (
+            self._filter_worker is not None
+            and hasattr(self._filter_worker, "cond_moments")
+        ):
+            cm_diag = self._filter_worker.cond_moments
+            if all(k in cm_diag for k in ("mix_w", "Gamma", "mu_Y_jk")):
+                _mix_w    = cm_diag["mix_w"]
+                _Gamma_cm = cm_diag["Gamma"]
+                _muY_jk   = cm_diag["mu_Y_jk"]
+
+        self._apply_innovation_diagnostics(innovations, _mix_w, _Gamma_cm, _muY_jk)
+
+    # ── C5 sub-methods (called from _on_filter_finished + session restore) ──
+
+    def _apply_filter_quality_frame(
+        self,
+        ns:            list,
+        xs:            np.ndarray | None,
+        E_xs:          np.ndarray,
+        log_lik_total: float,
+    ) -> None:
+        """Refresh the Filter quality frame (log L, MSE, RMSE, per-component)."""
+        N = len(ns)
         mean_ll = log_lik_total / N if N > 0 else float("nan")
         self._loglik_label.setText(
             f"log L = {log_lik_total:.4g}   (mean = {mean_ll:.4g})"
         )
 
-        # MSE / RMSE only when ground-truth X is available
         if xs is not None:
-            err = xs - E_xs                              # (N, q)
-            mse_per_comp = np.mean(err ** 2, axis=0)     # (q,)
+            err          = xs - E_xs
+            mse_per_comp = np.mean(err ** 2, axis=0)
             mse_global   = float(mse_per_comp.mean())
             rmse_global  = float(np.sqrt(mse_global))
-
             self._mse_global_label.setText(f"MSE  = {mse_global:.5g}")
             self._rmse_label.setText(f"RMSE = {rmse_global:.5g}")
-
-            # Color the frame: green if RMSE is small relative to signal std
             sig_std = float(xs.std()) if xs.std() > 0 else 1.0
             ratio   = rmse_global / sig_std
             if ratio < 0.20:
-                bg, fg, border = "#d4edda", "#155724", "#c3e6cb"   # green
+                bg, fg, border = "#d4edda", "#155724", "#c3e6cb"
                 quality_icon = "✓"
             elif ratio < 0.50:
-                bg, fg, border = "#fff3cd", "#856404", "#ffc107"   # amber
+                bg, fg, border = "#fff3cd", "#856404", "#ffc107"
                 quality_icon = "~"
             else:
-                bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"   # red
+                bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"
                 quality_icon = "✗"
-            title_text = (
-                f"Filter quality  {quality_icon}"
-                f"  (RMSE/σ = {ratio:.2f})"
-            )
+            title_text = f"Filter quality  {quality_icon}  (RMSE/σ = {ratio:.2f})"
         else:
-            # No ground truth: neutral styling, hide MSE/RMSE rows
             self._mse_global_label.setText("")
             self._rmse_label.setText("")
             bg, fg, border = "#eef2f7", "#333333", "#c8d0d8"
@@ -1726,7 +1831,6 @@ class GSSMainWindow(QMainWindow):
             mse_vbox.removeWidget(lbl)
             lbl.deleteLater()
         self._mse_comp_labels.clear()
-
         if xs is not None and self._q > 1:
             for i, v in enumerate(np.mean((xs - E_xs) ** 2, axis=0)):
                 lbl = QLabel(f"  MSE(X^{i}) = {v:.5g}")
@@ -1736,65 +1840,29 @@ class GSSMainWindow(QMainWindow):
 
         self._mse_frame.setVisible(True)
 
-        self._btn_filter.setEnabled(True)
-        self._btn_innov_hist.setEnabled(True)
-        self._sync_menu_actions()
+    def _apply_innovation_diagnostics(
+        self,
+        innovations: np.ndarray,
+        mix_w:   np.ndarray | None = None,
+        Gamma_cm: object = None,
+        muY_jk:   object = None,
+    ) -> None:
+        """Update Ljung-Box + shape badge pills in the innovation diagnostics frame.
 
-        # ── Tab: p(y_{n+1} | r_n, r_{n+1}, y_n) ───────────────────────────
-        if (
-            self._filter_worker is not None
-            and hasattr(self._filter_worker, "cond_moments")
-        ):
-            cm = self._filter_worker.cond_moments
-            _, _, _, ys, _ = self._state.data
-            self._pred_y_panel.set_data(
-                cm["mu_Y_jk"], cm["M_t"], cm["Gamma"], cm["mu_Y"], ys,
-                M_simple=cm.get("M_simple"),
-                Gamma2=cm.get("Gamma2"),
-                b_Y=cm.get("b_Y"),
-            )
-            self._right_tabs.setTabEnabled(1, True)
-
-        elapsed = time.perf_counter() - getattr(self, "_op_t0", time.perf_counter())
-        self.statusBar().showMessage(
-            f"Filter complete — N = {N}, log L = {log_lik_total:.4g}  "
-            f"({elapsed:.2f}s).",
-            8000,
-        )
-
-        # ── Innovation diagnostics: Ljung-Box + shape of standardised ν̃ ────
-        # Compute standardised innovations once (A12 / D1):
-        #   h5_exact  → whiten by stationary marginal covariance Σ w_{jk} Γ_{jk}
-        #   imm_general → whiten by sample covariance
-        _mix_w    = None
-        _Gamma_cm = None
-        _muY_jk   = None
-        if (
-            self._filter_worker is not None
-            and hasattr(self._filter_worker, "cond_moments")
-        ):
-            cm_diag = self._filter_worker.cond_moments
-            if all(k in cm_diag for k in ("mix_w", "Gamma", "mu_Y_jk")):
-                _mix_w    = cm_diag["mix_w"]
-                _Gamma_cm = cm_diag["Gamma"]
-                _muY_jk   = cm_diag["mu_Y_jk"]
-
+        Standardises innovations (D1 / A12) before the shape tests:
+          h5_exact  → weighted mixture covariance from cond_moments
+          imm_general → sample covariance (fallback)
+        Applies Bonferroni correction over 2·s simultaneous tests (D2).
+        """
         try:
-            innov_std = _standardise_innovations(
-                innovations, _mix_w, _Gamma_cm, _muY_jk
-            )
-        except Exception:   # noqa: BLE001
-            innov_std = innovations   # safe fallback
+            innov_std = _standardise_innovations(innovations, mix_w, Gamma_cm, muY_jk)
+        except Exception:  # noqa: BLE001
+            innov_std = innovations
+        std_mode = "h5 S" if mix_w is not None else "sample S"
 
-        std_mode = "h5 S" if _mix_w is not None else "sample S"
-
-        # D2: Bonferroni correction — running 2·s independent tests (s LB + s shape).
-        # Per-test significance level = α / (2·s) so the family-wise error rate ≤ α=0.05.
-        n_tests   = max(1, 2 * self._s)
-        alpha_fam = 0.05                             # target FWER
-        alpha_lb  = alpha_fam / n_tests              # per LB test
-        alpha_sk  = alpha_fam / n_tests              # per shape test
-        # "warn" zone = [alpha, 2·alpha]; "ok" zone = (2·alpha, 1]
+        n_tests        = max(1, 2 * self._s)
+        alpha_fam      = 0.05
+        alpha_lb       = alpha_fam / n_tests
         thresh_lb_ok   = 2.0 * alpha_lb
         thresh_lb_warn = alpha_lb
         bonf_note = (
@@ -1803,7 +1871,6 @@ class GSSMainWindow(QMainWindow):
         )
 
         for i in range(self._s):
-            # Ljung-Box on raw innovation (autocorrelation test is scale-independent)
             _, p_lb, h_lb = _ljung_box(innovations[:, i])
             if p_lb > thresh_lb_ok:
                 style, icon, verdict = _PILL_OK,   "✓", "white"
@@ -1811,28 +1878,20 @@ class GSSMainWindow(QMainWindow):
                 style, icon, verdict = _PILL_WARN, "~", "border"
             else:
                 style, icon, verdict = _PILL_ERR,  "✗", "autocor."
-            self._innov_lb_badges[i].setText(
-                f"{icon} {verdict}  p={p_lb:.3f}"
-            )
+            self._innov_lb_badges[i].setText(f"{icon} {verdict}  p={p_lb:.3f}")
             self._innov_lb_badges[i].setStyleSheet(style)
             self._innov_lb_badges[i].setToolTip(
                 f"Ljung-Box: Q stat with h = {h_lb} lags.\n"
-                f"p = {p_lb:.4g}   (OK if p > {thresh_lb_ok:.4g}).\n"
-                f"{bonf_note}"
+                f"p = {p_lb:.4g}   (OK if p > {thresh_lb_ok:.4g}).\n{bonf_note}"
             )
-            # Shape diagnostics on STANDARDISED innovation
             S, K, JB, p_jb = _shape_diagnostics(innov_std[:, i])
-            sk_ok = abs(S) < 0.25 and abs(K) < 0.50
-            sk_wn = abs(S) < 0.50 and abs(K) < 1.00
-            if sk_ok:
+            if abs(S) < 0.25 and abs(K) < 0.50:
                 style, icon = _PILL_OK,   "✓"
-            elif sk_wn:
+            elif abs(S) < 0.50 and abs(K) < 1.00:
                 style, icon = _PILL_WARN, "~"
             else:
                 style, icon = _PILL_ERR,  "✗"
-            self._innov_jb_badges[i].setText(
-                f"{icon}  S={S:+.2f}  K={K:+.2f}"
-            )
+            self._innov_jb_badges[i].setText(f"{icon}  S={S:+.2f}  K={K:+.2f}")
             self._innov_jb_badges[i].setStyleSheet(style)
             self._innov_jb_badges[i].setToolTip(
                 f"Standardised innovation ν̃  ({std_mode})\n"
@@ -2263,91 +2322,9 @@ class GSSMainWindow(QMainWindow):
                 self._plot_panel.add_pi_overlay(ns, pis, K)
                 self._plot_panel.update_innovations(ns, innovations)
 
-                # Rebuild filter quality frame (no cond_moments — use fallback)
-                N = len(ns)
-                mean_ll = log_lik_total / N if N > 0 else float("nan")
-                self._loglik_label.setText(
-                    f"log L = {log_lik_total:.4g}   (mean = {mean_ll:.4g})"
-                )
-                if xs_arr is not None:
-                    err = xs_arr - E_xs
-                    mse_per = np.mean(err ** 2, axis=0)
-                    mse_gl  = float(mse_per.mean())
-                    rmse_gl = float(np.sqrt(mse_gl))
-                    self._mse_global_label.setText(f"MSE  = {mse_gl:.5g}")
-                    self._rmse_label.setText(f"RMSE = {rmse_gl:.5g}")
-                    sig_std = float(xs_arr.std()) if xs_arr.std() > 0 else 1.0
-                    ratio   = rmse_gl / sig_std
-                    if ratio < 0.20:
-                        bg, fg, border = "#d4edda", "#155724", "#c3e6cb"
-                        icon = "✓"
-                    elif ratio < 0.50:
-                        bg, fg, border = "#fff3cd", "#856404", "#ffc107"
-                        icon = "~"
-                    else:
-                        bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"
-                        icon = "✗"
-                    self._mse_title.setText(
-                        f"Filter quality  {icon}  (RMSE/σ = {ratio:.2f})"
-                    )
-                else:
-                    self._mse_global_label.setText("")
-                    self._rmse_label.setText("")
-                    bg, fg, border = "#eef2f7", "#333333", "#c8d0d8"
-                    self._mse_title.setText("Filter quality  (log L only)")
-
-                self._mse_frame.setStyleSheet(
-                    f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
-                    f" border-radius: 4px; }}"
-                )
-                t_sty = f"font-weight: bold; font-size: 11px; color: {fg};"
-                v_sty = f"font-size: 10px; color: {fg};"
-                self._mse_title.setStyleSheet(t_sty)
-                self._loglik_label.setStyleSheet(v_sty)
-                self._mse_global_label.setStyleSheet(v_sty)
-                self._rmse_label.setStyleSheet(v_sty)
-                self._mse_frame.setVisible(True)
-
-                # Innovation diagnostics (sample-covariance standardisation)
-                n_tests   = max(1, 2 * s)
-                alpha_fam = 0.05
-                alpha_lb  = alpha_fam / n_tests
-                thresh_ok = 2.0 * alpha_lb
-                thresh_wn = alpha_lb
-                bonf_note = (
-                    f"Bonferroni: α_per = {alpha_lb:.4g} "
-                    f"(family-wise α={alpha_fam}, {n_tests} tests)."
-                )
-                innov_std = _standardise_innovations(innovations, None, None, None)
-                for i in range(s):
-                    _, p_lb, h_lb = _ljung_box(innovations[:, i])
-                    if p_lb > thresh_ok:
-                        style, icon2, verdict = _PILL_OK,   "✓", "white"
-                    elif p_lb > thresh_wn:
-                        style, icon2, verdict = _PILL_WARN, "~", "border"
-                    else:
-                        style, icon2, verdict = _PILL_ERR,  "✗", "autocor."
-                    self._innov_lb_badges[i].setText(f"{icon2} {verdict}  p={p_lb:.3f}")
-                    self._innov_lb_badges[i].setStyleSheet(style)
-                    self._innov_lb_badges[i].setToolTip(
-                        f"Ljung-Box: Q stat with h = {h_lb} lags.\n"
-                        f"p = {p_lb:.4g}   (OK if p > {thresh_ok:.4g}).\n{bonf_note}"
-                    )
-                    S2, K2, JB, p_jb = _shape_diagnostics(innov_std[:, i])
-                    if abs(S2) < 0.25 and abs(K2) < 0.50:
-                        style2, icon3 = _PILL_OK,   "✓"
-                    elif abs(S2) < 0.50 and abs(K2) < 1.00:
-                        style2, icon3 = _PILL_WARN, "~"
-                    else:
-                        style2, icon3 = _PILL_ERR,  "✗"
-                    self._innov_jb_badges[i].setText(f"{icon3}  S={S2:+.2f}  K={K2:+.2f}")
-                    self._innov_jb_badges[i].setStyleSheet(style2)
-                    self._innov_jb_badges[i].setToolTip(
-                        f"Standardised innovation ν̃  (sample S)\n"
-                        f"Skewness S = {S2:+.4f}   Excess kurtosis K = {K2:+.4f}\n"
-                        f"Jarque-Bera JB = {JB:.3f}   p = {p_jb:.4g}\n{bonf_note}"
-                    )
-                self._innov_frame.setVisible(True)
+                # C5: use shared helpers (sample-covariance fallback — no cond_moments)
+                self._apply_filter_quality_frame(ns, xs_arr, E_xs, log_lik_total)
+                self._apply_innovation_diagnostics(innovations)
 
                 self._btn_filter.setEnabled(True)
                 self._btn_innov_hist.setEnabled(True)
@@ -2771,7 +2748,10 @@ class GSSMainWindow(QMainWindow):
                     "mu_Y_jk": cm["mu_Y_jk"],   # [K][K] (s,1)
                 }
         dlg = _InnovHistDialog(
-            self._state.innovations, mix_params=mix_params, parent=self,
+            self._state.innovations,
+            mix_params=mix_params,
+            pis=self._state.filter_pis,   # D11: per-regime tab
+            parent=self,
         )
         dlg.show()
 

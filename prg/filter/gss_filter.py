@@ -396,19 +396,35 @@ class GSSFilter:
         # For each (j, k):
         #   µ_Y(j, k) = [C_k, D_k] µ(j) + b_Y(k)               (s, 1)
         #   Cov(Y_{n+1}, Y_n | j, k) = (F_k Σ(j))[q:, q:]      (s, s)
-        #   M̃_{j,k} = Cov × Σ_YY(j)^{-1}                       (s, s)
-        #   Γ(j, k) = Σ_YY(k) - M̃ Cov^T                        (s, s)
+        #   M̃_{j,k} = Cov × Σ_YY(j)^{-1}                       (s, s)  [used for the mean]
+        #   Γ(j, k) = C_k P_post(j) C_k^T + Σ_V(k)             (s, s)
+        #
+        # The pair-conditional predictive covariance Γ(j,k) is derived by
+        # integrating out the filtered state X_n | (r_n=j, y_{1:n}) which,
+        # under (H5), is N(µ_X(j) + K_j(y_n − µ_Y(j)), P_post(j)):
+        #
+        #   Var(Y_{n+1} | r_n=j, r_{n+1}=k, y_n) = C_k P_post(j) C_k^T + Σ_V(k)
+        #
+        # where C_k = F_k[q:, :q] and Σ_V(k) = noise_cov[q:, q:].
+        # Note: using Σ_YY(k) in place of this (the stationary *marginal*
+        # variance of Y_{n+1} under regime k) introduces a systematic error
+        # of F_k^Y [Σ_bar(k) − Σ(j)] F_k^{Y,T} that biases one regime to
+        # always win when the regime covariances differ.
         self._mu_Y_jk: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         self._M_t:     list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         self._Gamma:   list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         for k in range(K):
-            F   = p.f_matrix.F(k)
-            b_Y = p.b(k)[q:]
+            F    = p.f_matrix.F(k)
+            b_Y  = p.b(k)[q:]
+            C_k  = F[q:, :q]                       # C block of F_k  (s, q)
+            SV_k = p.noise_cov.Sigma_V(k)           # Σ_V(k)          (s, s)
             for j in range(K):
                 mu_Y_jk = F[q:, :] @ self._mu_z[j] + b_Y
-                Cov     = (F @ self._Sigma[j])[q:, q:]                    # (s, s)
-                M_t     = _safe_solve(self._S_YY[j].T, Cov.T).T           # (s, s)
-                Gamma   = _psd_floor(_sym(self._S_YY[k] - M_t @ Cov.T))   # (s, s)
+                Cov     = (F @ self._Sigma[j])[q:, q:]          # (s, s) — used for mean
+                M_t     = _safe_solve(self._S_YY[j].T, Cov.T).T  # (s, s) — used for mean
+                Gamma   = _psd_floor(_sym(
+                    C_k @ self._P_post[j] @ C_k.T + SV_k
+                ))                                               # (s, s)
                 self._mu_Y_jk[j][k] = mu_Y_jk
                 self._M_t[j][k]     = M_t
                 self._Gamma[j][k]   = Gamma

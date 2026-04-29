@@ -55,6 +55,8 @@ class PlotPanel(QWidget):
         fig_h = 2.2 * (1 + q + s) + 1.3 * (1 + s)   # extra 0.55 row for π_n
         self._fig = Figure(figsize=(7, fig_h), tight_layout=True)
         self._canvas = FigureCanvasQTAgg(self._fig)
+        # D10: canvas should not participate in Tab-key focus cycling
+        self._canvas.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._toolbar = NavigationToolbar2QT(self._canvas, self)
 
         layout = QVBoxLayout(self)
@@ -270,125 +272,12 @@ class PlotPanel(QWidget):
         self._axes[-1].set_xlabel(r"$n$", fontsize=10)
         self._canvas.draw_idle()
 
-    def update_mc_plots(
-        self,
-        ns: list[int],
-        mean_xs: np.ndarray,      # (N, q)
-        std_xs: np.ndarray,       # (N, q)
-        median_xs: np.ndarray,    # (N, q)
-        mean_ys: np.ndarray,      # (N, s)
-        std_ys: np.ndarray,       # (N, s)
-        median_ys: np.ndarray,    # (N, s)
-        regime_freqs: np.ndarray, # (N, K)
-        K: int,
-        M: int,
-    ) -> None:
-        """Redraw all subplots with Monte-Carlo statistics (mean ± 2σ + median)."""
-        self._clear_mc_plots()
-        self.clear_filter_overlay()
-        self.clear_innovations()
-        for ax in self._axes:
-            ax.cla()
-
-        ns_arr = np.asarray(ns)
-
-        # --- R_n: regime frequencies ---
-        ax_r = self._axes[self._r_offset]
-        colours_r = ["#555555", "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
-        for k in range(K):
-            ax_r.plot(
-                ns_arr, regime_freqs[:, k],
-                color=colours_r[k % len(colours_r)],
-                linewidth=1.0, label=f"P(R={k})",
-            )
-        ax_r.set_ylabel("P(R=k)", fontsize=10)
-        ax_r.set_ylim(-0.05, 1.05)
-        ax_r.legend(fontsize=7, loc="upper right")
-        ax_r.grid(True, linestyle=":", alpha=0.5)
-        ax_r.set_title(f"GSS Monte Carlo  (M = {M})", fontsize=10)
-
-        # --- π_n(k) row — empty in MC mode (no single posterior) ---
-        ax_pi = self._axes[self._pi_offset]
-        ax_pi.cla()
-        ax_pi.set_ylabel(r"$\pi_n(k)$", fontsize=9)
-        ax_pi.set_yticks([])
-        ax_pi.grid(True, linestyle=":", alpha=0.4)
-        ax_pi.tick_params(labelsize=7)
-
-        # --- X^i components: mean ± 2σ + median ---
-        colours_x = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
-        self._mc_artists: list = []
-        for i in range(self._q):
-            ax = self._axes[self._x_offset + i]
-            mu     = mean_xs[:, i]
-            sigma  = std_xs[:, i]
-            med    = median_xs[:, i]
-            c = colours_x[i % len(colours_x)]
-            line_mean, = ax.plot(ns_arr, mu, color=c, linewidth=1.0,
-                                 label=rf"$\bar{{X}}^{i}$  (mean)")
-            line_med,  = ax.plot(ns_arr, med, color=c, linewidth=1.0,
-                                 linestyle="--",
-                                 label=rf"$\tilde{{X}}^{i}$  (median)")
-            fill = ax.fill_between(
-                ns_arr, mu - 2 * sigma, mu + 2 * sigma,
-                color=c, alpha=0.18, label=r"$\pm 2\sigma$",
-            )
-            ax.set_ylabel(rf"$X^{i}$", fontsize=10)
-            ax.legend(fontsize=7, loc="upper right")
-            ax.grid(True, linestyle=":", alpha=0.5)
-            self._mc_artists.extend([line_mean, line_med, fill])
-
-        # --- Y^i components: mean ± 2σ + median ---
-        colours_y = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
-        for i in range(self._s):
-            ax = self._axes[self._y_offset + i]
-            mu    = mean_ys[:, i]
-            sigma = std_ys[:, i]
-            med   = median_ys[:, i]
-            c = colours_y[i % len(colours_y)]
-            line_mean, = ax.plot(ns_arr, mu, color=c, linewidth=1.0,
-                                 label=rf"$\bar{{Y}}^{i}$  (mean)")
-            line_med,  = ax.plot(ns_arr, med, color=c, linewidth=1.0,
-                                 linestyle="--",
-                                 label=rf"$\tilde{{Y}}^{i}$  (median)")
-            fill = ax.fill_between(
-                ns_arr, mu - 2 * sigma, mu + 2 * sigma,
-                color=c, alpha=0.18, label=r"$\pm 2\sigma$",
-            )
-            ax.set_ylabel(rf"$Y^{i}$", fontsize=10)
-            ax.legend(fontsize=7, loc="upper right")
-            ax.grid(True, linestyle=":", alpha=0.5)
-            self._mc_artists.extend([line_mean, line_med, fill])
-
-        # Innovation axes stay empty in MC mode
-        for i in range(self._s):
-            ax = self._axes[self._innov_offset + i]
-            ax.set_ylabel(rf"$\nu^{i}$", fontsize=9)
-            ax.set_yticks([])
-            ax.grid(True, linestyle=":", alpha=0.4)
-            ax.tick_params(labelsize=7)
-
-        self._axes[-1].set_xlabel(r"$n$", fontsize=10)
-        if len(ns_arr) > 0:
-            self._set_shared_xlim(ns_arr)
-        self._canvas.draw_idle()
-
-    def _clear_mc_plots(self) -> None:
-        """Remove Monte-Carlo overlay artists."""
-        for a in getattr(self, "_mc_artists", []):
-            try:
-                a.remove()
-            except (ValueError, NotImplementedError, AttributeError):
-                pass
-        self._mc_artists = []
-
     def save_figure(self, path: str) -> None:
         """Save the current figure to *path* (PNG, PDF, SVG… via extension)."""
         self._fig.savefig(path, dpi=150, bbox_inches="tight")
 
     def clear(self) -> None:
         """Clear all plots and restore the empty-state message."""
-        self._clear_mc_plots()
         self.clear_filter_overlay()
         self.clear_pi_overlay()
         self.clear_innovations()
@@ -561,6 +450,7 @@ class PredYPanel(QWidget):
         traj_layout.setContentsMargins(0, 0, 0, 0)
         self._fig_traj    = Figure(tight_layout=True)
         self._canvas_traj = FigureCanvasQTAgg(self._fig_traj)
+        self._canvas_traj.setFocusPolicy(Qt.FocusPolicy.ClickFocus)   # D10
         traj_layout.addWidget(NavigationToolbar2QT(self._canvas_traj, traj_widget))
         traj_layout.addWidget(self._canvas_traj)
         self._inner_tabs.addTab(traj_widget, "Trajectory")
@@ -620,6 +510,7 @@ class PredYPanel(QWidget):
 
         self._fig_dens    = Figure(tight_layout=True)
         self._canvas_dens = FigureCanvasQTAgg(self._fig_dens)
+        self._canvas_dens.setFocusPolicy(Qt.FocusPolicy.ClickFocus)   # D10
         dens_layout.addWidget(NavigationToolbar2QT(self._canvas_dens, dens_widget))
         dens_layout.addWidget(self._canvas_dens)
         self._inner_tabs.addTab(dens_widget, "Density")

@@ -258,6 +258,7 @@ class _InnovHistDialog(QDialog):
         hist_l.setContentsMargins(0, 0, 0, 0)
         fig_h   = Figure(figsize=(max(4, 3.5 * s), 3.8), tight_layout=True)
         can_h   = FigureCanvasQTAgg(fig_h)
+        can_h.setFocusPolicy(Qt.FocusPolicy.ClickFocus)    # D10
         hist_l.addWidget(NavigationToolbar2QT(can_h, hist_w))
         hist_l.addWidget(can_h)
 
@@ -327,6 +328,7 @@ class _InnovHistDialog(QDialog):
         max_lag = min(40, max(5, N // 10))
         fig_a   = Figure(figsize=(max(4, 3.5 * s), 3.2), tight_layout=True)
         can_a   = FigureCanvasQTAgg(fig_a)
+        can_a.setFocusPolicy(Qt.FocusPolicy.ClickFocus)    # D10
         acf_l.addWidget(NavigationToolbar2QT(can_a, acf_w))
         acf_l.addWidget(can_a)
         conf95 = 1.96 / float(np.sqrt(N))
@@ -374,6 +376,7 @@ class _InnovHistDialog(QDialog):
             fig_s   = Figure(figsize=(max(4, 3.5 * ncols), 3.2 * nrows),
                              tight_layout=True)
             can_s   = FigureCanvasQTAgg(fig_s)
+            can_s.setFocusPolicy(Qt.FocusPolicy.ClickFocus)    # D10
             sc_l.addWidget(NavigationToolbar2QT(can_s, sc_w))
             sc_l.addWidget(can_s)
 

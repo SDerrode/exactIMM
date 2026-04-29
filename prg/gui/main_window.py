@@ -5,24 +5,40 @@ prg/gui/main_window.py
 ======================
 GSSMainWindow — top-level application window.
 
-Layout
-------
-  ┌─────────────────────┬───────────────────────────────────────┐
-  │  ParamPanel         │  PlotPanel                            │
-  │  (tabs F(k)/Σ_W(k)) │                                       │
-  │  ─────────────────  │                                       │
-  │  N  [spinbox]       │                                       │
-  │  Seed  [lineedit]   │                                       │
-  │  [Simuler]          │                                       │
-  │  [Enregistrer CSV]  │                                       │
-  └─────────────────────┴───────────────────────────────────────┘
+Layout (C8: updated to reflect current UI)
+-------------------------------------------
+  ┌──────────────────────────┬──────────────────────────────────────────────┐
+  │  Left panel              │  Right tabs                                  │
+  │  ─────────────────────── │  ┌──────────────┬──────────────────────────┐ │
+  │  [Preset combo]          │  │  Main plots  │  Predicted Y             │ │
+  │  ParamPanel              │  │  (PlotPanel) │  (PredYPanel)            │ │
+  │    tabs: F(k) / Σ_W(k)  │  │              │                          │ │
+  │    per-state tabs        │  │  R_n step    │  Trajectory + Density    │ │
+  │  ─────────────────────── │  │  π_n(k)      │  tabs                    │ │
+  │  [P matrix widget]       │  │  X^i         │                          │ │
+  │  ─────────────────────── │  │  Y^i         │                          │ │
+  │  N  [spinbox]            │  │  ν^i innov.  │                          │ │
+  │  Seed  [lineedit]        │  └──────────────┴──────────────────────────┘ │
+  │  Filter mode [combo]     │                                              │
+  │  [Simulate] [Filter]     │                                              │
+  │  [Save CSV] [Load CSV]   │                                              │
+  │  [Export model]          │                                              │
+  │  [Export plots]          │                                              │
+  │  [Innovation hist] [Reset]│                                             │
+  │  ─────────────────────── │                                              │
+  │  Filter quality frame    │                                              │
+  │    log L, MSE, RMSE      │                                              │
+  │  Innovation diagnostics  │                                              │
+  │    Ljung-Box / shape badges│                                            │
+  └──────────────────────────┴──────────────────────────────────────────────┘
 
-Fixed (non-editable) parameters
---------------------------------
-  P       = uniform (1/K) or model's P
-  pi0     = None → stationary distribution
-  mu_z0   = zeros
-  Sigma_z0= I_{q+s}
+Key internal classes
+---------------------
+  _SessionState     — single source of truth for simulation + filter data
+  _SimWorker        — QThread: runs GSSSimulator
+  _FilterWorker     — QThread: runs GSSFilter (emits progress signals)
+  _WaitDialog       — modal progress dialog with Cancel button
+  _InnovHistDialog  — modeless histogram/ACF/scatter dialog for innovations
 """
 
 import csv
@@ -1152,7 +1168,10 @@ class GSSMainWindow(QMainWindow):
         base_label = "Filter"
         if self._state.params_signature is None:
             self._btn_filter.setText(base_label)
-            self._btn_filter.setToolTip("")
+            self._btn_filter.setToolTip(
+                "Run the optimal filter on the simulation  (Ctrl+F)"
+            )
+            self._btn_filter.setStyleSheet("")
             return
         live_sig = self._params_signature()
         if live_sig is not None and live_sig != self._state.params_signature:
@@ -1162,9 +1181,17 @@ class GSSMainWindow(QMainWindow):
                 "Filter will use the parameters captured at Simulate, not the\n"
                 "current GUI values. Re-run Simulate to use the new ones."
             )
+            # B11: amber border makes the drift state unmissable
+            self._btn_filter.setStyleSheet(
+                "QPushButton { border: 2px solid #e6a800; background-color: #fff8e1; }"
+                "QPushButton:hover { background-color: #fff0b3; }"
+            )
         else:
             self._btn_filter.setText(base_label)
-            self._btn_filter.setToolTip("")
+            self._btn_filter.setToolTip(
+                "Run the optimal filter on the simulation  (Ctrl+F)"
+            )
+            self._btn_filter.setStyleSheet("")
 
     def _on_sim_params_changed(self) -> None:
         """Called when N or Seed changes: invalidate current results."""

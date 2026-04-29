@@ -14,6 +14,8 @@ from matplotlib.backends.backend_qtagg import (
     NavigationToolbar2QT,
 )
 from matplotlib.figure import Figure
+from scipy.stats import norm as _norm                        # C1
+from scipy.stats import multivariate_normal as _mvn         # C1
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
@@ -70,6 +72,8 @@ class PlotPanel(QWidget):
         )
         if self._n_axes == 1:
             self._axes = [self._axes]
+        # C6: stable reference so callers needn't use fragile negative indexing
+        self._ax_last = self._axes[-1]
         self._draw_empty()
 
     # ------------------------------------------------------------------
@@ -141,7 +145,7 @@ class PlotPanel(QWidget):
             ax.set_ylabel(rf"$Y^{i}$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.5)
 
-        self._axes[-1].set_xlabel(r"$n$", fontsize=10)
+        self._ax_last.set_xlabel(r"$n$", fontsize=10)
         # Force x-axis limits to the new data range (sharex propagates).
         # Needed because cla() on multiple shared axes can leave autoscale_x
         # disabled so subsequent plot() calls don't drive the limits.
@@ -248,7 +252,7 @@ class PlotPanel(QWidget):
             ax.grid(True, linestyle=":", alpha=0.4)
             self._innov_artists.append(line)
 
-        self._axes[-1].set_xlabel(r"$n$", fontsize=10)
+        self._ax_last.set_xlabel(r"$n$", fontsize=10)
         if len(ns_arr) > 0:
             self._set_shared_xlim(ns_arr)
         self._canvas.draw_idle()
@@ -269,7 +273,7 @@ class PlotPanel(QWidget):
             ax.set_yticks([])
             ax.grid(True, linestyle=":", alpha=0.4)
             ax.tick_params(labelsize=7)
-        self._axes[-1].set_xlabel(r"$n$", fontsize=10)
+        self._ax_last.set_xlabel(r"$n$", fontsize=10)
         self._canvas.draw_idle()
 
     def save_figure(self, path: str) -> None:
@@ -358,7 +362,7 @@ class PlotPanel(QWidget):
             ax.grid(True, linestyle=":", alpha=0.4)
             ax.tick_params(labelsize=7)
 
-        self._axes[-1].set_xlabel(r"$n$", fontsize=10)
+        self._ax_last.set_xlabel(r"$n$", fontsize=10)
         self._canvas.draw_idle()
 
 
@@ -743,7 +747,6 @@ class PredYPanel(QWidget):
         mu2: np.ndarray | None, Gamma2: np.ndarray | None,
         j: int, k: int, y_n: np.ndarray,
     ) -> None:
-        from scipy.stats import norm as _norm
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
 
@@ -815,7 +818,6 @@ class PredYPanel(QWidget):
         mu2: np.ndarray | None, Gamma2: np.ndarray | None,
         j: int, k: int, y_n: np.ndarray,
     ) -> None:
-        from scipy.stats import norm as _norm, multivariate_normal as _mvn
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
 
@@ -929,7 +931,6 @@ class PredYPanel(QWidget):
         mu2: np.ndarray | None, Gamma2: np.ndarray | None,
         j: int, k: int, y_n: np.ndarray,
     ) -> None:
-        from scipy.stats import norm as _norm
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
         has2 = mu2 is not None

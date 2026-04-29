@@ -456,6 +456,200 @@ class _InnovHistDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Regime diagnostics dialog (B7 + B8)
+# ---------------------------------------------------------------------------
+
+
+class _RegimeDiagDialog(QDialog):
+    """Non-modal dialog: confusion matrix and regime-duration histograms.
+
+    Tabs
+    ----
+    • Confusion  — K×K table of  argmax_k π_n(k)  vs  true r_n
+                   (only when filter results are available).
+    • Durations  — per-regime histogram of consecutive run lengths
+                   overlaid with the theoretical Geom(1−P_{kk}) PMF.
+    """
+
+    def __init__(
+        self,
+        K:   int,
+        rs:  list,                     # true regime sequence, length N
+        P:   np.ndarray,               # (K, K) transition matrix
+        pis: np.ndarray | None = None, # (N, K) filtered posteriors (None → no filter)
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Regime diagnostics")
+        self.setModal(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        from matplotlib.backends.backend_qtagg import (
+            FigureCanvasQTAgg, NavigationToolbar2QT,
+        )
+        from matplotlib.figure import Figure
+        from scipy.stats import geom as _geom_dist
+
+        rs_arr = np.asarray(rs, dtype=int)
+        N = len(rs_arr)
+
+        layout  = QVBoxLayout(self)
+        tabs    = QTabWidget()
+        layout.addWidget(tabs)
+
+        colours = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+
+        # ── Tab 1: Confusion matrix ───────────────────────────────────
+        if pis is not None:
+            conf_w  = QWidget()
+            conf_l  = QVBoxLayout(conf_w)
+            conf_l.setContentsMargins(4, 4, 4, 4)
+
+            r_pred = np.argmax(pis, axis=1)          # (N,) predicted regime
+
+            # K×K confusion matrix (rows = true, cols = predicted)
+            conf = np.zeros((K, K), dtype=int)
+            for t, p in zip(rs_arr, r_pred):
+                conf[t, p] += 1
+
+            accuracy = np.trace(conf) / max(N, 1)
+
+            # ── Title label ──
+            acc_col  = "#155724" if accuracy > 0.85 else (
+                       "#856404" if accuracy > 0.70 else "#721c24")
+            acc_lbl  = QLabel(
+                f"Overall regime accuracy:  {accuracy:.1%}  "
+                f"(N = {N},  argmax π_n  vs  r_n)"
+            )
+            acc_lbl.setStyleSheet(
+                f"font-weight: bold; font-size: 11px; color: {acc_col};"
+            )
+            acc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            conf_l.addWidget(acc_lbl)
+
+            # ── Matplotlib heatmap ──
+            fig_c  = Figure(figsize=(max(3.5, 1.8 * K), max(3.0, 1.6 * K)),
+                            tight_layout=True)
+            can_c  = FigureCanvasQTAgg(fig_c)
+            can_c.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+            ax_c   = fig_c.add_subplot(1, 1, 1)
+
+            # Normalize by true-count per row
+            row_sums = conf.sum(axis=1, keepdims=True).clip(1)
+            conf_norm = conf / row_sums
+
+            im = ax_c.imshow(conf_norm, vmin=0, vmax=1, cmap="Blues",
+                             aspect="equal")
+            fig_c.colorbar(im, ax=ax_c, fraction=0.046, pad=0.04,
+                           label="Recall per row")
+
+            for i in range(K):
+                for j in range(K):
+                    n_ij = conf[i, j]
+                    pct  = conf_norm[i, j]
+                    txt  = f"{n_ij}\n({pct:.1%})"
+                    col  = "white" if pct > 0.6 else "#333333"
+                    ax_c.text(j, i, txt, ha="center", va="center",
+                              fontsize=9, color=col)
+
+            ticks = list(range(K))
+            ax_c.set_xticks(ticks)
+            ax_c.set_yticks(ticks)
+            ax_c.set_xticklabels([f"Pred k={k}" for k in ticks])
+            ax_c.set_yticklabels([f"True k={k}" for k in ticks])
+            ax_c.set_xlabel("Predicted (argmax π_n)", fontsize=10)
+            ax_c.set_ylabel("True (r_n)",             fontsize=10)
+            ax_c.set_title(f"Confusion matrix  —  accuracy = {accuracy:.1%}",
+                           fontsize=10)
+
+            conf_l.addWidget(NavigationToolbar2QT(can_c, conf_w))
+            conf_l.addWidget(can_c)
+
+            # ── Per-regime recall/precision text ──
+            for k in range(K):
+                recall    = conf[k, k] / max(conf[k, :].sum(), 1)
+                precision = conf[k, k] / max(conf[:, k].sum(), 1)
+                lbl = QLabel(
+                    f"  k={k}:  recall = {recall:.1%}"
+                    f"   precision = {precision:.1%}"
+                    f"   support = {conf[k,:].sum()}"
+                )
+                lbl.setStyleSheet("font-size: 10px;")
+                conf_l.addWidget(lbl)
+
+            tabs.addTab(conf_w, "Confusion matrix")
+
+        # ── Tab 2: Duration histograms ────────────────────────────────
+        dur_w = QWidget()
+        dur_l = QVBoxLayout(dur_w)
+        dur_l.setContentsMargins(4, 4, 4, 4)
+
+        ncols = min(K, 3)
+        nrows = (K + ncols - 1) // ncols
+        fig_d = Figure(figsize=(max(4, 4.5 * ncols), 3.5 * nrows),
+                       tight_layout=True)
+        can_d = FigureCanvasQTAgg(fig_d)
+        can_d.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+
+        for k in range(K):
+            # Extract run lengths in regime k
+            runs: list[int] = []
+            run_len = 0
+            for r in rs_arr:
+                if r == k:
+                    run_len += 1
+                else:
+                    if run_len > 0:
+                        runs.append(run_len)
+                    run_len = 0
+            if run_len > 0:
+                runs.append(run_len)
+
+            ax_d = fig_d.add_subplot(nrows, ncols, k + 1)
+            c    = colours[k % len(colours)]
+
+            if runs:
+                runs_arr = np.asarray(runs, dtype=float)
+                max_len  = int(runs_arr.max())
+                bins     = np.arange(0.5, max_len + 2.5, 1)
+                ax_d.hist(runs_arr, bins=bins, density=True,
+                          color=c, alpha=0.55, label="observed")
+
+                # Theoretical Geom(p) where p = 1 − P_kk
+                p_kk = float(P[k, k])
+                q_kk = max(1e-9, 1.0 - p_kk)
+                xs_t = np.arange(1, max_len + 2)
+                pmf  = (1 - q_kk) ** (xs_t - 1) * q_kk   # Geom(q_kk) PMF
+                ax_d.step(xs_t - 0.5, pmf, where="post",
+                          color=c, linewidth=1.5, linestyle="--",
+                          label=f"Geom(1−P_{k}{k}={q_kk:.3f})")
+                ax_d.set_xlabel("Run length", fontsize=9)
+                ax_d.set_ylabel("Density",    fontsize=9)
+                mean_obs = float(runs_arr.mean())
+                mean_th  = 1.0 / q_kk if q_kk > 0 else float("inf")
+                ax_d.set_title(
+                    f"Regime k={k}   "
+                    f"({len(runs)} runs,  "
+                    f"mean {mean_obs:.1f} / th. {mean_th:.1f})",
+                    fontsize=9,
+                )
+                ax_d.legend(fontsize=8)
+            else:
+                ax_d.text(0.5, 0.5, f"No runs in regime k={k}",
+                          transform=ax_d.transAxes,
+                          ha="center", va="center", fontsize=9, color="#aaa")
+                ax_d.set_title(f"Regime k={k}", fontsize=9)
+            ax_d.grid(True, linestyle=":", alpha=0.5)
+
+        dur_l.addWidget(NavigationToolbar2QT(can_d, dur_w))
+        dur_l.addWidget(can_d)
+        tabs.addTab(dur_w, "Duration histograms")
+
+        tabs.setCurrentIndex(0)
+        self.resize(max(520, 440 * min(K, 3)), 500)
+
+
+# ---------------------------------------------------------------------------
 
 from prg.classes.FMatrix import FMatrix
 from prg.classes.GSSParams import GSSParams
@@ -993,13 +1187,22 @@ class GSSMainWindow(QMainWindow):
         self._btn_export_plots.setToolTip("Save current plots to PDF / PNG / SVG  (Ctrl+Shift+E)")  # B6
         self._btn_export_plots.clicked.connect(self._on_export_plots)
 
-        self._btn_innov_hist = QPushButton("📊 Innovation histograms…")
+        self._btn_innov_hist = QPushButton("📊 Innov. histograms…")
         self._btn_innov_hist.setFixedHeight(36)
         self._btn_innov_hist.setEnabled(False)
         self._btn_innov_hist.setToolTip(
             "Show innovation histograms, ACF, and scatter plots.  (Ctrl+I)"  # A8
         )
         self._btn_innov_hist.clicked.connect(self._on_innov_hist)
+
+        # B7/B8: regime diagnostics (confusion matrix + duration histogram)
+        self._btn_regime_diag = QPushButton("📊 Regime diagnostics…")
+        self._btn_regime_diag.setFixedHeight(36)
+        self._btn_regime_diag.setEnabled(False)
+        self._btn_regime_diag.setToolTip(
+            "Confusion matrix (argmax π_n vs r_n) and regime-duration histograms  (Ctrl+D)"
+        )
+        self._btn_regime_diag.clicked.connect(self._on_regime_diag)
 
         # D5/B10: session persistence (params + data + filter results)
         self._btn_save_session = QPushButton("💾 Save session…")
@@ -1028,7 +1231,8 @@ class GSSMainWindow(QMainWindow):
         btn_grid.addWidget(self._btn_load,        1, 1)
         btn_grid.addWidget(self._btn_export,      2, 0)
         btn_grid.addWidget(self._btn_export_plots,2, 1)
-        btn_grid.addWidget(self._btn_innov_hist,  3, 0, 1, 2)
+        btn_grid.addWidget(self._btn_innov_hist,   3, 0)
+        btn_grid.addWidget(self._btn_regime_diag,  3, 1)
         btn_grid.addWidget(self._btn_save_session, 4, 0)
         btn_grid.addWidget(self._btn_load_session, 4, 1)
         btn_grid.addWidget(self._btn_reset,        5, 0, 1, 2)
@@ -1271,6 +1475,7 @@ class GSSMainWindow(QMainWindow):
         self._btn_export.setEnabled(False)
         self._btn_export_plots.setEnabled(False)
         self._btn_innov_hist.setEnabled(False)
+        self._btn_regime_diag.setEnabled(False)
         self._sync_menu_actions()
         self._mse_frame.setVisible(False)
         self._innov_frame.setVisible(False)
@@ -1369,6 +1574,7 @@ class GSSMainWindow(QMainWindow):
         self._btn_save.setEnabled(True)
         self._btn_filter.setEnabled(True)
         self._btn_export_plots.setEnabled(True)
+        self._btn_regime_diag.setEnabled(True)  # B7/B8: available after simulate
         self._sync_menu_actions()
         self._refresh_simulate_button()
 
@@ -1829,6 +2035,7 @@ class GSSMainWindow(QMainWindow):
         self._btn_filter.setEnabled(self._state.can_filter())
         self._btn_save.setEnabled(False)        # nothing new generated
         self._btn_export_plots.setEnabled(True)
+        self._btn_regime_diag.setEnabled(True)  # B7/B8
         self._sync_menu_actions()
         self._mse_frame.setVisible(False)
 
@@ -2037,6 +2244,7 @@ class GSSMainWindow(QMainWindow):
                 self._plot_panel.update_plots(ns, rs, xs_arr, ys_arr, K)
                 self._btn_filter.setEnabled(True)
                 self._btn_export_plots.setEnabled(True)
+                self._btn_regime_diag.setEnabled(True)  # B7/B8
             except Exception as exc:  # noqa: BLE001
                 QMessageBox.warning(self, "Load session",
                                     f"Could not restore simulation data:\n{exc}")
@@ -2146,6 +2354,7 @@ class GSSMainWindow(QMainWindow):
 
                 self._btn_filter.setEnabled(True)
                 self._btn_innov_hist.setEnabled(True)
+                # regime diag already enabled from data restore above
 
             except Exception as exc:  # noqa: BLE001
                 QMessageBox.warning(self, "Load session",
@@ -2255,6 +2464,16 @@ class GSSMainWindow(QMainWindow):
         self._act_innov_hist.setEnabled(False)
         self._act_innov_hist.triggered.connect(self._on_innov_hist)
         view_menu.addAction(self._act_innov_hist)
+
+        # B7/B8: regime diagnostics
+        self._act_regime_diag = QAction("&Regime diagnostics…", self)
+        self._act_regime_diag.setShortcut(QKeySequence("Ctrl+D"))
+        self._act_regime_diag.setStatusTip(
+            "Confusion matrix and regime-duration histograms"
+        )
+        self._act_regime_diag.setEnabled(False)
+        self._act_regime_diag.triggered.connect(self._on_regime_diag)
+        view_menu.addAction(self._act_regime_diag)
 
 
     def _build_status_bar(self) -> None:
@@ -2366,6 +2585,17 @@ class GSSMainWindow(QMainWindow):
         parts = "   ".join(f"π<sub>{k}</sub> = {pi[k]:.3f}" for k in range(len(pi)))
         self._stationary_label.setText(f"π* :  {parts}")
 
+    def _on_regime_diag(self) -> None:
+        """Open regime diagnostics dialog (B7/B8): confusion matrix + duration hist."""
+        if not self._state.has_data():
+            return
+        ns, rs, xs, ys, _ = self._state.data
+        pis = self._state.filter_pis  # None if filter not run
+        dlg = _RegimeDiagDialog(
+            K=self._K, rs=rs, P=self._P, pis=pis, parent=self,
+        )
+        dlg.show()
+
     def _on_innov_hist(self) -> None:
         """Open innovation histogram dialog."""
         if not self._state.has_filter():
@@ -2411,6 +2641,7 @@ class GSSMainWindow(QMainWindow):
         self._act_export.setEnabled(self._btn_export.isEnabled())
         self._act_export_plots.setEnabled(self._btn_export_plots.isEnabled())
         self._act_innov_hist.setEnabled(self._btn_innov_hist.isEnabled())
+        self._act_regime_diag.setEnabled(self._btn_regime_diag.isEnabled())
         # D5: session actions always available (save checks validity inline)
         self._act_save_session.setEnabled(True)
         self._act_load_session.setEnabled(True)

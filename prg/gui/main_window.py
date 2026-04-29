@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.stats import chi2 as _chi2_dist
 from scipy.stats import jarque_bera as _jb
+from scipy.stats import norm as _norm_dist     # C3 / C1: hoisted from InnovHistDialog
 
 from prg.filter.gss_filter import GSSFilter
 
@@ -61,6 +62,18 @@ from PyQt6.QtWidgets import (
     QFileDialog, QFrame, QComboBox, QCheckBox, QProgressBar,
     QTabWidget,
 )
+
+# ---------------------------------------------------------------------------
+# C3 — Named constants for plot colours and diagnostic thresholds
+# ---------------------------------------------------------------------------
+
+# Matplotlib series colours (tab10 palette, first 5)
+_COL_X = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]  # hidden components
+_COL_Y = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]             # observed components
+_COL_R = ["#555555", "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]  # regime colours
+
+# Diagnostic FWER target (used in Bonferroni correction for innovation tests)
+_INNOV_ALPHA_FAM: float = 0.05   # family-wise error rate over 2·s tests
 
 # ---------------------------------------------------------------------------
 # White-noise test (Ljung-Box)
@@ -256,7 +269,7 @@ class _InnovHistDialog(QDialog):
             FigureCanvasQTAgg, NavigationToolbar2QT,
         )
         from matplotlib.figure import Figure
-        from scipy.stats import norm as _norm
+        _norm = _norm_dist   # C1/C3: use module-level import
 
         s      = innovations.shape[1]
         N      = innovations.shape[0]
@@ -1299,7 +1312,7 @@ class GSSMainWindow(QMainWindow):
 
         # B1: keyboard shortcut hint — small one-liner for discoverability
         _sc_hint = QLabel(
-            "Ctrl+R Simulate  ·  Ctrl+F Filter  ·  Ctrl+I Innovations  ·  Ctrl+Shift+R Reset"
+            "Ctrl+R Simulate  ·  Ctrl+F Filter  ·  Ctrl+I Innov.  ·  Ctrl+D Regimes  ·  Ctrl+Shift+R Reset"
         )
         _sc_hint.setStyleSheet("font-size: 9px; color: #888888; padding: 1px 0;")
         _sc_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1861,7 +1874,7 @@ class GSSMainWindow(QMainWindow):
         std_mode = "h5 S" if mix_w is not None else "sample S"
 
         n_tests        = max(1, 2 * self._s)
-        alpha_fam      = 0.05
+        alpha_fam      = _INNOV_ALPHA_FAM        # C3: named constant
         alpha_lb       = alpha_fam / n_tests
         thresh_lb_ok   = 2.0 * alpha_lb
         thresh_lb_warn = alpha_lb

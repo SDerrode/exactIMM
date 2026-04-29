@@ -495,6 +495,11 @@ class _SessionState:
     params: object | None = None           # GSSParams (avoids circular import)
     params_signature: tuple | None = None  # bytes signature of GUI at capture
     innovations: np.ndarray | None = None  # (N, s)
+    # D5: filter arrays kept for session persistence
+    filter_E_xs:   np.ndarray | None = None   # (N, q)
+    filter_Var_xs: np.ndarray | None = None   # (N, q)
+    filter_pis:    np.ndarray | None = None   # (N, K)
+    filter_log_lik: float | None    = None
 
     # ----- Predicates --------------------------------------------------
 
@@ -515,6 +520,10 @@ class _SessionState:
         self.params = None
         self.params_signature = None
         self.innovations = None
+        self.filter_E_xs   = None
+        self.filter_Var_xs = None
+        self.filter_pis    = None
+        self.filter_log_lik = None
 
     def begin_simulation(self, params: object, signature: tuple | None) -> None:
         """About to launch a new Simulate: capture params, drop stale results."""
@@ -527,6 +536,18 @@ class _SessionState:
 
     def store_innovations(self, innov: np.ndarray) -> None:
         self.innovations = innov
+
+    def store_filter_results(                               # D5
+        self,
+        E_xs: np.ndarray,
+        Var_xs: np.ndarray,
+        pis: np.ndarray,
+        log_lik_total: float,
+    ) -> None:
+        self.filter_E_xs   = E_xs
+        self.filter_Var_xs = Var_xs
+        self.filter_pis    = pis
+        self.filter_log_lik = log_lik_total
 
     def load_external(self, ns, rs, xs, ys, params: object,
                       signature: tuple | None) -> None:
@@ -980,6 +1001,22 @@ class GSSMainWindow(QMainWindow):
         )
         self._btn_innov_hist.clicked.connect(self._on_innov_hist)
 
+        # D5/B10: session persistence (params + data + filter results)
+        self._btn_save_session = QPushButton("💾 Save session…")
+        self._btn_save_session.setFixedHeight(32)
+        self._btn_save_session.setToolTip(
+            "Save the complete session (parameters + data + filter results) "
+            "to a .fofgss file  (Ctrl+Shift+S)"
+        )
+        self._btn_save_session.clicked.connect(self._on_save_session)
+
+        self._btn_load_session = QPushButton("📂 Load session…")
+        self._btn_load_session.setFixedHeight(32)
+        self._btn_load_session.setToolTip(
+            "Restore a previously saved .fofgss session  (Ctrl+Shift+O)"
+        )
+        self._btn_load_session.clicked.connect(self._on_load_session)
+
         self._btn_reset = QPushButton("⟳  Reset")
         self._btn_reset.setFixedHeight(36)
         self._btn_reset.setToolTip("Clear all results and reset the plots  (Ctrl+Shift+R)")  # B7
@@ -992,7 +1029,9 @@ class GSSMainWindow(QMainWindow):
         btn_grid.addWidget(self._btn_export,      2, 0)
         btn_grid.addWidget(self._btn_export_plots,2, 1)
         btn_grid.addWidget(self._btn_innov_hist,  3, 0, 1, 2)
-        btn_grid.addWidget(self._btn_reset,       4, 0, 1, 2)
+        btn_grid.addWidget(self._btn_save_session, 4, 0)
+        btn_grid.addWidget(self._btn_load_session, 4, 1)
+        btn_grid.addWidget(self._btn_reset,        5, 0, 1, 2)
 
         left_layout.addLayout(btn_grid)
 
@@ -1419,6 +1458,7 @@ class GSSMainWindow(QMainWindow):
 
         # Overlay filtered estimates + regime posterior + innovation sequence
         self._state.store_innovations(innovations)
+        self._state.store_filter_results(E_xs, Var_xs, pis, log_lik_total)  # D5
         self._plot_panel.add_filter_overlay(ns, E_xs, Var_xs)
         self._plot_panel.add_pi_overlay(ns, pis, self._K)
         self._plot_panel.update_innovations(ns, innovations)
@@ -1799,6 +1839,325 @@ class GSSMainWindow(QMainWindow):
         self.statusBar().showMessage(info, 6000)
 
     # ------------------------------------------------------------------
+    # D5 / B10 — Save / Load complete session
+    # ------------------------------------------------------------------
+
+    def _on_save_session(self) -> None:
+        """Save params + sim data + filter results to a .fofgss file."""
+        import io
+        default_dir = pathlib.Path("data/sessions")
+        default_dir.mkdir(parents=True, exist_ok=True)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save session",
+            str(default_dir / "session.fofgss"),
+            "FofGss sessions (*.fofgss);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.endswith(".fofgss"):
+            path += ".fofgss"
+
+        # Collect GUI parameters
+        F_list   = self._param_panel.get_F_list()
+        SW_list  = self._param_panel.get_Sigma_W_list()
+        mu_list  = self._param_panel.get_mu_z0_list()
+        b_list   = self._param_panel.get_b_list()
+        P        = self._p_widget.get_matrix()
+        if F_list is None or SW_list is None:
+            QMessageBox.warning(
+                self, "Save session",
+                "Cannot save: one or more parameter matrices are invalid.",
+            )
+            return
+
+        arrays: dict = {
+            "_K":           np.array(self._K),
+            "_q":           np.array(self._q),
+            "_s":           np.array(self._s),
+            "_filter_mode": np.array(self._mode_combo.currentData() or "imm_general",
+                                     dtype=object),
+            "_joseph":      np.array(self._joseph_check.isChecked()),
+            "_P":           P,
+        }
+        for k in range(self._K):
+            q, s = self._q, self._s
+            arrays[f"_F_{k}"]  = F_list[k]
+            arrays[f"_SW_{k}"] = SW_list[k]
+            arrays[f"_mu_{k}"] = mu_list[k]  if mu_list  else np.zeros((q + s, 1))
+            arrays[f"_b_{k}"]  = b_list[k]   if b_list   else np.zeros((q + s, 1))
+
+        has_data = self._state.has_data()
+        arrays["_has_data"] = np.array(has_data)
+        if has_data:
+            ns, rs, xs, ys, seed_used = self._state.data
+            has_xs = xs is not None
+            arrays["_ns"]     = np.array(ns, dtype=np.int32)
+            arrays["_rs"]     = np.array(rs, dtype=np.int32)
+            arrays["_ys"]     = ys
+            arrays["_has_xs"] = np.array(has_xs)
+            arrays["_xs"]     = xs if has_xs else np.zeros(0, dtype=np.float64)
+            arrays["_seed"]   = np.array(
+                seed_used if seed_used is not None else -1, dtype=np.int64
+            )
+
+        has_filt = (
+            self._state.has_filter()
+            and self._state.filter_E_xs is not None
+        )
+        arrays["_has_filter"] = np.array(has_filt)
+        if has_filt:
+            arrays["_innovations"] = self._state.innovations
+            arrays["_E_xs"]       = self._state.filter_E_xs
+            arrays["_Var_xs"]     = self._state.filter_Var_xs
+            arrays["_pis"]        = self._state.filter_pis
+            arrays["_log_lik"]    = np.array(self._state.filter_log_lik or 0.0)
+
+        try:
+            buf = io.BytesIO()
+            np.savez_compressed(buf, **arrays)
+            buf.seek(0)
+            pathlib.Path(path).write_bytes(buf.read())
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Save session error", str(exc))
+            return
+
+        self._set_status(f"Session saved: {pathlib.Path(path).name}")
+        self.statusBar().showMessage(
+            f"Session saved to {pathlib.Path(path).resolve()}", 6000
+        )
+
+    def _on_load_session(self) -> None:
+        """Restore a .fofgss session (params + data + filter)."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load session",
+            str(pathlib.Path("data/sessions")),
+            "FofGss sessions (*.fofgss *.npz);;All files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            npz = np.load(path, allow_pickle=True)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(
+                self, "Load session error",
+                f"Cannot read session file:\n{exc}",
+            )
+            return
+
+        K = int(npz["_K"])
+        q = int(npz["_q"])
+        s = int(npz["_s"])
+
+        if K != self._K or q != self._q or s != self._s:
+            QMessageBox.warning(
+                self, "Dimension mismatch",
+                f"Session has K={K}, q={q}, s={s} but the current window "
+                f"has K={self._K}, q={self._q}, s={self._s}.\n\n"
+                "Close this window and open one with the matching dimensions "
+                "(use the Preset combo or launch the app with the correct model), "
+                "then load the session again.",
+            )
+            return
+
+        # --- 1. Restore parameters ---
+        self._param_panel.blockSignals(True)
+        self._p_widget.blockSignals(True)
+        try:
+            P      = npz["_P"]
+            F_list = [npz[f"_F_{k}"]  for k in range(K)]
+            SW_list= [npz[f"_SW_{k}"] for k in range(K)]
+            mu_list= [npz[f"_mu_{k}"] for k in range(K)]
+            b_list = [npz[f"_b_{k}"]  for k in range(K)]
+
+            A_list  = [f[:q, :q] for f in F_list]
+            B_list  = [f[:q, q:] for f in F_list]
+            C_list  = [f[q:, :q] for f in F_list]
+            D_list  = [f[q:, q:] for f in F_list]
+            SU_list = [sw[:q, :q] for sw in SW_list]
+            Dl_list = [sw[:q, q:] for sw in SW_list]
+            SV_list = [sw[q:, q:] for sw in SW_list]
+
+            fm = FMatrix(K, q, s, A_list, B_list, C_list, D_list)
+            nc = GSSNoiseCovariance(K, q, s, SU_list, Dl_list, SV_list)
+            for k in range(K):
+                self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k),
+                                                   mu_list[k], b_list[k])
+            self._P = P
+            self._p_widget.set_matrix(self._P)
+            self._update_stationary_display()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Load session error",
+                                 f"Failed to restore parameters:\n{exc}")
+            return
+        finally:
+            self._param_panel.blockSignals(False)
+            self._p_widget.blockSignals(False)
+        self._refresh_simulate_button()
+
+        # Restore filter mode + Joseph flag
+        try:
+            fm_str = str(npz["_filter_mode"])
+            idx = self._mode_combo.findData(fm_str)
+            if idx >= 0:
+                self._mode_combo.setCurrentIndex(idx)
+            self._joseph_check.setChecked(bool(npz["_joseph"]))
+        except Exception:  # noqa: BLE001
+            pass
+
+        # --- 2. Clear and restore simulation data ---
+        self._state.reset()
+        self._plot_panel.clear()
+        self._mse_frame.setVisible(False)
+        self._innov_frame.setVisible(False)
+        self._btn_filter.setEnabled(False)
+        self._btn_save.setEnabled(False)
+        self._btn_innov_hist.setEnabled(False)
+        self._right_tabs.setTabEnabled(1, False)
+
+        has_data = bool(npz["_has_data"]) if "_has_data" in npz else False
+        ns: list = []
+        xs_arr: np.ndarray | None = None
+        ys_arr: np.ndarray = np.zeros((0, s))
+        if has_data:
+            try:
+                ns       = npz["_ns"].tolist()
+                rs       = npz["_rs"].tolist()
+                ys_arr   = npz["_ys"]
+                has_xs   = bool(npz["_has_xs"])
+                xs_arr   = npz["_xs"] if has_xs else None
+                seed_val = int(npz["_seed"])
+                seed_val = seed_val if seed_val >= 0 else None
+
+                live_params = self._build_gss_params()
+                self._state.store_data(ns, rs, xs_arr, ys_arr, seed_val)
+                self._state.params = live_params
+                self._state.params_signature = self._params_signature()
+
+                self._plot_panel.update_plots(ns, rs, xs_arr, ys_arr, K)
+                self._btn_filter.setEnabled(True)
+                self._btn_export_plots.setEnabled(True)
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.warning(self, "Load session",
+                                    f"Could not restore simulation data:\n{exc}")
+
+        # --- 3. Restore filter results ---
+        has_filt = bool(npz["_has_filter"]) if "_has_filter" in npz else False
+        if has_filt and has_data and "_E_xs" in npz:
+            try:
+                E_xs          = npz["_E_xs"]
+                Var_xs        = npz["_Var_xs"]
+                pis           = npz["_pis"]
+                innovations   = npz["_innovations"]
+                log_lik_total = float(npz["_log_lik"])
+
+                self._state.store_innovations(innovations)
+                self._state.store_filter_results(E_xs, Var_xs, pis, log_lik_total)
+
+                self._plot_panel.add_filter_overlay(ns, E_xs, Var_xs)
+                self._plot_panel.add_pi_overlay(ns, pis, K)
+                self._plot_panel.update_innovations(ns, innovations)
+
+                # Rebuild filter quality frame (no cond_moments — use fallback)
+                N = len(ns)
+                mean_ll = log_lik_total / N if N > 0 else float("nan")
+                self._loglik_label.setText(
+                    f"log L = {log_lik_total:.4g}   (mean = {mean_ll:.4g})"
+                )
+                if xs_arr is not None:
+                    err = xs_arr - E_xs
+                    mse_per = np.mean(err ** 2, axis=0)
+                    mse_gl  = float(mse_per.mean())
+                    rmse_gl = float(np.sqrt(mse_gl))
+                    self._mse_global_label.setText(f"MSE  = {mse_gl:.5g}")
+                    self._rmse_label.setText(f"RMSE = {rmse_gl:.5g}")
+                    sig_std = float(xs_arr.std()) if xs_arr.std() > 0 else 1.0
+                    ratio   = rmse_gl / sig_std
+                    if ratio < 0.20:
+                        bg, fg, border = "#d4edda", "#155724", "#c3e6cb"
+                        icon = "✓"
+                    elif ratio < 0.50:
+                        bg, fg, border = "#fff3cd", "#856404", "#ffc107"
+                        icon = "~"
+                    else:
+                        bg, fg, border = "#f8d7da", "#721c24", "#f5c6cb"
+                        icon = "✗"
+                    self._mse_title.setText(
+                        f"Filter quality  {icon}  (RMSE/σ = {ratio:.2f})"
+                    )
+                else:
+                    self._mse_global_label.setText("")
+                    self._rmse_label.setText("")
+                    bg, fg, border = "#eef2f7", "#333333", "#c8d0d8"
+                    self._mse_title.setText("Filter quality  (log L only)")
+
+                self._mse_frame.setStyleSheet(
+                    f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
+                    f" border-radius: 4px; }}"
+                )
+                t_sty = f"font-weight: bold; font-size: 11px; color: {fg};"
+                v_sty = f"font-size: 10px; color: {fg};"
+                self._mse_title.setStyleSheet(t_sty)
+                self._loglik_label.setStyleSheet(v_sty)
+                self._mse_global_label.setStyleSheet(v_sty)
+                self._rmse_label.setStyleSheet(v_sty)
+                self._mse_frame.setVisible(True)
+
+                # Innovation diagnostics (sample-covariance standardisation)
+                n_tests   = max(1, 2 * s)
+                alpha_fam = 0.05
+                alpha_lb  = alpha_fam / n_tests
+                thresh_ok = 2.0 * alpha_lb
+                thresh_wn = alpha_lb
+                bonf_note = (
+                    f"Bonferroni: α_per = {alpha_lb:.4g} "
+                    f"(family-wise α={alpha_fam}, {n_tests} tests)."
+                )
+                innov_std = _standardise_innovations(innovations, None, None, None)
+                for i in range(s):
+                    _, p_lb, h_lb = _ljung_box(innovations[:, i])
+                    if p_lb > thresh_ok:
+                        style, icon2, verdict = _PILL_OK,   "✓", "white"
+                    elif p_lb > thresh_wn:
+                        style, icon2, verdict = _PILL_WARN, "~", "border"
+                    else:
+                        style, icon2, verdict = _PILL_ERR,  "✗", "autocor."
+                    self._innov_lb_badges[i].setText(f"{icon2} {verdict}  p={p_lb:.3f}")
+                    self._innov_lb_badges[i].setStyleSheet(style)
+                    self._innov_lb_badges[i].setToolTip(
+                        f"Ljung-Box: Q stat with h = {h_lb} lags.\n"
+                        f"p = {p_lb:.4g}   (OK if p > {thresh_ok:.4g}).\n{bonf_note}"
+                    )
+                    S2, K2, JB, p_jb = _shape_diagnostics(innov_std[:, i])
+                    if abs(S2) < 0.25 and abs(K2) < 0.50:
+                        style2, icon3 = _PILL_OK,   "✓"
+                    elif abs(S2) < 0.50 and abs(K2) < 1.00:
+                        style2, icon3 = _PILL_WARN, "~"
+                    else:
+                        style2, icon3 = _PILL_ERR,  "✗"
+                    self._innov_jb_badges[i].setText(f"{icon3}  S={S2:+.2f}  K={K2:+.2f}")
+                    self._innov_jb_badges[i].setStyleSheet(style2)
+                    self._innov_jb_badges[i].setToolTip(
+                        f"Standardised innovation ν̃  (sample S)\n"
+                        f"Skewness S = {S2:+.4f}   Excess kurtosis K = {K2:+.4f}\n"
+                        f"Jarque-Bera JB = {JB:.3f}   p = {p_jb:.4g}\n{bonf_note}"
+                    )
+                self._innov_frame.setVisible(True)
+
+                self._btn_filter.setEnabled(True)
+                self._btn_innov_hist.setEnabled(True)
+
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.warning(self, "Load session",
+                                    f"Could not restore filter results:\n{exc}")
+
+        self._sync_menu_actions()
+        self._refresh_filter_button_drift_indicator()
+        name = pathlib.Path(path).name
+        self._set_status(f"Session loaded: {name}")
+        self.statusBar().showMessage(f"Session loaded from {name}", 6000)
+
+    # ------------------------------------------------------------------
     # Menu bar, status bar, settings
     # ------------------------------------------------------------------
 
@@ -1821,6 +2180,23 @@ class GSSMainWindow(QMainWindow):
         self._act_load.setStatusTip("Load a previously saved simulation CSV")
         self._act_load.triggered.connect(self._on_load_data)
         file_menu.addAction(self._act_load)
+
+        file_menu.addSeparator()
+
+        # D5/B10: session persistence
+        self._act_save_session = QAction("Save &session…", self)
+        self._act_save_session.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self._act_save_session.setStatusTip(
+            "Save complete session (params + data + filter) to a .fofgss file"
+        )
+        self._act_save_session.triggered.connect(self._on_save_session)
+        file_menu.addAction(self._act_save_session)
+
+        self._act_load_session = QAction("L&oad session…", self)
+        self._act_load_session.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        self._act_load_session.setStatusTip("Restore a previously saved .fofgss session")
+        self._act_load_session.triggered.connect(self._on_load_session)
+        file_menu.addAction(self._act_load_session)
 
         file_menu.addSeparator()
 
@@ -2035,6 +2411,9 @@ class GSSMainWindow(QMainWindow):
         self._act_export.setEnabled(self._btn_export.isEnabled())
         self._act_export_plots.setEnabled(self._btn_export_plots.isEnabled())
         self._act_innov_hist.setEnabled(self._btn_innov_hist.isEnabled())
+        # D5: session actions always available (save checks validity inline)
+        self._act_save_session.setEnabled(True)
+        self._act_load_session.setEnabled(True)
 
     def _set_status(self, msg: str, *, error: bool = False) -> None:
         """Update the left-panel status label with appropriate styling (A10).

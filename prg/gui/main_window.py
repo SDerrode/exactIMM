@@ -1918,6 +1918,7 @@ class GSSMainWindow(QMainWindow):
             "CSV saved",
             f"File saved:\n{filepath.resolve()}",
         )
+        self._push_recent_csv(str(filepath))   # D9
 
     def _on_preset_selected(self, index: int) -> None:
         """Load a preset model; restart the window if K/q/s differ."""
@@ -2044,6 +2045,7 @@ class GSSMainWindow(QMainWindow):
             info += "  (no ground-truth X)"
         self._set_status(info)
         self.statusBar().showMessage(info, 6000)
+        self._push_recent_csv(path)   # D9
 
     # ------------------------------------------------------------------
     # D5 / B10 — Save / Load complete session
@@ -2132,6 +2134,7 @@ class GSSMainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Session saved to {pathlib.Path(path).resolve()}", 6000
         )
+        self._push_recent_session(path)   # D9
 
     def _on_load_session(self) -> None:
         """Restore a .fofgss session (params + data + filter)."""
@@ -2142,16 +2145,10 @@ class GSSMainWindow(QMainWindow):
         )
         if not path:
             return
+        self._load_session_from(path)
 
-        try:
-            npz = np.load(path, allow_pickle=True)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(
-                self, "Load session error",
-                f"Cannot read session file:\n{exc}",
-            )
-            return
-
+    def _restore_session_from_npz(self, npz, path: str) -> None:
+        """Core session-restore logic — shared by dialog and recent-files paths."""
         K = int(npz["_K"])
         q = int(npz["_q"])
         s = int(npz["_s"])
@@ -2365,6 +2362,7 @@ class GSSMainWindow(QMainWindow):
         name = pathlib.Path(path).name
         self._set_status(f"Session loaded: {name}")
         self.statusBar().showMessage(f"Session loaded from {name}", 6000)
+        self._push_recent_session(path)   # D9: update recent-sessions menu
 
     # ------------------------------------------------------------------
     # Menu bar, status bar, settings
@@ -2390,6 +2388,10 @@ class GSSMainWindow(QMainWindow):
         self._act_load.triggered.connect(self._on_load_data)
         file_menu.addAction(self._act_load)
 
+        # D9/B4: recent CSV submenu (populated dynamically)
+        self._recent_csv_menu = file_menu.addMenu("Recent &CSV")
+        self._rebuild_recent_csv_menu()
+
         file_menu.addSeparator()
 
         # D5/B10: session persistence
@@ -2406,6 +2408,10 @@ class GSSMainWindow(QMainWindow):
         self._act_load_session.setStatusTip("Restore a previously saved .fofgss session")
         self._act_load_session.triggered.connect(self._on_load_session)
         file_menu.addAction(self._act_load_session)
+
+        # D9/B4: recent sessions submenu
+        self._recent_session_menu = file_menu.addMenu("Recent &sessions")
+        self._rebuild_recent_session_menu()
 
         file_menu.addSeparator()
 
@@ -2475,6 +2481,158 @@ class GSSMainWindow(QMainWindow):
         self._act_regime_diag.triggered.connect(self._on_regime_diag)
         view_menu.addAction(self._act_regime_diag)
 
+
+    # ------------------------------------------------------------------
+    # D9 / B4 — Recent files helpers
+    # ------------------------------------------------------------------
+
+    _MAX_RECENT = 5
+
+    def _push_recent_csv(self, path: str) -> None:
+        """Prepend *path* to the recent-CSV list and persist to QSettings."""
+        s = self._settings()
+        recent: list[str] = s.value("recent_csv", [], type=list) or []
+        path = str(pathlib.Path(path).resolve())
+        if path in recent:
+            recent.remove(path)
+        recent.insert(0, path)
+        s.setValue("recent_csv", recent[: self._MAX_RECENT])
+        if hasattr(self, "_recent_csv_menu"):
+            self._rebuild_recent_csv_menu()
+
+    def _push_recent_session(self, path: str) -> None:
+        """Prepend *path* to the recent-sessions list and persist to QSettings."""
+        s = self._settings()
+        recent: list[str] = s.value("recent_sessions", [], type=list) or []
+        path = str(pathlib.Path(path).resolve())
+        if path in recent:
+            recent.remove(path)
+        recent.insert(0, path)
+        s.setValue("recent_sessions", recent[: self._MAX_RECENT])
+        if hasattr(self, "_recent_session_menu"):
+            self._rebuild_recent_session_menu()
+
+    def _rebuild_recent_csv_menu(self) -> None:
+        """Repopulate the Recent CSV submenu from QSettings."""
+        menu = self._recent_csv_menu
+        menu.clear()
+        s = self._settings()
+        recent: list[str] = s.value("recent_csv", [], type=list) or []
+        recent = [p for p in recent if pathlib.Path(p).exists()]
+        if not recent:
+            act = menu.addAction("(no recent files)")
+            act.setEnabled(False)
+            return
+        for path in recent:
+            lbl = pathlib.Path(path).name
+            act = menu.addAction(lbl)
+            act.setStatusTip(path)
+            act.triggered.connect(lambda checked, p=path: self._load_csv_from(p))
+        menu.addSeparator()
+        clr = menu.addAction("Clear recent CSV")
+        clr.triggered.connect(self._clear_recent_csv)
+
+    def _rebuild_recent_session_menu(self) -> None:
+        """Repopulate the Recent sessions submenu from QSettings."""
+        menu = self._recent_session_menu
+        menu.clear()
+        s = self._settings()
+        recent: list[str] = s.value("recent_sessions", [], type=list) or []
+        recent = [p for p in recent if pathlib.Path(p).exists()]
+        if not recent:
+            act = menu.addAction("(no recent sessions)")
+            act.setEnabled(False)
+            return
+        for path in recent:
+            lbl = pathlib.Path(path).name
+            act = menu.addAction(lbl)
+            act.setStatusTip(path)
+            act.triggered.connect(lambda checked, p=path: self._load_session_from(p))
+        menu.addSeparator()
+        clr = menu.addAction("Clear recent sessions")
+        clr.triggered.connect(self._clear_recent_sessions)
+
+    def _clear_recent_csv(self) -> None:
+        self._settings().remove("recent_csv")
+        self._rebuild_recent_csv_menu()
+
+    def _clear_recent_sessions(self) -> None:
+        self._settings().remove("recent_sessions")
+        self._rebuild_recent_session_menu()
+
+    def _load_csv_from(self, path: str) -> None:
+        """Load a CSV directly (called from Recent CSV menu)."""
+        # Temporarily patch QFileDialog to return the known path
+        # instead of showing the dialog.  We call _on_load_data's internals.
+        try:
+            with open(path, newline="", encoding="utf-8") as fh:
+                import csv as _csv_mod
+                reader = _csv_mod.DictReader(fh)
+                rows = list(reader)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Load error", str(exc))
+            return
+
+        if not rows:
+            QMessageBox.warning(self, "Load error", "File is empty.")
+            return
+
+        headers = list(rows[0].keys())
+        required = ["n", "r"] + [f"y_{i}" for i in range(self._s)]
+        missing  = [c for c in required if c not in headers]
+        if missing:
+            QMessageBox.warning(
+                self, "Load error",
+                f"Missing column(s): {missing}\n"
+                f"Expected at least: n, r, y_0 … y_{self._s - 1}\n"
+                f"Found: {headers}",
+            )
+            return
+
+        try:
+            ns  = [int(float(row["n"])) for row in rows]
+            rs  = [int(float(row["r"])) for row in rows]
+            ys  = np.array([[float(row[f"y_{i}"]) for i in range(self._s)]
+                            for row in rows])
+            x_cols = [f"x_{i}" for i in range(self._q)]
+            has_x  = all(c in headers for c in x_cols)
+            xs     = (np.array([[float(row[f"x_{i}"]) for i in range(self._q)]
+                                for row in rows]) if has_x else None)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Load error", str(exc))
+            return
+
+        live_params = self._build_gss_params()
+        self._state.load_external(ns, rs, xs, ys,
+                                  params=live_params,
+                                  signature=self._params_signature())
+        self._refresh_filter_button_drift_indicator()
+        self._plot_panel.clear_filter_overlay()
+        self._plot_panel.update_plots(ns, rs, xs, ys, self._K)
+        self._btn_filter.setEnabled(self._state.can_filter())
+        self._btn_save.setEnabled(False)
+        self._btn_export_plots.setEnabled(True)
+        self._btn_regime_diag.setEnabled(True)
+        self._sync_menu_actions()
+        self._mse_frame.setVisible(False)
+        info = f"Loaded {len(ns)} steps from '{pathlib.Path(path).name}'"
+        if not has_x:
+            info += "  (no ground-truth X)"
+        self._set_status(info)
+        self.statusBar().showMessage(info, 6000)
+        self._push_recent_csv(path)   # refresh menu with this path on top
+
+    def _load_session_from(self, path: str) -> None:
+        """Load a session directly (called from Recent sessions menu)."""
+        # Delegate to _on_load_session but bypass the file dialog.
+        # We temporarily override the dialog call by calling the shared body.
+        try:
+            npz = np.load(path, allow_pickle=True)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Load session error",
+                                 f"Cannot read session file:\n{exc}")
+            return
+        self._restore_session_from_npz(npz, path)
 
     def _build_status_bar(self) -> None:
         """Permanent status bar: ephemeral messages + session summary."""

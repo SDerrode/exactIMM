@@ -25,18 +25,18 @@ class ModelGssK2Q2S2Custom(BaseGSSModel):
     s: int = 2
 
     # --- Markov chain ---
-    P: np.ndarray = np.array([[0.99, 0.01],
-          [0.03, 0.97]])
+    P: np.ndarray = np.array([[0.95, 0.05],
+          [0.05, 0.95]])
 
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
     A_list: list[np.ndarray] = [np.array([[0.75, 0.05],
           [0, 0.7]]),
      np.array([[0.5, 0.05],
           [0, 0.45]])]
-    B_list: list[np.ndarray] = [np.array([[0.04, 0.02],
-          [0.02, 0.03]]),
-     np.array([[0.05, 0.03],
-          [0.03, 0.04]])]
+    B_list: list[np.ndarray] = [np.array([[0.0275906, 0.0159614],
+          [0.0139175, -0.00198833]]),
+     np.array([[0.0202226, 0.0131395],
+          [0.00929655, 0.0144188]])]
     C_list: list[np.ndarray] = [np.array([[0.08, 0.06],
           [0.04, 0.1]]),
      np.array([[0.08, 0.06],
@@ -79,14 +79,14 @@ class ModelGssK2Q2S2Custom(BaseGSSModel):
           [0, 1, 0, 0],
           [0, 0, 1, 0],
           [0, 0, 0, 1]])]
-    b_list: list[np.ndarray] = [np.array([[1],
-          [1],
-          [2],
-          [2]]),
-     np.array([[-1],
-          [-1],
-          [-2],
-          [-2]])]
+    b_list: list[np.ndarray] = [np.array([[3],
+          [3],
+          [0],
+          [0]]),
+     np.array([[-3],
+          [-3],
+          [0],
+          [0]])]
 
     # ------------------------------------------------------------------
 

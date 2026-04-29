@@ -25,42 +25,42 @@ class ModelGssK2Q1S1Custom(BaseGSSModel):
     s: int = 1
 
     # --- Markov chain ---
-    P: np.ndarray = np.array([[0.985, 0.015],
-          [0.015, 0.985]])
+    P: np.ndarray = np.array([[0.97, 0.03],
+          [0.02, 0.98]])
 
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
-    A_list: list[np.ndarray] = [np.array([[0.95]]),
-     np.array([[-0.6]])]
-    B_list: list[np.ndarray] = [np.array([[0]]),
-     np.array([[0]])]
-    C_list: list[np.ndarray] = [np.array([[0]]),
-     np.array([[0]])]
-    D_list: list[np.ndarray] = [np.array([[-0.7]]),
-     np.array([[0.92]])]
+    A_list: list[np.ndarray] = [np.array([[0.8]]),
+     np.array([[0.5]])]
+    B_list: list[np.ndarray] = [np.array([[0.0815534]]),
+     np.array([[0.0538691]])]
+    C_list: list[np.ndarray] = [np.array([[0.2]]),
+     np.array([[0.1]])]
+    D_list: list[np.ndarray] = [np.array([[0.7]]),
+     np.array([[0.6]])]
 
     # --- Noise covariances: Sigma_W(k) = [[Sigma_U, Delta], [Delta^T, Sigma_V]] ---
-    Sigma_U_list: list[np.ndarray] = [np.array([[0.05]]),
-     np.array([[0.5]])]
-    Delta_list:   list[np.ndarray] = [np.array([[0]]),
-     np.array([[0]])]
-    Sigma_V_list: list[np.ndarray] = [np.array([[0.5]]),
-     np.array([[0.04]])]
+    Sigma_U_list: list[np.ndarray] = [np.array([[0.1]]),
+     np.array([[0.2]])]
+    Delta_list:   list[np.ndarray] = [np.array([[0.05]]),
+     np.array([[0.02]])]
+    Sigma_V_list: list[np.ndarray] = [np.array([[0.1]]),
+     np.array([[0.15]])]
 
     # --- Initial conditions ---
     pi0: np.ndarray | None = None   # None → stationary distribution
 
-    mu_z0_list: list[np.ndarray] = [np.array([[12],
+    mu_z0_list: list[np.ndarray] = [np.array([[0],
           [0]]),
-     np.array([[-6],
-          [10]])]
+     np.array([[0],
+          [0]])]
     Sigma_z0_list: list[np.ndarray] = [np.array([[1, 0],
           [0, 1]]),
      np.array([[1, 0],
           [0, 1]])]
-    b_list: list[np.ndarray] = [np.array([[0.6],
-          [0]]),
-     np.array([[-9.6],
-          [0.8]])]
+    b_list: list[np.ndarray] = [np.array([[1],
+          [2]]),
+     np.array([[-2],
+          [-1]])]
 
     # ------------------------------------------------------------------
 

@@ -54,6 +54,12 @@ from prg.utils.h5_constraint import (
     compute_A_from_h5, compute_B_from_h5, compute_SU_from_h5, compute_C_from_h5,
 )
 
+# Pill style for constraint error messages (explicit background → readable on any theme)
+_CONSTRAINT_ERR_STYLE = (
+    "font-size: 10px; padding: 1px 6px; border-radius: 3px;"
+    "background: #fff8f8; color: #c0392b; border: 1px solid #f5c6cb;"
+)
+
 
 # ---------------------------------------------------------------------------
 # _StateTab
@@ -128,13 +134,6 @@ class _StateTab(QWidget):
             chk_row.addWidget(chk)
 
         chk_row.addStretch()
-        btn_rand = QPushButton("🎲 Randomize")
-        btn_rand.setFixedHeight(24)
-        btn_rand.setToolTip(
-            "Fill F(k) and Σ_W(k) with random stable parameters."
-        )
-        btn_rand.clicked.connect(self._randomize)
-        chk_row.addWidget(btn_rand)
         layout.addLayout(chk_row)
 
         # -- Matrix/vector widgets row --
@@ -393,7 +392,7 @@ class _StateTab(QWidget):
         ))
         if A_new is None:
             self._f_widget.set_constraint_status(
-                "✗  A — singular system", "color: #cc0000; font-size: 10px;")
+                "✗  A — singular system", _CONSTRAINT_ERR_STYLE)
             return
 
         q = self._q
@@ -420,7 +419,7 @@ class _StateTab(QWidget):
         ))
         if B_new is None:
             self._f_widget.set_constraint_status(
-                "✗  B — singular system", "color: #cc0000; font-size: 10px;")
+                "✗  B — singular system", _CONSTRAINT_ERR_STYLE)
             return
 
         q, s = self._q, self._s
@@ -448,7 +447,7 @@ class _StateTab(QWidget):
         ))
         if SU_new is None:
             self._sigma_widget.set_constraint_status(
-                "✗  Σ_U — singular system", "color: #cc0000; font-size: 10px;")
+                "✗  Σ_U — singular system", _CONSTRAINT_ERR_STYLE)
             return
 
         q = self._q
@@ -479,7 +478,7 @@ class _StateTab(QWidget):
         ))
         if C_new is None:
             self._f_widget.set_constraint_status(
-                "✗  C — non-convergence / singular", "color: #cc0000; font-size: 10px;")
+                "✗  C — non-convergence / singular", _CONSTRAINT_ERR_STYLE)
             return
 
         new_F = F.copy()
@@ -770,21 +769,37 @@ class ParamPanel(QWidget):
             self._tabs.addTab(scroll, f"State {k}")
             self._state_tabs.append(tab)
 
-        # D3: "Apply H5 to all states" button (only meaningful when K > 1)
+        # Corner widget: [🎲] and (K>1) [Apply H5 → all] in the tab-bar top-right corner.
+        # Randomize is moved here from each _StateTab's constraint row to reduce row width.
+        corner = QWidget()
+        c_lay = QHBoxLayout(corner)
+        c_lay.setContentsMargins(0, 0, 4, 0)
+        c_lay.setSpacing(4)
+
+        btn_rand_corner = QPushButton("🎲")
+        btn_rand_corner.setFixedSize(26, 22)
+        btn_rand_corner.setToolTip(
+            "Randomize F(k) and Σ_W(k) for the current state\n"
+            "with random stable parameters."
+        )
+        btn_rand_corner.clicked.connect(
+            lambda: self._state_tabs[self._tabs.currentIndex()]._randomize()
+        )
+        c_lay.addWidget(btn_rand_corner)
+
         if K > 1:
-            apply_row = QHBoxLayout()
-            self._btn_apply_h5_all = QPushButton("Apply H5 constraint to all states →")
-            self._btn_apply_h5_all.setFixedHeight(26)
+            self._btn_apply_h5_all = QPushButton("Apply H5 → all")
+            self._btn_apply_h5_all.setFixedHeight(22)
             self._btn_apply_h5_all.setToolTip(
                 "Copy the active H5 constraint (Constraint on A / B / C / Σ_U)\n"
                 "and the Δ=0 flag from the currently visible state tab to ALL\n"
-                "other tabs.  Each target tab recomputes its constrained block\n"
+                "other states.  Each target tab recomputes its constrained block\n"
                 "from its own current parameter values."
             )
             self._btn_apply_h5_all.clicked.connect(self._on_apply_h5_all)
-            apply_row.addStretch()
-            apply_row.addWidget(self._btn_apply_h5_all)
-            layout.addLayout(apply_row)
+            c_lay.addWidget(self._btn_apply_h5_all)
+
+        self._tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
     # ------------------------------------------------------------------
     # Public

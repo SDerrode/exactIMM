@@ -606,13 +606,15 @@ class PredYPanel(QWidget):
     def _refresh_traj(self) -> None:
         """Plot both conditional signals over the full trajectory.
 
+        Both means are the *marginal* (y_n-averaged) values — constant in n.
+
         Signal 1 — exact under (H5):
-            μ₁(n) = μ_Y_jk[j][k] + M_t[j][k] @ (y_n − μ_Y[j])
-            Cov₁  = Γ(j,k)  (constant)
+            μ₁ = μ_Y_jk[j][k]    (= E[y_{n+1} | r_n=j, r_{n+1}=k], constant)
+            Cov₁ = Γ(j,k)         (constant)
 
         Signal 2 — approximation without (H5):
-            μ₂(n) = b_Y[k] + M_simple[j][k] @ y_n
-            Cov₂  = Γ₂(j,k)  (constant)
+            μ₂ = b_Y[k] + M_simple[j][k] @ μ_Y[j]   (marginal mean, constant)
+            Cov₂ = Γ₂(j,k)                             (constant)
 
         Only the ±2σ envelope is drawn (no ±1σ).
         """
@@ -626,18 +628,20 @@ class PredYPanel(QWidget):
         N  = len(ys)
         ns = np.arange(N - 1)  # indices n = 0 … N-2
 
-        # ── Signal 1 ────────────────────────────────────────────────────
-        diffs  = ys[:-1] - self._mu_Y[j].ravel()              # (N-1, s)
-        means1 = self._mu_Y_jk[j][k].ravel() + (self._M_t[j][k] @ diffs.T).T  # (N-1, s)
-        sigs1  = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))         # (s,)
+        # ── Signal 1 — marginal mean (constant in n) ────────────────────
+        means1 = np.tile(self._mu_Y_jk[j][k].ravel(), (N - 1, 1))    # (N-1, s)
+        sigs1  = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))        # (s,)
 
-        # ── Signal 2 (if available) ──────────────────────────────────────
+        # ── Signal 2 (if available) — marginal mean (constant in n) ─────
         has_sig2 = (self._M_simple is not None
                     and self._Gamma2   is not None
                     and self._b_Y      is not None)
         if has_sig2:
             b_k    = self._b_Y[k].ravel()                             # (s,)
-            means2 = b_k + (self._M_simple[j][k] @ ys[:-1].T).T     # (N-1, s)
+            mu_Y_j = self._mu_Y[j].ravel()                            # (s,)
+            means2 = np.tile(
+                b_k + self._M_simple[j][k] @ mu_Y_j, (N - 1, 1)
+            )                                                          # (N-1, s)
             sigs2  = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))   # (s,)
 
         # observed y_{n+1}
@@ -687,8 +691,8 @@ class PredYPanel(QWidget):
 
         axes[-1].set_xlabel(r"$n$", fontsize=10)
         self._fig_traj.suptitle(
-            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)$"
-            r"  —  $\pm 2\sigma$ envelopes",
+            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k})$"
+            r"  —  marginal mean $\pm 2\sigma$",
             fontsize=10,
         )
         self._canvas_traj.draw_idle()

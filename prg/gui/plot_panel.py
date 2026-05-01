@@ -629,31 +629,23 @@ class PredYPanel(QWidget):
         ns = np.arange(N - 1)  # indices n = 0 … N-2
 
         # ── Signal 1 — marginal mean (constant in n) ────────────────────
-        mu1_flat = self._mu_Y_jk[j][k].ravel()                        # (s,)
-        sigs1    = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))  # (s,)
+        means1 = np.tile(self._mu_Y_jk[j][k].ravel(), (N - 1, 1))    # (N-1, s)
+        sigs1  = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))        # (s,)
 
         # ── Signal 2 (if available) — marginal mean (constant in n) ─────
         has_sig2 = (self._M_simple is not None
                     and self._Gamma2   is not None
                     and self._b_Y      is not None)
         if has_sig2:
-            b_k      = self._b_Y[k].ravel()                           # (s,)
-            mu_Y_j   = self._mu_Y[j].ravel()                          # (s,)
-            mu2_flat = b_k + self._M_simple[j][k] @ mu_Y_j           # (s,)
-            sigs2    = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))  # (s,)
+            b_k    = self._b_Y[k].ravel()                             # (s,)
+            mu_Y_j = self._mu_Y[j].ravel()                            # (s,)
+            means2 = np.tile(
+                b_k + self._M_simple[j][k] @ mu_Y_j, (N - 1, 1)
+            )                                                          # (N-1, s)
+            sigs2  = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))   # (s,)
 
-        # ── Normalise par y_{n+1} : la courbe observée → droite à 1 ────
-        # µ_r[n,i]  = µ[i] / y_{n+1}[n,i]
-        # sig_r[n,i] = σ[i] / |y_{n+1}[n,i]|
-        # y_r[n,i]  = 1  (y / y)
-        y_obs  = ys[1:]                                                # (N-1, s)
-        safe_y = np.where(np.abs(y_obs) > 1e-12, y_obs, 1.0)         # avoid /0
-
-        mu1_r  = mu1_flat[np.newaxis, :] / safe_y                     # (N-1, s)
-        sig1_r = sigs1[np.newaxis, :]    / np.abs(safe_y)             # (N-1, s)
-        if has_sig2:
-            mu2_r  = mu2_flat[np.newaxis, :] / safe_y                 # (N-1, s)
-            sig2_r = sigs2[np.newaxis, :]    / np.abs(safe_y)         # (N-1, s)
+        # observed y_{n+1}
+        y_obs = ys[1:]   # (N-1, s)
 
         self._fig_traj.clf()
         axes = (self._fig_traj.subplots(s, 1, sharex=True)
@@ -665,42 +657,42 @@ class PredYPanel(QWidget):
         for i in range(s):
             ax = axes[i]
 
-            # ── Signal 1 : µ₁ / y ────────────────────────────────────────
-            env1 = ax.fill_between(ns,
-                                   mu1_r[:, i] - 2 * sig1_r[:, i],
-                                   mu1_r[:, i] + 2 * sig1_r[:, i],
+            # ── Signal 1 ─────────────────────────────────────────────────
+            mu1_i  = means1[:, i]
+            sig1_i = sigs1[i]
+            env1 = ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i,
                                    color=c1, alpha=0.15)
-            line1, = ax.plot(ns, mu1_r[:, i], color=c1, linewidth=1.5)
+            line1, = ax.plot(ns, mu1_i, color=c1, linewidth=1.5)
 
-            # ── Signal 2 : µ₂ / y ────────────────────────────────────────
+            # ── Signal 2 ─────────────────────────────────────────────────
             if has_sig2:
-                env2 = ax.fill_between(ns,
-                                       mu2_r[:, i] - 2 * sig2_r[:, i],
-                                       mu2_r[:, i] + 2 * sig2_r[:, i],
+                mu2_i  = means2[:, i]
+                sig2_i = sigs2[i]
+                env2 = ax.fill_between(ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i,
                                        color=c2, alpha=0.15)
-                line2, = ax.plot(ns, mu2_r[:, i], color=c2, linewidth=1.5)
+                line2, = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
 
-            # ── Reference : y_{n+1} / y_{n+1} = 1 (droite) ──────────────
-            obs_line, = ax.plot(ns, np.ones(N - 1), color="#333333",
-                                linewidth=2.0, alpha=0.85, linestyle="-")
+            # ── observed y_{n+1} ─────────────────────────────────────────
+            obs_line, = ax.plot(ns, y_obs[:, i], color="#333333", linewidth=2.0,
+                                alpha=0.85, linestyle="-")
 
-            # ── Legend ───────────────────────────────────────────────────
-            left_h  = [line1];   left_l  = [rf"$\mu_1 / y^{i}$  (H5)"]
-            right_h = [env1];    right_l = [rf"$\pm 2\sigma_1 / y^{i}$"]
+            # ── 2-column legend (matplotlib fills column-by-column) ──────
+            left_h  = [line1];              left_l  = [rf"$\mu_1$ (H5 exact)"]
+            right_h = [env1];               right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
             if has_sig2:
-                left_h  += [line2];   left_l  += [rf"$\mu_2 / y^{i}$  (approx.)"]
-                right_h += [env2];    right_l += [rf"$\pm 2\sigma_2 / y^{i}$"]
-            left_h  += [obs_line];    left_l  += [rf"$y^{i} / y^{i} = 1$"]
+                left_h  += [line2];         left_l  += [rf"$\mu_2$ (approx.)"]
+                right_h += [env2];          right_l += [rf"$\pm 2\sigma_2={sigs2[i]:.3g}$"]
+            left_h  += [obs_line];          left_l  += [rf"$y^{i}$"]
             ax.legend(left_h + right_h, left_l + right_l,
                       fontsize=8, loc="upper right", ncol=2)
 
-            ax.set_ylabel(rf"ratio  (/ $y^{i}_{{n+1}}$)", fontsize=10)
+            ax.set_ylabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.4)
 
         axes[-1].set_xlabel(r"$n$", fontsize=10)
         self._fig_traj.suptitle(
             rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k})$"
-            r"  —  normalized by $y_{{n+1}}$",
+            r"  —  marginal mean $\pm 2\sigma$",
             fontsize=10,
         )
         self._canvas_traj.draw_idle()

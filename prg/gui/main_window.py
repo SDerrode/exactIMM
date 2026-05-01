@@ -255,8 +255,11 @@ class _InnovHistDialog(QDialog):
     def __init__(
         self,
         innovations: np.ndarray,
-        mix_params: dict | None = None,
-        pis:        np.ndarray | None = None,   # D11: (N, K) filtered posteriors
+        mix_params:  dict | None       = None,
+        pis:         np.ndarray | None = None,   # D11: (N, K) filtered posteriors
+        mu_Y:        list | None       = None,   # [K] ndarray (s,1) — stationary means
+        S_YY:        list | None       = None,   # [K] ndarray (s,s) — stationary cov
+        ys:          np.ndarray | None = None,   # (N, s) observations
         parent=None,
     ):
         super().__init__(parent)
@@ -431,12 +434,25 @@ class _InnovHistDialog(QDialog):
             inner_tabs.addTab(sc_w, "Scatter")
 
         # ─────────────────────────────────────────────────────────────
-        # Tab 3: Per-regime innovations (D11)
+        # Tab 3: Per-regime residuals (D11)
+        #
+        # For each regime k we plot  y_n − µ_Y(k)  for all time steps
+        # n where  argmax π_n = k.  Under the model this residual has
+        # distribution N(0, Σ_YY(k)) — constant in n.
+        # Fallback (no ys / mu_Y): marginal innovations filtered by regime.
         # ─────────────────────────────────────────────────────────────
         if pis is not None and pis.ndim == 2 and pis.shape[0] == N:
             K = pis.shape[1]
-            r_pred = np.argmax(pis, axis=1)          # (N,) predicted regime index
+            r_pred = np.argmax(pis, axis=1)          # (N,) dominant regime
             regime_colours = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+
+            # Decide whether we can build per-regime residuals
+            use_resid = (
+                mu_Y is not None
+                and ys is not None
+                and len(mu_Y) == K
+                and ys.shape == (N, s)
+            )
 
             preg_w = QWidget()
             preg_l = QVBoxLayout(preg_w)
@@ -451,35 +467,62 @@ class _InnovHistDialog(QDialog):
             can_pr.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
             for k in range(K):
-                mask    = r_pred == k
-                n_k     = int(mask.sum())
-                innov_k = innovations[mask]   # (N_k, s)
-                c       = regime_colours[k % len(regime_colours)]
+                mask = r_pred == k
+                n_k  = int(mask.sum())
+                c    = regime_colours[k % len(regime_colours)]
+
+                # Build the quantity to plot and its theoretical reference
+                if use_resid:
+                    # Regime-conditional residual: y_n − µ_Y(k) ~ N(0, Σ_YY(k))
+                    resid_k   = ys[mask] - mu_Y[k].ravel()  # (N_k, s)
+                    y_label_f = lambda i: rf"$y^{i} - \mu_{{Y,{k}}}^{i}$"
+                    title_pf  = f"k={k}  residual"
+                    has_theory = S_YY is not None and len(S_YY) == K
+                else:
+                    # Fallback: marginal innovations
+                    resid_k   = innovations[mask]            # (N_k, s)
+                    y_label_f = lambda i: rf"$\nu^{i}$"
+                    title_pf  = f"k={k}  ν"
+                    has_theory = False
 
                 for i in range(s):
                     ax = fig_pr.add_subplot(nrows, ncols, k * ncols + i + 1)
                     if n_k > 1:
-                        xi = innov_k[:, i]
-                        ax.hist(xi, bins=max(10, n_k // 20),
+                        xi = resid_k[:, i]
+                        ax.hist(xi, bins=max(10, min(n_k // 20, 200)),
                                 density=True, color=c, alpha=0.5)
-                        xg = np.linspace(xi.min() - xi.std(),
-                                         xi.max() + xi.std(), 300)
-                        ax.plot(xg, _norm.pdf(xg, xi.mean(), max(xi.std(), 1e-9)),
-                                color=c, linewidth=1.5)
+                        pad = max(float(xi.std()), 1e-3)
+                        xg  = np.linspace(float(xi.min()) - pad,
+                                          float(xi.max()) + pad, 400)
+
+                        if has_theory:
+                            # Overlay theoretical N(0, Σ_YY(k)[i,i])
+                            sig_th = float(np.sqrt(max(float(S_YY[k][i, i]), 1e-12)))
+                            ax.plot(xg, _norm.pdf(xg, 0.0, sig_th),
+                                    "k-", linewidth=1.6,
+                                    label=rf"$\mathcal{{N}}(0,\,\Sigma_{{YY}}({k}))$")
+                            ax.legend(fontsize=7)
+                        else:
+                            # Fallback: fit empirical Gaussian
+                            mu_e  = float(xi.mean())
+                            sig_e = float(xi.std())
+                            if sig_e > 1e-10:
+                                ax.plot(xg, _norm.pdf(xg, mu_e, sig_e),
+                                        color=c, linewidth=1.5)
+
                         _, p_lb, _ = _ljung_box(xi)
-                        S2, K2, _, p_jb = _shape_diagnostics(xi)
+                        S2, K2, _, _ = _shape_diagnostics(xi)
                         ax.set_title(
-                            f"k={k}  ν^{i}   N_k={n_k}\n"
+                            f"{title_pf}^{i}   N_k={n_k}\n"
                             f"LB p={p_lb:.3f}  S={S2:+.2f}  K={K2:+.2f}",
                             fontsize=8,
                         )
                     else:
-                        ax.set_title(f"k={k}  ν^{i}   N_k={n_k}",
-                                     fontsize=8)
+                        ax.set_title(f"{title_pf}^{i}   N_k={n_k}", fontsize=8)
                         ax.text(0.5, 0.5, "n/a", transform=ax.transAxes,
                                 ha="center", va="center",
                                 fontsize=9, color="#aaa")
-                    ax.set_xlabel(rf"$\nu^{i}$", fontsize=8)
+                    ax.set_xlabel(y_label_f(i), fontsize=8)
                     ax.grid(True, linestyle=":", alpha=0.4)
                     ax.tick_params(labelsize=7)
 
@@ -906,12 +949,17 @@ class _FilterWorker(QThread):
                 if np.isfinite(res.log_lik):
                     log_lik_total += float(res.log_lik)
 
-            # Expose pre-computed moments for the p(y_{n+1}|r_n,r_{n+1},y_n) tab.
-            # These attributes only exist in "h5_exact" mode (produced by _precompute()).
-            # In "imm_general" mode they are absent: _on_filter_finished checks hasattr()
-            # and leaves the tab grayed out.
+            # Expose pre-computed moments for diagnostics.
+            # Stationary moments µ_Y[k] and Σ_YY(k) are always available (both modes
+            # call _precompute_stationary()).  h5_exact-specific keys (mu_Y_jk, …) are
+            # added only when the filter was run in h5_exact mode.
+            self.cond_moments: dict = {}
+            if hasattr(filt, "_mu_Y") and hasattr(filt, "_S_YY"):
+                self.cond_moments["mu_Y"] = filt._mu_Y    # [K] ndarray (s,1)
+                self.cond_moments["S_YY"] = filt._S_YY    # [K] ndarray (s,s)
+
             if hasattr(filt, "_mu_Y_jk"):
-                # ── Signal 2: direct moments from the model matrices ──────────
+                # ── h5_exact: Signal 2 + PredY panel moments ─────────────────
                 # μ₂(j,k) = b_Y(k) + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n
                 # Γ₂(j,k) = Σ_{V,k} + C_k (Σ_{U,j} − Δ_j Σ_{V,j}^{-1} Δ_j^T) C_k^T
                 p   = self._params
@@ -937,16 +985,15 @@ class _FilterWorker(QThread):
                 # Stationary mixture weights w_{jk} = π_∞(j) P(j,k)  (K,K)
                 mix_w = filt._pi_inf[:, None] * p.P
 
-                self.cond_moments: dict = {
+                self.cond_moments.update({
                     "mu_Y_jk": filt._mu_Y_jk,
                     "M_t":     filt._M_t,
                     "Gamma":   filt._Gamma,
-                    "mu_Y":    filt._mu_Y,
                     "M_simple": M_simple,   # (s,s) signal 2 coefficient matrix
                     "Gamma2":   Gamma2,     # (s,s) signal 2 constant covariance
                     "b_Y":      b_Y,        # [K]   ndarray (s,1) — signal 2 bias
                     "mix_w":    mix_w,      # (K,K) stationary mixture weights
-                }
+                })
 
             self.finished.emit(
                 np.array(E_xs_list),
@@ -2749,6 +2796,10 @@ class GSSMainWindow(QMainWindow):
         if not self._state.has_filter():
             return
         mix_params = None
+        mu_Y_pr   = None    # [K] ndarray (s,1) — stationary regime means
+        S_YY_pr   = None    # [K] ndarray (s,s) — stationary regime Y-covariances
+        ys_pr     = None    # (N, s) observations (for per-regime residuals)
+
         if (
             self._filter_worker is not None
             and hasattr(self._filter_worker, "cond_moments")
@@ -2760,10 +2811,20 @@ class GSSMainWindow(QMainWindow):
                     "Gamma":   cm["Gamma"],      # [K][K] (s,s)
                     "mu_Y_jk": cm["mu_Y_jk"],   # [K][K] (s,1)
                 }
+            # Per-regime residuals: always available after stationary prior commit
+            mu_Y_pr = cm.get("mu_Y")            # [K] ndarray (s,1)
+            S_YY_pr = cm.get("S_YY")            # [K] ndarray (s,s)
+
+        if self._state.data is not None:
+            _, _, _, ys_pr, _ = self._state.data  # (N, s)
+
         dlg = _InnovHistDialog(
             self._state.innovations,
             mix_params=mix_params,
             pis=self._state.filter_pis,   # D11: per-regime tab
+            mu_Y=mu_Y_pr,
+            S_YY=S_YY_pr,
+            ys=ys_pr,
             parent=self,
         )
         dlg.show()

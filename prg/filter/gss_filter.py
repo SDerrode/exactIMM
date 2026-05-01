@@ -212,16 +212,16 @@ class GSSFilter:
 
         if mode == "h5_exact":
             self._check_h5()
-            self._precompute()
+            self._precompute()          # calls _precompute_stationary() internally
         else:
-            # imm_general: no pre-computation; joseph flag is ignored
+            # imm_general: no (H5) pre-computation; joseph flag is ignored
             if self._joseph:
                 logger.warning(
                     "joseph=True has no effect in mode='imm_general' "
                     "(the per-step posterior covariance is already PSD-floored)."
                 )
-            # Stationary distribution is still exposed for convenience
-            self._pi_inf = params.stationary_distribution()
+            # Compute stationary moments so the filter can start at stationarity
+            self._precompute_stationary()
         self._reset_state()
 
     # ------------------------------------------------------------------
@@ -289,18 +289,32 @@ class GSSFilter:
     # Pre-computation of stationary moments and IMM constants
     # ------------------------------------------------------------------
 
-    def _precompute(self) -> None:
-        """
-        Pre-compute the stationary regime moments µ(k), P(k) and all
-        IMM constants that depend on them. Called once at construction.
+    # ------------------------------------------------------------------
+    # Pre-computation of stationary moments (shared by both modes)
+    # ------------------------------------------------------------------
 
-        All quantities computed here are time-invariant; the per-step
-        recursion only manipulates the K-vector π_n and the previous
-        observation y_{n-1}.
+    def _precompute_stationary(self) -> None:
+        """
+        Pre-compute and cache the stationary regime moments µ(k), Σ(k) and
+        related quantities.  Called once at construction for **both** filter
+        modes so that the initial step can start at the stationary distribution.
+
+        Stores
+        ------
+        self._pi_inf   : (K,)                  stationary regime distribution
+        self._p_rev    : (K, K)                time-reversed transition
+                                               p_rev[j,k] = p(r_n=j | r_{n+1}=k)
+        self._mu_z     : list[K] of (dim_z,1)  E[Z_n | r_n=k] at stationarity
+        self._P_z_stat : list[K] of (dim_z,dim_z)  E[Z_n Z_n^T | r_n=k] (uncentred)
+        self._Sigma    : list[K] of (dim_z,dim_z)  Var[Z_n | r_n=k] (centred)
+        self._mu_X     : list[K] of (q,1)      E[X_n | r_n=k]
+        self._mu_Y     : list[K] of (s,1)      E[Y_n | r_n=k]
+        self._S_XX     : list[K] of (q,q)      Σ_XX(k)
+        self._S_XY     : list[K] of (q,s)      Σ_XY(k)
+        self._S_YY     : list[K] of (s,s)      Σ_YY(k)
         """
         p = self._p
-        K, q, s = p.K, p.q, p.s
-        dim_z = q + s
+        K, q = p.K, p.q
 
         # --- Stationary distribution and time-reversed transition ----------
         self._pi_inf = p.stationary_distribution()           # (K,)
@@ -316,11 +330,12 @@ class GSSFilter:
         #      + F_k (Σ_j p_rev[j,k] µ(j)) b_k^T
         #      + b_k (Σ_j p_rev[j,k] µ(j))^T F_k^T
         #      + b_k b_k^T + Σ_W(k)
-        mu_list  = [p.mu_z0(k).copy() for k in range(K)]
-        P_list   = [p.Sigma_z0(k) + p.mu_z0(k) @ p.mu_z0(k).T for k in range(K)]
+        mu_list = [p.mu_z0(k).copy() for k in range(K)]
+        P_list  = [p.Sigma_z0(k) + p.mu_z0(k) @ p.mu_z0(k).T for k in range(K)]
 
         MAX_ITER = 1000
         TOL      = 1e-12
+        diff     = np.inf
         for it in range(MAX_ITER):
             mu_new: list[np.ndarray] = []
             P_new:  list[np.ndarray] = []
@@ -352,17 +367,37 @@ class GSSFilter:
             )
 
         # Cache stationary moments and their X/Y blocks
-        self._mu_z   = mu_list                                # µ(k), (dim_z, 1)
-        self._P_z    = P_list                                 # uncentred 2nd moment
-        self._Sigma  = [
+        self._mu_z     = mu_list    # µ(k),                  (dim_z, 1)
+        self._P_z_stat = P_list     # uncentred 2nd moment,  (dim_z, dim_z)
+        self._Sigma    = [
             _psd_floor(_sym(P_list[k] - mu_list[k] @ mu_list[k].T))
             for k in range(K)
-        ]                                                     # centred Σ(k)
-        self._mu_X   = [self._mu_z[k][:q]    for k in range(K)]
-        self._mu_Y   = [self._mu_z[k][q:]    for k in range(K)]
-        self._S_XX   = [self._Sigma[k][:q, :q] for k in range(K)]
-        self._S_XY   = [self._Sigma[k][:q, q:] for k in range(K)]
-        self._S_YY   = [self._Sigma[k][q:, q:] for k in range(K)]
+        ]                           # centred Σ(k),          (dim_z, dim_z)
+        self._mu_X = [self._mu_z[k][:q]      for k in range(K)]
+        self._mu_Y = [self._mu_z[k][q:]      for k in range(K)]
+        self._S_XX = [self._Sigma[k][:q, :q] for k in range(K)]
+        self._S_XY = [self._Sigma[k][:q, q:] for k in range(K)]
+        self._S_YY = [self._Sigma[k][q:, q:] for k in range(K)]
+
+    # ------------------------------------------------------------------
+    # Pre-computation of IMM constants (h5_exact only)
+    # ------------------------------------------------------------------
+
+    def _precompute(self) -> None:
+        """
+        Pre-compute all IMM constants for mode='h5_exact': stationary moments
+        (via :meth:`_precompute_stationary`), per-regime Kalman gain, posterior
+        covariance, and pair-conditional regime-update constants.
+
+        All quantities computed here are time-invariant; the per-step
+        recursion only manipulates the K-vector π_n and the previous
+        observation y_{n-1}.
+        """
+        p = self._p
+        K, q = p.K, p.q
+
+        # --- Stationary distribution, p_rev, µ(k), Σ(k) and X/Y blocks ---
+        self._precompute_stationary()
 
         # --- Per-regime Kalman gain and posterior covariance (constant) ----
         # K_k    = Σ_XY(k) Σ_YY(k)^{-1}
@@ -436,20 +471,19 @@ class GSSFilter:
     def _reset_state(self) -> None:
         """Reset the per-step dynamic state (pre-computed constants stay cached)."""
         p = self._p
-        # Posterior regime weights (start at π_0)
-        self._pi: np.ndarray = p.pi0.copy()
+        # Posterior regime weights — start at the stationary distribution π_∞
+        # (computed by _precompute_stationary(), called during __init__).
+        self._pi: np.ndarray = self._pi_inf.copy()
         # Previous observation — needed from step 1 onward
         self._y_prev: np.ndarray | None = None
         self._n: int = 0
         self._initialized: bool = False
 
-        # Mode-specific per-step moments (only used in mode="imm_general")
+        # Mode-specific per-step moments (only used in mode="imm_general").
+        # Start at the stationary moments (from _precompute_stationary()).
         if self._mode == "imm_general":
-            self._mu: list[np.ndarray] = [p.mu_z0(k).copy() for k in range(p.K)]
-            self._P_z: list[np.ndarray] = [
-                p.Sigma_z0(k) + p.mu_z0(k) @ p.mu_z0(k).T
-                for k in range(p.K)
-            ]
+            self._mu:  list[np.ndarray] = [self._mu_z[k].copy()     for k in range(p.K)]
+            self._P_z: list[np.ndarray] = [self._P_z_stat[k].copy() for k in range(p.K)]
 
     def reset(self) -> None:
         """Reset the filter to n = 0 (call before re-processing a sequence)."""
@@ -497,10 +531,10 @@ class GSSFilter:
     # MODE = "h5_exact" — exact IMM under hypothesis (H5)
     # ==================================================================
     #
-    # The initial step uses the *model's prior* (µ_z0, Σ_z0) rather than
-    # the stationary moments, exactly as specified in paper §3.5
-    # (eqs. init_post / init_mean / init_var). When the prior matches the
-    # stationary distribution this is the same as one stationary step.
+    # The initial step uses the *stationary* prior (µ_z[r], Σ[r], π_∞[r]),
+    # i.e. the same pre-computed moments that drive every subsequent step.
+    # This ensures the filter starts in steady state and avoids the
+    # transient that would arise from an arbitrary user-supplied π_0 / Σ_z0.
     # ------------------------------------------------------------------
 
     def _init_step_h5(self, y1: np.ndarray) -> FilterResult:
@@ -512,34 +546,21 @@ class GSSFilter:
         Var_x_r: list[np.ndarray] = []
 
         for r in range(K):
-            Sig  = p.Sigma_z0(r)              # centred prior covariance
-            mu   = p.mu_z0(r)
-            mu_X = mu[:q];  mu_Y = mu[q:]
-            S_XX = Sig[:q, :q]
-            S_XY = Sig[:q, q:]
-            S_YY = Sig[q:, q:]
+            # All moments are pre-computed at stationarity
+            mu_Y_r = self._mu_Y[r]                              # (s, 1)
 
-            # log p(y_1 | r_1=r) = log π_0(r) + log N(y_1; µ_Y, S_YY)
+            # log p(y_1 | r_1=r) = log π_∞(r) + log N(y_1; µ_Y(r), Σ_YY(r))
             log_w[r] = (
-                np.log(p.pi0[r] + 1e-300)
+                np.log(self._pi_inf[r] + 1e-300)
                 + multivariate_normal.logpdf(
-                    y1.ravel(), mean=mu_Y.ravel(), cov=S_YY,
+                    y1.ravel(), mean=mu_Y_r.ravel(), cov=self._S_YY[r],
                     allow_singular=True,
                 )
             )
 
-            # Kalman update on the prior (eq. init_mean / init_var)
-            K_init = _safe_solve(S_YY.T, S_XY.T).T            # (q, s)
-            e_x    = mu_X + K_init @ (y1 - mu_Y)              # (q, 1)
-            if self._joseph:
-                H_init = _safe_solve(S_XX.T, S_XY).T          # (s, q)
-                R_init = _psd_floor(_sym(S_YY - H_init @ S_XX @ H_init.T))
-                IKH    = np.eye(q) - K_init @ H_init
-                var_x  = _psd_floor(_sym(
-                    IKH @ S_XX @ IKH.T + K_init @ R_init @ K_init.T
-                ))
-            else:
-                var_x  = _psd_floor(_sym(S_XX - K_init @ S_XY.T))
+            # Kalman update using pre-computed gain and posterior covariance
+            e_x   = self._mu_X[r] + self._K_gain[r] @ (y1 - mu_Y_r)   # (q, 1)
+            var_x = self._P_post[r]                                      # constant
 
             E_x_r.append(e_x)
             Var_x_r.append(var_x)
@@ -550,23 +571,23 @@ class GSSFilter:
         # Posterior weights π_1
         log_max = log_w.max()
         if not np.isfinite(log_max):
-            pi1 = p.pi0.copy()
-            logger.warning("Filter init: log-weights all -inf; falling back to π_0.")
+            pi1 = self._pi_inf.copy()
+            logger.warning("Filter init: log-weights all -inf; falling back to π_∞.")
         else:
             log_w -= log_max
             pi1 = np.exp(log_w)
             s_pi = pi1.sum()
             if not np.isfinite(s_pi) or s_pi <= 0.0:
-                pi1 = p.pi0.copy()
-                logger.warning("Filter init: invalid posterior sum; falling back to π_0.")
+                pi1 = self._pi_inf.copy()
+                logger.warning("Filter init: invalid posterior sum; falling back to π_∞.")
             else:
                 pi1 /= s_pi
 
         # Marginal filtered estimates
         E_x, E_xx = _mix(pi1, E_x_r, Var_x_r, K)
 
-        # Innovation: ν_1 = y_1 − Σ_r π_0(r) µ_Y(r)
-        y_pred = sum(p.pi0[r] * p.mu_z0(r)[q:] for r in range(K))
+        # Innovation: ν_1 = y_1 − Σ_r π_∞(r) µ_Y(r)
+        y_pred = sum(self._pi_inf[r] * self._mu_Y[r] for r in range(K))
         innov  = y1 - y_pred
 
         self._pi = pi1
@@ -671,6 +692,7 @@ class GSSFilter:
     # ------------------------------------------------------------------
 
     def _init_step_general(self, y1: np.ndarray) -> FilterResult:
+        """Initial step using the stationary prior µ_z[r], Σ[r], π_∞[r]."""
         p = self._p
         K, q = p.K, p.q
 
@@ -679,15 +701,16 @@ class GSSFilter:
         Var_x_r: list[np.ndarray] = []
 
         for r in range(K):
-            Sig  = p.Sigma_z0(r)              # (dim_z, dim_z) centred cov
-            mu   = p.mu_z0(r)                 # (dim_z, 1)
+            # Use stationary moments (from _precompute_stationary())
+            Sig  = self._Sigma[r]   # (dim_z, dim_z) centred cov
+            mu   = self._mu_z[r]   # (dim_z, 1)
             mu_X = mu[:q];  mu_Y = mu[q:]
             S_XX = Sig[:q, :q]
             S_XY = Sig[:q, q:]
             S_YY = Sig[q:, q:]
 
             log_w[r] = (
-                np.log(p.pi0[r] + 1e-300)
+                np.log(self._pi_inf[r] + 1e-300)
                 + multivariate_normal.logpdf(
                     y1.ravel(), mean=mu_Y.ravel(), cov=S_YY,
                     allow_singular=True,
@@ -705,21 +728,22 @@ class GSSFilter:
 
         log_max = log_w.max()
         if not np.isfinite(log_max):
-            pi1 = p.pi0.copy()
-            logger.warning("Filter init: log-weights all -inf; falling back to π_0.")
+            pi1 = self._pi_inf.copy()
+            logger.warning("Filter init: log-weights all -inf; falling back to π_∞.")
         else:
             log_w -= log_max
             pi1 = np.exp(log_w)
             s_pi = pi1.sum()
             if not np.isfinite(s_pi) or s_pi <= 0.0:
-                pi1 = p.pi0.copy()
-                logger.warning("Filter init: invalid posterior sum; falling back to π_0.")
+                pi1 = self._pi_inf.copy()
+                logger.warning("Filter init: invalid posterior sum; falling back to π_∞.")
             else:
                 pi1 /= s_pi
 
         E_x, E_xx = _mix(pi1, E_x_r, Var_x_r, K)
 
-        y_pred = sum(p.pi0[r] * p.mu_z0(r)[q:] for r in range(K))
+        # Innovation: ν_1 = y_1 − Σ_r π_∞(r) µ_Y(r)
+        y_pred = sum(self._pi_inf[r] * self._mu_Y[r] for r in range(K))
         innov  = y1 - y_pred
 
         self._pi = pi1

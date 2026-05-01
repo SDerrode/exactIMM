@@ -671,14 +671,21 @@ class _RegimeDiagDialog(QDialog):
             accuracy = np.trace(conf) / max(N, 1)
 
             # ── Title label ──
-            acc_col  = "#155724" if accuracy > 0.85 else (
-                       "#856404" if accuracy > 0.70 else "#721c24")
-            acc_lbl  = QLabel(
+            # Pill-style label so text is readable on both light and dark themes
+            if accuracy > 0.85:
+                acc_bg, acc_fg, acc_bd = "#d4edda", "#155724", "#c3e6cb"
+            elif accuracy > 0.70:
+                acc_bg, acc_fg, acc_bd = "#fff3cd", "#856404", "#ffc107"
+            else:
+                acc_bg, acc_fg, acc_bd = "#f8d7da", "#721c24", "#f5c6cb"
+            acc_lbl = QLabel(
                 f"Overall regime accuracy:  {accuracy:.1%}  "
                 f"(N = {N},  argmax π_n  vs  r_n)"
             )
             acc_lbl.setStyleSheet(
-                f"font-weight: bold; font-size: 11px; color: {acc_col};"
+                f"font-weight: bold; font-size: 11px; color: {acc_fg};"
+                f"background: {acc_bg}; border: 1px solid {acc_bd};"
+                "padding: 3px 12px; border-radius: 4px;"
             )
             acc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             conf_l.addWidget(acc_lbl)
@@ -730,7 +737,11 @@ class _RegimeDiagDialog(QDialog):
                     f"   precision = {precision:.1%}"
                     f"   support = {conf[k,:].sum()}"
                 )
-                lbl.setStyleSheet("font-size: 10px;")
+                # Explicit foreground so the label reads on both light & dark themes
+                lbl.setStyleSheet(
+                    "font-size: 10px; color: palette(windowText);"
+                    "background: transparent;"
+                )
                 conf_l.addWidget(lbl)
 
             tabs.addTab(conf_w, "Confusion matrix")

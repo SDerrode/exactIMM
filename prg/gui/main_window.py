@@ -434,25 +434,31 @@ class _InnovHistDialog(QDialog):
             inner_tabs.addTab(sc_w, "Scatter")
 
         # ─────────────────────────────────────────────────────────────
-        # Tab 3: Per-regime residuals (D11)
+        # Tab 3: Per-regime soft-weighted residuals (D11)
         #
-        # For each regime k we plot  y_n − µ_Y(k)  for all time steps
-        # n where  argmax π_n = k.  Under the model this residual has
-        # distribution N(0, Σ_YY(k)) — constant in n.
-        # Fallback (no ys / mu_Y): marginal innovations filtered by regime.
+        # Hard assignment (argmax π_n = k) contaminates each regime's
+        # histogram with observations from regime j at transition times,
+        # producing bimodal, heavily-skewed distributions.
+        #
+        # Soft assignment: each observation y_n contributes to regime k
+        # with weight π_n(k) → the weighted distribution converges to
+        # N(0, Σ_YY(k)) if the model is correct.
+        # N_eff = Σ_n π_n(k) is shown in the title.
+        #
+        # Fallback (no ys / mu_Y): hard-assigned marginal innovations.
         # ─────────────────────────────────────────────────────────────
         if pis is not None and pis.ndim == 2 and pis.shape[0] == N:
             K = pis.shape[1]
-            r_pred = np.argmax(pis, axis=1)          # (N,) dominant regime
             regime_colours = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
 
-            # Decide whether we can build per-regime residuals
+            # Decide whether we can build soft-weighted residuals
             use_resid = (
                 mu_Y is not None
                 and ys is not None
                 and len(mu_Y) == K
                 and ys.shape == (N, s)
             )
+            has_theory = use_resid and S_YY is not None and len(S_YY) == K
 
             preg_w = QWidget()
             preg_l = QVBoxLayout(preg_w)
@@ -466,63 +472,99 @@ class _InnovHistDialog(QDialog):
             can_pr = FigureCanvasQTAgg(fig_pr)
             can_pr.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
-            for k in range(K):
-                mask = r_pred == k
-                n_k  = int(mask.sum())
-                c    = regime_colours[k % len(regime_colours)]
+            # Pre-compute residuals for all regimes (shape (N, s) each)
+            if use_resid:
+                resid_all = [
+                    ys - mu_Y[k].ravel()[np.newaxis, :]   # (N, s)
+                    for k in range(K)
+                ]
 
-                # Build the quantity to plot and its theoretical reference
+            for k in range(K):
+                c = regime_colours[k % len(regime_colours)]
+
                 if use_resid:
-                    # Regime-conditional residual: y_n − µ_Y(k) ~ N(0, Σ_YY(k))
-                    resid_k   = ys[mask] - mu_Y[k].ravel()  # (N_k, s)
-                    y_label_f = lambda i: rf"$y^{i} - \mu_{{Y,{k}}}^{i}$"
-                    title_pf  = f"k={k}  residual"
-                    has_theory = S_YY is not None and len(S_YY) == K
+                    w_k   = pis[:, k]            # (N,) soft weights π_n(k)
+                    n_eff = float(w_k.sum())     # effective count
+                    xi_all = resid_all[k]        # (N, s)  y_n − µ_Y(k)
+                    w_norm = w_k / max(n_eff, 1e-12)   # normalised
                 else:
-                    # Fallback: marginal innovations
-                    resid_k   = innovations[mask]            # (N_k, s)
-                    y_label_f = lambda i: rf"$\nu^{i}$"
-                    title_pf  = f"k={k}  ν"
-                    has_theory = False
+                    # Fallback: hard-assigned marginal innovations
+                    mask  = np.argmax(pis, axis=1) == k
+                    n_eff = float(mask.sum())
+                    xi_all = innovations[mask]   # (N_k, s)
+                    w_k    = None
+                    w_norm = None
 
                 for i in range(s):
                     ax = fig_pr.add_subplot(nrows, ncols, k * ncols + i + 1)
-                    if n_k > 1:
-                        xi = resid_k[:, i]
-                        ax.hist(xi, bins=max(10, min(n_k // 20, 200)),
-                                density=True, color=c, alpha=0.5)
-                        pad = max(float(xi.std()), 1e-3)
-                        xg  = np.linspace(float(xi.min()) - pad,
-                                          float(xi.max()) + pad, 400)
+                    if n_eff > 1:
+                        xi = xi_all[:, i]        # (N,) or (N_k,)
 
+                        # ── Axis limits: clip to ±5σ of theoretical (or ±3 empirical σ)
                         if has_theory:
-                            # Overlay theoretical N(0, Σ_YY(k)[i,i])
                             sig_th = float(np.sqrt(max(float(S_YY[k][i, i]), 1e-12)))
+                            x_lo, x_hi = -5.0 * sig_th, 5.0 * sig_th
+                        else:
+                            if w_norm is not None:
+                                mu_e  = float(np.dot(w_norm, xi))
+                                std_e = float(np.sqrt(np.dot(w_norm, (xi - mu_e) ** 2)))
+                            else:
+                                mu_e, std_e = float(xi.mean()), float(xi.std())
+                            std_e = max(std_e, 1e-3)
+                            x_lo  = mu_e - 3.5 * std_e
+                            x_hi  = mu_e + 3.5 * std_e
+
+                        n_bins = max(10, min(int(n_eff) // 50, 300))
+                        ax.hist(xi,
+                                bins=n_bins,
+                                range=(x_lo, x_hi),
+                                weights=w_k,
+                                density=True,
+                                color=c, alpha=0.5)
+                        ax.set_xlim(x_lo, x_hi)
+
+                        xg = np.linspace(x_lo, x_hi, 400)
+                        if has_theory:
                             ax.plot(xg, _norm.pdf(xg, 0.0, sig_th),
                                     "k-", linewidth=1.6,
                                     label=rf"$\mathcal{{N}}(0,\,\Sigma_{{YY}}({k}))$")
                             ax.legend(fontsize=7)
                         else:
-                            # Fallback: fit empirical Gaussian
-                            mu_e  = float(xi.mean())
-                            sig_e = float(xi.std())
-                            if sig_e > 1e-10:
-                                ax.plot(xg, _norm.pdf(xg, mu_e, sig_e),
+                            if std_e > 1e-10:
+                                ax.plot(xg, _norm.pdf(xg, mu_e, std_e),
                                         color=c, linewidth=1.5)
 
-                        _, p_lb, _ = _ljung_box(xi)
-                        S2, K2, _, _ = _shape_diagnostics(xi)
+                        # ── Weighted shape statistics ──────────────────────
+                        if w_norm is not None:
+                            mu_w  = float(np.dot(w_norm, xi))
+                            xc    = xi - mu_w
+                            std_w = float(np.sqrt(np.dot(w_norm, xc ** 2)))
+                            if std_w > 1e-10:
+                                S2 = float(np.dot(w_norm, (xc / std_w) ** 3))
+                                K2 = float(np.dot(w_norm, (xc / std_w) ** 4)) - 3.0
+                            else:
+                                S2, K2 = 0.0, 0.0
+                            stats_str = f"S={S2:+.2f}  K={K2:+.2f}  μ={mu_w:+.2f}"
+                        else:
+                            S2, K2, _, _ = _shape_diagnostics(xi)
+                            stats_str = f"S={S2:+.2f}  K={K2:+.2f}"
+
+                        kind = "soft-resid" if use_resid else "ν"
                         ax.set_title(
-                            f"{title_pf}^{i}   N_k={n_k}\n"
-                            f"LB p={p_lb:.3f}  S={S2:+.2f}  K={K2:+.2f}",
+                            f"k={k}  {kind}^{i}   N_eff={n_eff:.0f}\n"
+                            f"{stats_str}",
                             fontsize=8,
                         )
                     else:
-                        ax.set_title(f"{title_pf}^{i}   N_k={n_k}", fontsize=8)
+                        ax.set_title(f"k={k}   N_eff={n_eff:.0f}", fontsize=8)
                         ax.text(0.5, 0.5, "n/a", transform=ax.transAxes,
                                 ha="center", va="center",
                                 fontsize=9, color="#aaa")
-                    ax.set_xlabel(y_label_f(i), fontsize=8)
+
+                    if use_resid:
+                        ax.set_xlabel(rf"$y^{i} - \mu_{{Y,{k}}}^{i}$", fontsize=8)
+                    else:
+                        ax.set_xlabel(rf"$\nu^{i}$", fontsize=8)
                     ax.grid(True, linestyle=":", alpha=0.4)
                     ax.tick_params(labelsize=7)
 

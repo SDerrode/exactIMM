@@ -15,7 +15,7 @@ authors:
     family-names: Pieczynski
     email: wojciech.pieczynski@telecom-sudparis.eu
     affiliation: Télécom SudParis
-repository-code: "https://github.com/<USER>/fofgss"
+repository-code: "https://github.com/SDerrode/exactIMM"
 abstract: >-
   Reference implementation of the H5-constrained Gaussian Switching
   System (GSS) framework: a fast constant-gain optimal filter under

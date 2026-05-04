@@ -25,7 +25,7 @@ the preprint is accepted.)
   title        = {{FofGss: Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
   version      = {0.10.1},
-  url          = {https://github.com/<USER>/fofgss},
+  url          = {https://github.com/SDerrode/exactIMM},
   license      = {AGPL-3.0},
 }
 ```

@@ -11,8 +11,8 @@
 ## Quick install (CPU only)
 
 ```bash
-git clone https://github.com/<USER>/fofgss.git
-cd fofgss
+git clone https://github.com/SDerrode/exactIMM.git
+cd exactIMM       # the Python package inside is called `fofgss`
 
 # Create and activate a project virtualenv
 python3 -m venv .venv

@@ -63,7 +63,7 @@ from prg.learning.semi_supervised import fit_semi_supervised
 
 __all__ = ["run_em_all", "run_em_trial"]
 
-logger = logging.getLogger("fofgss.experiments.em")
+logger = logging.getLogger("exactIMM.experiments.em")
 
 # ---------------------------------------------------------------------------
 # Default protocol parameters

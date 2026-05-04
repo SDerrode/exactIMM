@@ -1,4 +1,4 @@
-# FofGss — Fast Optimal Filtering in Gaussian Switching Systems
+# exactIMM — Fast Optimal Filtering in Gaussian Switching Systems
 
 Implementation of the filtering and simulation algorithms described in:
 
@@ -27,7 +27,7 @@ The central objective is to compute $\mathbb{E}[X_n \mid Y_{1:n}]$ efficiently (
 ## Project structure
 
 ```
-fofgss/
+exactIMM/
 ├── prg/
 │   ├── utils/
 │   │   ├── exceptions.py       # GSSError hierarchy
@@ -610,12 +610,12 @@ logs            = "logs"
 If you use this code or the (H5) framework in your work, please cite:
 
 ```bibtex
-@misc{derrode_fofgss_2026,
+@misc{derrode_exactIMM_2026,
   author       = {Derrode, St{\'e}phane and Pieczynski, Wojciech},
   title        = {{On Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
   howpublished = {\url{https://github.com/SDerrode/exactIMM}},
-  note         = {Software v0.10.1, accompanying paper preprint},
+  note         = {Software v0.11.0, accompanying paper preprint},
 }
 ```
 

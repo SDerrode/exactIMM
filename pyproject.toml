@@ -3,8 +3,8 @@ requires = ["setuptools>=72", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fofgss"
-version = "0.10.1"
+name = "exactIMM"
+version = "0.11.0"
 description = "Fast optimal filtering in Gaussian switching systems"
 readme = "README.md"
 license = { file = "LICENSE" }

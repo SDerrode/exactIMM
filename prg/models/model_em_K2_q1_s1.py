@@ -6,7 +6,7 @@ prg/models/model_em_K2_q1_s1.py
 GSS model: K=2 states, q=1 (hidden), s=1 (observed).
 
 Estimated by Baum-Welch EM from (X,Y) data — R hidden.  (semi-supervised EM, K=2, log L=-2874.4626, 8 iters)
-Source CSV : /Users/MacBook_Derrode/Documents/Recherche/Wojciech/FofGss/fofgss/data/simulated/simulated_model_gss_K2_q1_s1_N3000_seed42.csv
+Source CSV : data/simulated/simulated_model_gss_K2_q1_s1_N3000_seed42.csv
 Estimated  : 2026-04-19 17:33:20
 Constraint : none
 Delta=0    : no

@@ -12,7 +12,7 @@
 
 ```bash
 git clone https://github.com/SDerrode/exactIMM.git
-cd exactIMM       # the Python package inside is called `fofgss`
+cd exactIMM       # the Python package inside is called `exactIMM`
 
 # Create and activate a project virtualenv
 python3 -m venv .venv
@@ -63,8 +63,8 @@ git pull
 pip install -e ".[dev]" --upgrade
 ```
 
-If a previous version of `fofgss.egg-info/` lingers and causes
-`ModuleNotFoundError`, just delete it: `rm -rf fofgss.egg-info` and
+If a previous version of `exactIMM.egg-info/` lingers and causes
+`ModuleNotFoundError`, just delete it: `rm -rf exactIMM.egg-info` and
 re-run `pip install -e ".[dev]"`.
 
 ## Common issues

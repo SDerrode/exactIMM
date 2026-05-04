@@ -67,7 +67,7 @@ __all__ = [
 # Paths
 # ---------------------------------------------------------------------------
 
-REPO_ROOT  = pathlib.Path(__file__).resolve().parents[2]   # → fofgss/
+REPO_ROOT  = pathlib.Path(__file__).resolve().parents[2]   # → exactIMM/
 DEFAULT_IN = REPO_ROOT / "data" / "experiments" / "mc_results.csv"
 DEFAULT_FIG_DIR = REPO_ROOT / "paper" / "figures" / "generated"
 

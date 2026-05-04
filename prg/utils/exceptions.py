@@ -3,7 +3,7 @@
 """
 prg/utils/exceptions.py
 -----------------------
-Centralised exception hierarchy for the FofGss project.
+Centralised exception hierarchy for the exactIMM project.
 
 Tree
 ----
@@ -29,7 +29,7 @@ __all__ = [
 
 
 class GSSError(Exception):
-    """Root of all FofGss exceptions."""
+    """Root of all exactIMM exceptions."""
 
     def __repr__(self) -> str:
         msg = self.args[0] if self.args else ""

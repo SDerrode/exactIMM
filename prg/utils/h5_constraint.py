@@ -462,7 +462,7 @@ def apply_h5_constraint(
     from prg.classes.FMatrix import FMatrix
     from prg.classes.GSSParams import GSSParams
 
-    log = logger or logging.getLogger("fofgss.h5_constraint")
+    log = logger or logging.getLogger("exactIMM.h5_constraint")
     K, q, s = params.K, params.q, params.s
 
     A_list: list[np.ndarray] = []

@@ -86,7 +86,7 @@ from prg.learning.supervised import (
 
 __all__ = ["fit_semi_supervised"]
 
-_log = logging.getLogger("fofgss.learning.semi_supervised")
+_log = logging.getLogger("exactIMM.learning.semi_supervised")
 
 _LOG_FLOOR = 1e-300   # avoids log(0) in transition / initial probabilities
 

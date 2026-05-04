@@ -1,4 +1,4 @@
-# Citing FofGss
+# Citing exactIMM
 
 If this code helped your work, please cite both the **paper** (where
 the math is) and the **software** (this repository).
@@ -20,11 +20,11 @@ the preprint is accepted.)
 ## Software
 
 ```bibtex
-@software{derrode_fofgss_2026,
+@software{derrode_exactIMM_2026,
   author       = {Derrode, St{\'e}phane and Pieczynski, Wojciech},
-  title        = {{FofGss: Fast Optimal Filtering in Gaussian Switching Systems}},
+  title        = {{exactIMM: Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
-  version      = {0.10.1},
+  version      = {0.11.0},
   url          = {https://github.com/SDerrode/exactIMM},
   license      = {AGPL-3.0},
 }

@@ -23,9 +23,7 @@ cd ..
 git clone https://github.com/SDerrode/exactIMM.wiki.git
 
 # Each time you update wiki/*.md, rsync and push.
-# Replace <local-repo-dir> by your local directory name (e.g. fofgss
-# if you cloned with `git clone … fofgss`, or exactIMM otherwise).
-rsync -av --delete --exclude README.md <local-repo-dir>/wiki/ exactIMM.wiki/
+rsync -av --delete --exclude README.md exactIMM/wiki/ exactIMM.wiki/
 cd exactIMM.wiki
 git add . && git commit -m "Update wiki" && git push
 ```

@@ -1,3 +1,3 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""fofgss — Fast optimal filtering in Gaussian switching systems."""
+"""exactIMM — Fast optimal filtering in Gaussian switching systems."""

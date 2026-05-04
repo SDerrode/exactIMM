@@ -1172,7 +1172,7 @@ class GSSMainWindow(QMainWindow):
         self._op_t0: float = time.perf_counter()   # C4: initialised in constructor
 
         self.setWindowTitle(
-            f"FofGss — GSS Simulator  (K={K}, q={q}, s={s})"
+            f"exactIMM — GSS Simulator  (K={K}, q={q}, s={s})"
         )
 
         # ── central widget ────────────────────────────────────────────
@@ -1279,11 +1279,11 @@ class GSSMainWindow(QMainWindow):
         mode_row.addWidget(QLabel("Filter mode:"))
         self._mode_combo = QComboBox()
         self._mode_combo.addItem("Approximate IMM - H5 not required", "imm_general")
-        self._mode_combo.addItem("fofgss - Exact IMM - H5 required",  "h5_exact")
+        self._mode_combo.addItem("exactIMM - Exact IMM - H5 required",  "h5_exact")
         self._mode_combo.setToolTip(
             "Approximate IMM — per-step moment propagation from the filtered π_n.\n"
             "               Works for any GSS model, with or without (H5)\n"
-            "               (matches fofgss ≤ v0.9.0).\n"
+            "               (matches exactIMM ≤ v0.9.0).\n"
             "Exact IMM    — stationary pre-computed moments. Exact when (H5)\n"
             "               holds: the algebraic constraint of paper eq. (4.4)\n"
             "               linking A, B, C, D, Σ_U, Σ_V, Δ. Emits a warning\n"
@@ -1381,14 +1381,14 @@ class GSSMainWindow(QMainWindow):
         self._btn_save_session.setFixedHeight(32)
         self._btn_save_session.setToolTip(
             "Save the complete session (parameters + data + filter results) "
-            "to a .fofgss file  (Ctrl+Shift+S)"
+            "to a .exactIMM file  (Ctrl+Shift+S)"
         )
         self._btn_save_session.clicked.connect(self._on_save_session)
 
         self._btn_load_session = QPushButton("📂 Load session…")
         self._btn_load_session.setFixedHeight(32)
         self._btn_load_session.setToolTip(
-            "Restore a previously saved .fofgss session  (Ctrl+Shift+O)"
+            "Restore a previously saved .exactIMM session  (Ctrl+Shift+O)"
         )
         self._btn_load_session.clicked.connect(self._on_load_session)
 
@@ -2241,19 +2241,19 @@ class GSSMainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_save_session(self) -> None:
-        """Save params + sim data + filter results to a .fofgss file."""
+        """Save params + sim data + filter results to a .exactIMM file."""
         import io
         default_dir = pathlib.Path("data/sessions")
         default_dir.mkdir(parents=True, exist_ok=True)
         path, _ = QFileDialog.getSaveFileName(
             self, "Save session",
-            str(default_dir / "session.fofgss"),
-            "FofGss sessions (*.fofgss);;All files (*)",
+            str(default_dir / "session.exactIMM"),
+            "exactIMM sessions (*.exactIMM);;All files (*)",
         )
         if not path:
             return
-        if not path.endswith(".fofgss"):
-            path += ".fofgss"
+        if not path.endswith(".exactIMM"):
+            path += ".exactIMM"
 
         # Collect GUI parameters
         F_list   = self._param_panel.get_F_list()
@@ -2326,11 +2326,11 @@ class GSSMainWindow(QMainWindow):
         self._push_recent_session(path)   # D9
 
     def _on_load_session(self) -> None:
-        """Restore a .fofgss session (params + data + filter)."""
+        """Restore a .exactIMM session (params + data + filter)."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Load session",
             str(pathlib.Path("data/sessions")),
-            "FofGss sessions (*.fofgss *.npz);;All files (*)",
+            "exactIMM sessions (*.exactIMM *.npz);;All files (*)",
         )
         if not path:
             return
@@ -2511,14 +2511,14 @@ class GSSMainWindow(QMainWindow):
         self._act_save_session = QAction("Save &session…", self)
         self._act_save_session.setShortcut(QKeySequence("Ctrl+Shift+S"))
         self._act_save_session.setStatusTip(
-            "Save complete session (params + data + filter) to a .fofgss file"
+            "Save complete session (params + data + filter) to a .exactIMM file"
         )
         self._act_save_session.triggered.connect(self._on_save_session)
         file_menu.addAction(self._act_save_session)
 
         self._act_load_session = QAction("L&oad session…", self)
         self._act_load_session.setShortcut(QKeySequence("Ctrl+Shift+O"))
-        self._act_load_session.setStatusTip("Restore a previously saved .fofgss session")
+        self._act_load_session.setStatusTip("Restore a previously saved .exactIMM session")
         self._act_load_session.triggered.connect(self._on_load_session)
         file_menu.addAction(self._act_load_session)
 
@@ -2791,7 +2791,7 @@ class GSSMainWindow(QMainWindow):
     # -- Settings persistence via QSettings --------------------------------
 
     def _settings(self) -> QSettings:
-        return QSettings("FofGss", "Simulator")
+        return QSettings("exactIMM", "Simulator")
 
     def _load_settings(self) -> None:
         s = self._settings()
@@ -3094,7 +3094,7 @@ class GSSMainWindow(QMainWindow):
             f"{'=' * (len('prg/models/') + len(file_stem) + 3)}",
             f"GSS model: K={K} states, q={q} (hidden), s={s} (observed).",
             "",
-            "Generated by FofGss GUI.",
+            "Generated by exactIMM GUI.",
             f'"""',
             "",
             "from __future__ import annotations",

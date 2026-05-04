@@ -46,7 +46,7 @@ Modes
     The full F(k) = [[A_k, B_k], [C_k, D_k]] is used. Per-regime moments
     µ_n(r), P_n(r) are propagated **at each step** following the recursion
     of the companion paper CS_FinaleBis eqs (17ter), (17quater), (13')–(15),
-    (18), (21')–(22). This matches the behaviour of ``fofgss ≤ v0.9.0``
+    (18), (21')–(22). This matches the behaviour of ``exactIMM ≤ v0.9.0``
     and is appropriate for any GSS model, in particular non-(H5) models.
 
     **IMM approximation note.** The paper's recursion (17ter)/(17quater)
@@ -108,7 +108,7 @@ FILTER_MODES = ("h5_exact", "imm_general")
 # can legitimately reach ~1e-8 even when (H5) is exactly enforced).
 H5_TOL       = 1e-6
 
-logger = logging.getLogger("fofgss.filter")
+logger = logging.getLogger("exactIMM.filter")
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ class GSSFilter:
 
         * ``"imm_general"`` (default) — IMM recursion with per-step
           moment propagation; no (H5) requirement. Matches
-          ``fofgss ≤ v0.9.0`` and is the correct choice for any GSS
+          ``exactIMM ≤ v0.9.0`` and is the correct choice for any GSS
           model, in particular those that do not satisfy (H5).
         * ``"h5_exact"`` — exact IMM under hypothesis (H5), with
           stationary pre-computed regime moments. Requires (H5), i.e.
@@ -687,7 +687,7 @@ class GSSFilter:
     # ==================================================================
     #
     # This is the filter of CS_FinaleBis (eqs 17ter, 16–17, 13'–15, 18,
-    # 21'–22, 8–9) — i.e. the fofgss ≤ v0.9.0 implementation. The full
+    # 21'–22, 8–9) — i.e. the exactIMM ≤ v0.9.0 implementation. The full
     # F(k) = [[A_k, B_k], [C_k, D_k]] is used, per-regime moments
     # µ_n(r), P_n(r) are propagated at each step from the filtered π_n
     # (*not* the stationary π_∞), and the Kalman update uses the

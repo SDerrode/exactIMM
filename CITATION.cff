@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 title: >-
-  FofGss: Fast Optimal Filtering in Gaussian Switching Systems
+  exactIMM: Fast Optimal Filtering in Gaussian Switching Systems
 message: >-
   If you use this software, please cite both the software (this
   CITATION.cff) and the accompanying paper preprint (preferred-citation).
@@ -34,8 +34,8 @@ keywords:
   - ENSO
   - signal processing
 license: AGPL-3.0
-version: "0.10.1"
-date-released: "2026-05-02"
+version: "0.11.0"
+date-released: "2026-05-04"
 preferred-citation:
   type: generic
   title: "On Fast Optimal Filtering in Gaussian Switching Systems"

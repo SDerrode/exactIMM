@@ -1,6 +1,6 @@
-# FofGss — Wiki
+# exactIMM — Wiki
 
-Welcome to the **FofGss** wiki. This software accompanies the paper
+Welcome to the **exactIMM** wiki. This software accompanies the paper
 
 > *On Fast Optimal Filtering in Gaussian Switching Systems*  
 > S. Derrode & W. Pieczynski (2026)

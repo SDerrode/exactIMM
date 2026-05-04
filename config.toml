@@ -1,8 +1,8 @@
-# FofGss – Application configuration
+# exactIMM – Application configuration
 # Edit this file to tune simulation and I/O parameters.
 
 [general]
-project_name   = "fofgss"
+project_name   = "exactIMM"
 random_seed    = 42
 log_level      = "INFO"   # DEBUG | INFO | WARNING | ERROR
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-05-04
+
+### Changed
+
+- **Project renamed** from ``fofgss`` to ``exactIMM`` for consistency
+  with the GitHub repository. The Python distribution name
+  (``pyproject.toml``), all logger names (``logging.getLogger("exactIMM…")``),
+  the GUI ``QSettings`` namespace, the session file extension
+  (``.exactIMM``), and all branding in docs/wiki/CITATION have been
+  updated. The GitLab remote was renamed accordingly to
+  ``gitlab.ec-lyon.fr/sderrode/exactIMM``.
+
 ## [0.10.1] — 2026-04-20
 
 ### Added
@@ -15,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   constructor argument:
   - ``mode="imm_general"`` (new **default**) — IMM recursion with
     per-step moment propagation; no (H5) requirement. Matches the
-    ``fofgss ≤ v0.9.0`` implementation; correct for models with
+    ``exactIMM ≤ v0.9.0`` implementation; correct for models with
     ``B(k) ≠ 0``.
   - ``mode="h5_exact"`` — exact IMM under hypothesis (H5), with
     stationary pre-computed regime moments (the v0.10.0 default).

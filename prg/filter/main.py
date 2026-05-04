@@ -86,7 +86,7 @@ def _setup_logging(
         datefmt="%H:%M:%S",
     )
 
-    root_logger = logging.getLogger("fofgss")
+    root_logger = logging.getLogger("exactIMM")
     root_logger.setLevel(logging.DEBUG)
 
     fh = logging.FileHandler(log_path, encoding="utf-8")
@@ -108,14 +108,14 @@ def _load_model(model_name: str) -> BaseGSSModel:
     try:
         module = importlib.import_module(module_path)
     except ImportError as exc:
-        logging.getLogger("fofgss").error(
+        logging.getLogger("exactIMM").error(
             "Cannot import model '%s': %s", module_path, exc
         )
         sys.exit(1)
     for _, obj in inspect.getmembers(module, inspect.isclass):
         if issubclass(obj, BaseGSSModel) and obj is not BaseGSSModel:
             return obj()
-    logging.getLogger("fofgss").error(
+    logging.getLogger("exactIMM").error(
         "No BaseGSSModel subclass found in '%s'.", module_path
     )
     sys.exit(1)
@@ -199,7 +199,7 @@ def main() -> None:
 
     tag = f"{args.model}_N{args.N or 'csv'}_seed{args.seed or 'random'}"
     _setup_logging(log_level, logs_dir, tag, args.verbose)
-    log = logging.getLogger("fofgss.filter.main")
+    log = logging.getLogger("exactIMM.filter.main")
 
     # --- Load model and build params ---
     log.info("Loading model '%s' …", args.model)

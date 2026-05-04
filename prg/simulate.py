@@ -63,7 +63,7 @@ def _load_config(root: pathlib.Path) -> dict:
     """
     cfg_path = root / _CONFIG_FILENAME
     if not cfg_path.exists():
-        logging.getLogger("fofgss").warning(
+        logging.getLogger("exactIMM").warning(
             "config.toml not found at '%s'. Using built-in defaults.", cfg_path
         )
         return {}
@@ -101,7 +101,7 @@ def _setup_logging(
     seed: int | None,
     verbose: int,
 ) -> None:
-    """Configure the root 'fofgss' logger with console + file handlers."""
+    """Configure the root 'exactIMM' logger with console + file handlers."""
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     seed_str = str(seed) if seed is not None else "random"
@@ -116,7 +116,7 @@ def _setup_logging(
         datefmt="%H:%M:%S",
     )
 
-    root_logger = logging.getLogger("fofgss")
+    root_logger = logging.getLogger("exactIMM")
     root_logger.setLevel(logging.DEBUG)   # capture everything; handlers filter
 
     # --- File handler (always DEBUG) ---
@@ -155,7 +155,7 @@ def _load_model(model_name: str) -> BaseGSSModel:
     try:
         module = importlib.import_module(module_path)
     except ImportError as exc:
-        logging.getLogger("fofgss").error(
+        logging.getLogger("exactIMM").error(
             "Cannot import model '%s': %s", module_path, exc
         )
         sys.exit(1)
@@ -164,7 +164,7 @@ def _load_model(model_name: str) -> BaseGSSModel:
         if issubclass(obj, BaseGSSModel) and obj is not BaseGSSModel:
             return obj()
 
-    logging.getLogger("fofgss").error(
+    logging.getLogger("exactIMM").error(
         "No BaseGSSModel subclass found in '%s'.", module_path
     )
     sys.exit(1)
@@ -254,7 +254,7 @@ def main() -> None:
         seed=args.seed,
         verbose=args.verbose,
     )
-    log = logging.getLogger("fofgss.simulate")
+    log = logging.getLogger("exactIMM.simulate")
 
     # --- Load model ---
     log.info("Loading model '%s' …", args.model)

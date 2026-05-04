@@ -30,7 +30,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-REPO_ROOT  = pathlib.Path(__file__).resolve().parents[2]   # → fofgss/
+REPO_ROOT  = pathlib.Path(__file__).resolve().parents[2]   # → exactIMM/
 TEX_PATH   = REPO_ROOT / "paper" / "sections" / "06_experiments.tex"
 DATA_DIR   = REPO_ROOT / "data" / "experiments"
 

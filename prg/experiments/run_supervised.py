@@ -54,7 +54,7 @@ from prg.utils.h5_constraint import compute_h5_residual
 
 __all__ = ["run_supervised_all", "run_supervised_trial"]
 
-logger = logging.getLogger("fofgss.experiments.supervised")
+logger = logging.getLogger("exactIMM.experiments.supervised")
 
 # ---------------------------------------------------------------------------
 # Protocol constants

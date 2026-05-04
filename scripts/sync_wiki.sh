@@ -39,6 +39,12 @@ if [[ ! -d "${WIKI_SRC}" ]]; then
 fi
 
 # 2. Clone or update the wiki repo
+# If WIKI_DIR exists but lacks .git/ (e.g. previous run wiped it), wipe and re-clone.
+if [[ -d "${WIKI_DIR}" && ! -d "${WIKI_DIR}/.git" ]]; then
+    echo "WARN: ${WIKI_DIR} exists but is not a git repo — re-cloning."
+    rm -rf "${WIKI_DIR}"
+fi
+
 if [[ ! -d "${WIKI_DIR}" ]]; then
     echo "Cloning ${WIKI_URL} → ${WIKI_DIR}"
     if ! git clone "${WIKI_URL}" "${WIKI_DIR}"; then
@@ -60,9 +66,14 @@ else
     git -C "${WIKI_DIR}" pull --quiet
 fi
 
-# 3. Sync content (excluding the wiki/README.md meta file)
+# 3. Sync content. CRITICAL: exclude .git/ (otherwise --delete wipes the
+#    wiki's git repo since it doesn't exist in the source) and the
+#    wiki/README.md meta file (only useful in the main repo).
 echo "Syncing ${WIKI_SRC}/ → ${WIKI_DIR}/"
-rsync -av --delete --exclude README.md \
+rsync -av --delete \
+    --exclude='.git/' \
+    --exclude='.gitignore' \
+    --exclude='README.md' \
     "${WIKI_SRC}/" "${WIKI_DIR}/"
 
 # 4. Commit + push

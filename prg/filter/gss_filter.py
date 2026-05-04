@@ -103,7 +103,10 @@ __all__ = ["GSSFilter", "FilterResult"]
 FILTER_MODES = ("h5_exact", "imm_general")
 # Relative residual ‖F(k)‖_F / max(‖Z(k)‖_F, 1) of the (H5) constraint
 # F(k) = Z(k) − P(k) M(k)⁻¹ W(k)  (paper eq. 4.4) below this → (H5) holds.
-H5_TOL       = 1e-8
+# 1e-6 is the practical floor for float64 matrix arithmetic (two solve() calls
+# in compute_B_from_h5 accumulate O(ε · κ(M) · κ(L)) rounding errors that
+# can legitimately reach ~1e-8 even when (H5) is exactly enforced).
+H5_TOL       = 1e-6
 
 logger = logging.getLogger("fofgss.filter")
 

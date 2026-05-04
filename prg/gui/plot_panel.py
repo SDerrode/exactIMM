@@ -407,6 +407,7 @@ class PredYPanel(QWidget):
 
         self._build_ui()
         self._draw_traj_empty()
+        self._draw_traj_raw_empty()
         self._draw_density_empty()
 
     # ------------------------------------------------------------------
@@ -457,9 +458,20 @@ class PredYPanel(QWidget):
         self._canvas_traj.setFocusPolicy(Qt.FocusPolicy.ClickFocus)   # D10
         traj_layout.addWidget(NavigationToolbar2QT(self._canvas_traj, traj_widget))
         traj_layout.addWidget(self._canvas_traj)
-        self._inner_tabs.addTab(traj_widget, "Trajectory")
+        self._inner_tabs.addTab(traj_widget, "Trajectory (norm.)")
 
-        # --- Tab 1: Density ---
+        # --- Tab 1: Trajectory (raw, non-normalised) ---
+        traj_raw_widget = QWidget()
+        traj_raw_layout = QVBoxLayout(traj_raw_widget)
+        traj_raw_layout.setContentsMargins(0, 0, 0, 0)
+        self._fig_traj_raw    = Figure(tight_layout=True)
+        self._canvas_traj_raw = FigureCanvasQTAgg(self._fig_traj_raw)
+        self._canvas_traj_raw.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        traj_raw_layout.addWidget(NavigationToolbar2QT(self._canvas_traj_raw, traj_raw_widget))
+        traj_raw_layout.addWidget(self._canvas_traj_raw)
+        self._inner_tabs.addTab(traj_raw_widget, "Trajectory (raw)")
+
+        # --- Tab 2: Density ---
         dens_widget = QWidget()
         dens_layout = QVBoxLayout(dens_widget)
         dens_layout.setContentsMargins(4, 4, 4, 4)
@@ -568,6 +580,7 @@ class PredYPanel(QWidget):
         self._b_Y      = None
         self._ys       = None
         self._draw_traj_empty()
+        self._draw_traj_raw_empty()
         self._draw_density_empty()
 
     # ------------------------------------------------------------------
@@ -576,6 +589,7 @@ class PredYPanel(QWidget):
 
     def _refresh_both(self) -> None:
         self._refresh_traj()
+        self._refresh_traj_raw()
         self._refresh_density()
 
     def _on_n_changed(self) -> None:
@@ -601,20 +615,22 @@ class PredYPanel(QWidget):
     # ------------------------------------------------------------------
 
     _COL_SIG1 = "#1f77b4"   # blue   — signal 1 (H5 exact)
-    _COL_SIG2 = "#ff7f0e"   # orange — signal 2 (approx. without H5)
+    _COL_SIG2 = "#ff7f0e"   # orange — signal 2 (exact Markov transition, éq. (f)/(h))
 
     def _refresh_traj(self) -> None:
-        """Plot both conditional signals over the full trajectory.
+        """Plot conditional signals against the observed trajectory.
 
-        Both means are the *marginal* (y_n-averaged) values — constant in n.
+        At each time step n:
 
-        Signal 1 — exact under (H5):
-            μ₁ = μ_Y_jk[j][k]    (= E[y_{n+1} | r_n=j, r_{n+1}=k], constant)
-            Cov₁ = Γ(j,k)         (constant)
+        Signal 1 (blue) — exact under (H5):
+            E₁ = μ_Y_jk[j][k] + M_t[j][k] @ (y_n − μ_Y[j])    (varies with n)
+            σ₁ = sqrt(diag(Γ(j,k)))                               (constant)
 
-        Signal 2 — approximation without (H5):
-            μ₂ = b_Y[k] + M_simple[j][k] @ μ_Y[j]   (marginal mean, constant)
-            Cov₂ = Γ₂(j,k)                             (constant)
+        Signal 2 (orange) — exact Markov transition density (Proposition, (f)/(h)):
+            E₂ = b_Y[k] + M_simple[j][k] @ y_n                   (varies with n)
+            σ₂ = sqrt(diag(Γ₂(j,k)))                              (constant)
+
+        Black curve: observed y^i_{n+1} / y^i_{n+1} = 1.
 
         Only the ±2σ envelope is drawn (no ±1σ).
         """
@@ -624,28 +640,31 @@ class PredYPanel(QWidget):
         j = self._j_combo.currentIndex()
         k = self._k_combo.currentIndex()
         s = self._s
-        ys = self._ys           # (N, s)
+        ys = self._ys            # (N, s)
         N  = len(ys)
-        ns = np.arange(N - 1)  # indices n = 0 … N-2
+        ns = np.arange(N - 1)   # indices n = 0 … N-2
 
-        # ── Signal 1 — marginal mean (constant in n) ────────────────────
-        means1 = np.tile(self._mu_Y_jk[j][k].ravel(), (N - 1, 1))    # (N-1, s)
-        sigs1  = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))        # (s,)
+        y_prev = ys[:-1]         # (N-1, s) — y_n
+        y_next = ys[1:]          # (N-1, s) — y_{n+1}
 
-        # ── Signal 2 (if available) — marginal mean (constant in n) ─────
+        # ── Signal 1 — E[y_{n+1} | j,k, y_n] ───────────────────────────
+        mu_Y_j  = self._mu_Y[j].ravel()           # (s,)
+        mu_Y_jk = self._mu_Y_jk[j][k].ravel()    # (s,)
+        cond1   = (mu_Y_jk[None, :]
+                   + (y_prev - mu_Y_j[None, :]) @ self._M_t[j][k].T)  # (N-1, s)
+        sigs1   = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))  # (s,) constant
+
+        # ── Signal 2 — partie linéaire de la densité de transition (Proposition, (f)/(h))
+        #    On trace (M_simple[j][k] @ y_n)^i / y^i_n, sans le biais b_Y[k] :
+        #    diviser b_Y[k]^i / y^i_n par y^i_n diverge quand y^i_n → 0.
+        #    Le biais est visible dans l'onglet "Trajectory (raw)".
+        #    σ₂ = sqrt(diag(Γ₂(j,k)))  (constante, formule (h))
         has_sig2 = (self._M_simple is not None
                     and self._Gamma2   is not None
                     and self._b_Y      is not None)
         if has_sig2:
-            b_k    = self._b_Y[k].ravel()                             # (s,)
-            mu_Y_j = self._mu_Y[j].ravel()                            # (s,)
-            means2 = np.tile(
-                b_k + self._M_simple[j][k] @ mu_Y_j, (N - 1, 1)
-            )                                                          # (N-1, s)
-            sigs2  = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))   # (s,)
-
-        # observed y_{n+1}
-        y_obs = ys[1:]   # (N-1, s)
+            cond2 = y_prev @ self._M_simple[j][k].T                           # (N-1, s)
+            sigs2 = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))   # (s,) constant
 
         self._fig_traj.clf()
         axes = (self._fig_traj.subplots(s, 1, sharex=True)
@@ -657,42 +676,46 @@ class PredYPanel(QWidget):
         for i in range(s):
             ax = axes[i]
 
-            # ── Signal 1 ─────────────────────────────────────────────────
-            mu1_i  = means1[:, i]
-            sig1_i = sigs1[i]
+            # normaliser: y^i_n pour les deux signaux
+            safe_yn = np.where(np.abs(y_prev[:, i]) > 1e-12,
+                               y_prev[:, i], 1e-12)                    # (N-1,)
+
+            # ── Signal 1 — cond1^i / y^i_n ───────────────────────────────
+            mu1_i  = cond1[:, i] / safe_yn                             # (N-1,)
+            sig1_i = float(sigs1[i])                                   # constant scalar
             env1 = ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i,
                                    color=c1, alpha=0.15)
             line1, = ax.plot(ns, mu1_i, color=c1, linewidth=1.5)
 
-            # ── Signal 2 ─────────────────────────────────────────────────
+            # ── Signal 2 — cond2^i / y^i_n ───────────────────────────────
             if has_sig2:
-                mu2_i  = means2[:, i]
-                sig2_i = sigs2[i]
+                mu2_i  = cond2[:, i] / safe_yn                         # (N-1,)
+                sig2_i = float(sigs2[i])                               # constant scalar
                 env2 = ax.fill_between(ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i,
                                        color=c2, alpha=0.15)
                 line2, = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
 
-            # ── observed y_{n+1} ─────────────────────────────────────────
-            obs_line, = ax.plot(ns, y_obs[:, i], color="#333333", linewidth=2.0,
-                                alpha=0.85, linestyle="-")
+            # ── observed y^i_{n+1} / y^i_{n+1} = 1 ──────────────────────
+            obs_line, = ax.plot(ns, np.ones(N - 1), color="#333333",
+                                linewidth=2.0, alpha=0.85, linestyle="-")
 
-            # ── 2-column legend (matplotlib fills column-by-column) ──────
-            left_h  = [line1];              left_l  = [rf"$\mu_1$ (H5 exact)"]
-            right_h = [env1];               right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
+            # ── 2-column legend ──────────────────────────────────────────
+            left_h  = [line1];   left_l  = [rf"$\mu_1/y^{i}_n$ (H5 exact)"]
+            right_h = [env1];    right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
             if has_sig2:
-                left_h  += [line2];         left_l  += [rf"$\mu_2$ (approx.)"]
-                right_h += [env2];          right_l += [rf"$\pm 2\sigma_2={sigs2[i]:.3g}$"]
-            left_h  += [obs_line];          left_l  += [rf"$y^{i}$"]
+                left_h  += [line2];  left_l  += [rf"$\mu_2/y^{i}_n$ éq. (f)"]
+                right_h += [env2];   right_l += [rf"$\pm 2\sigma_2={sig2_i:.3g}$"]
+            left_h  += [obs_line];   left_l  += [rf"$y^{i}_n/y^{i}_n=1$"]
             ax.legend(left_h + right_h, left_l + right_l,
                       fontsize=8, loc="upper right", ncol=2)
 
-            ax.set_ylabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
+            ax.set_ylabel(rf"$\cdot\,/\,y^{i}_n$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.4)
 
         axes[-1].set_xlabel(r"$n$", fontsize=10)
         self._fig_traj.suptitle(
-            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k})$"
-            r"  —  marginal mean $\pm 2\sigma$",
+            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)\;/\;y^i_n$"
+            r"  —  $\pm 2\sigma(n)$",
             fontsize=10,
         )
         self._canvas_traj.draw_idle()
@@ -714,7 +737,115 @@ class PredYPanel(QWidget):
         self._canvas_traj.draw_idle()
 
     # ------------------------------------------------------------------
-    # Sous-onglet 1 : Densité
+    # Sous-onglet 1 : Trajectory (raw, non-normalised)
+    # ------------------------------------------------------------------
+
+    def _refresh_traj_raw(self) -> None:
+        """Plot the same conditional signals as _refresh_traj but without normalisation.
+
+        Signal 1 (blue) — exact under (H5):
+            E₁ = μ_Y_jk[j][k] + M_t[j][k] @ (y_n − μ_Y[j])    (varies with n)
+            σ₁ = sqrt(diag(Γ(j,k)))                               (constant)
+
+        Signal 2 (orange) — exact Markov transition density (Proposition, (f)/(h)):
+            E₂ = b_Y[k] + M_simple[j][k] @ y_n                   (varies with n)
+            σ₂ = sqrt(diag(Γ₂(j,k)))                              (constant)
+
+        Black curve: observed y^i_{n+1}.
+        """
+        if self._mu_Y_jk is None or self._ys is None:
+            return
+
+        j = self._j_combo.currentIndex()
+        k = self._k_combo.currentIndex()
+        s = self._s
+        ys = self._ys            # (N, s)
+        N  = len(ys)
+        ns = np.arange(N - 1)   # indices n = 0 … N-2
+
+        y_prev = ys[:-1]         # (N-1, s) — y_n
+        y_next = ys[1:]          # (N-1, s) — y_{n+1}
+
+        # ── Signal 1 ────────────────────────────────────────────────────
+        mu_Y_j  = self._mu_Y[j].ravel()
+        mu_Y_jk = self._mu_Y_jk[j][k].ravel()
+        cond1   = (mu_Y_jk[None, :]
+                   + (y_prev - mu_Y_j[None, :]) @ self._M_t[j][k].T)  # (N-1, s)
+        sigs1   = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))  # (s,)
+
+        # ── Signal 2 — exact Markov transition density (Proposition, (f)/(h)) ────
+        has_sig2 = (self._M_simple is not None
+                    and self._Gamma2   is not None
+                    and self._b_Y      is not None)
+        if has_sig2:
+            b_k   = self._b_Y[k].ravel()
+            cond2 = b_k[None, :] + y_prev @ self._M_simple[j][k].T    # (N-1, s)
+            sigs2 = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))  # (s,)
+
+        self._fig_traj_raw.clf()
+        axes = (self._fig_traj_raw.subplots(s, 1, sharex=True)
+                if s > 1 else [self._fig_traj_raw.add_subplot(1, 1, 1)])
+
+        c1 = self._COL_SIG1
+        c2 = self._COL_SIG2
+
+        for i in range(s):
+            ax = axes[i]
+
+            mu1_i  = cond1[:, i]
+            sig1_i = float(sigs1[i])
+            env1 = ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i,
+                                   color=c1, alpha=0.15)
+            line1, = ax.plot(ns, mu1_i, color=c1, linewidth=1.5)
+
+            if has_sig2:
+                mu2_i  = cond2[:, i]
+                sig2_i = float(sigs2[i])
+                env2 = ax.fill_between(ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i,
+                                       color=c2, alpha=0.15)
+                line2, = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
+
+            obs_line, = ax.plot(ns, y_next[:, i], color="#333333",
+                                linewidth=2.0, alpha=0.85, linestyle="-")
+
+            left_h  = [line1];   left_l  = [rf"$\mu_1$ (H5 exact)"]
+            right_h = [env1];    right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
+            if has_sig2:
+                left_h  += [line2];  left_l  += [rf"$\mu_2$ éq. (f)"]
+                right_h += [env2];   right_l += [rf"$\pm 2\sigma_2={sig2_i:.3g}$"]
+            left_h  += [obs_line];   left_l  += [rf"$y^{i}_{{n+1}}$"]
+            ax.legend(left_h + right_h, left_l + right_l,
+                      fontsize=8, loc="upper right", ncol=2)
+
+            ax.set_ylabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
+            ax.grid(True, linestyle=":", alpha=0.4)
+
+        axes[-1].set_xlabel(r"$n$", fontsize=10)
+        self._fig_traj_raw.suptitle(
+            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)$"
+            r"  —  $\pm 2\sigma$  (raw)",
+            fontsize=10,
+        )
+        self._canvas_traj_raw.draw_idle()
+
+    def _draw_traj_raw_empty(self) -> None:
+        self._fig_traj_raw.clf()
+        ax = self._fig_traj_raw.add_subplot(1, 1, 1)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.text(
+            0.5, 0.5,
+            "Run the filter in\n"
+            "'Exact IMM – H5 required' mode\n"
+            "to display the trajectory\n"
+            r"$\mathbb{E}[y_{n+1} \mid r_n,\; r_{n+1},\; y_n]$",
+            transform=ax.transAxes, ha="center", va="center",
+            fontsize=11, color="#999999", style="italic",
+        )
+        ax.grid(True, linestyle=":", alpha=0.3)
+        self._canvas_traj_raw.draw_idle()
+
+    # ------------------------------------------------------------------
+    # Sous-onglet 2 : Densité
     # ------------------------------------------------------------------
 
     def _refresh_density(self) -> None:
@@ -801,7 +932,7 @@ class PredYPanel(QWidget):
         left_h  = [line1];              left_l  = [rf"$p_1$ H5 exact   $\mu_1={m1:.4g}$"]
         right_h = [env1];               right_l = [rf"$\pm 2\sigma_1={sig1:.4g}$"]
         if has2:
-            left_h  += [line2];         left_l  += [rf"$p_2$ approx.   $\mu_2={m2:.4g}$"]
+            left_h  += [line2];         left_l  += [rf"$p_2$ éq. (f)   $\mu_2={m2:.4g}$"]
             right_h += [env2];          right_l += [rf"$\pm 2\sigma_2={sig2:.4g}$"]
         if yn_line is not None:
             left_h  += [yn_line];       left_l  += [rf"$y^0 = {yn_val:.4g}$"]

@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import QApplication
 
 from prg.gui.main_window import GSSMainWindow
 from prg.models.base_gss_model import BaseGSSModel
+from prg.models.presets import PRESETS
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +73,15 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"[ERROR] Could not load model '{args.model}': {exc}", file=sys.stderr)
             sys.exit(1)
+    else:
+        # No model specified → load the Reference preset (K=2, q=1, s=1) by default
+        try:
+            model = PRESETS[0].load()
+            p = model.get_params()
+            K, q, s = p["K"], p["q"], p["s"]
+            P = np.asarray(p["P"]) if p.get("P") is not None else None
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WARNING] Could not load default preset: {exc}", file=sys.stderr)
 
     app = QApplication(sys.argv)
     app.setApplicationName("FofGss Simulator")

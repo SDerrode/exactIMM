@@ -1012,9 +1012,10 @@ class _FilterWorker(QThread):
                 self.cond_moments["S_YY"] = filt._S_YY    # [K] ndarray (s,s)
 
             if hasattr(filt, "_mu_Y_jk"):
-                # ── h5_exact: Signal 2 + PredY panel moments ─────────────────
-                # μ₂(j,k) = b_Y(k) + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n
-                # Γ₂(j,k) = Σ_{V,k} + C_k (Σ_{U,j} − Δ_j Σ_{V,j}^{-1} Δ_j^T) C_k^T
+                # ── h5_exact: Signal 2 — exact Markov transition density ──────
+                # Per the Markovianité Proposition (formulas (f) and (h)):
+                #   μ₂(j,k) = b_Y(k) + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n      (f)
+                #   Γ₂(j,k) = Σ_{V,k} + C_k (Σ_{U,j} − Δ_j Σ_{V,j}^{-1} Δ_j^T) C_k^T  (h)
                 p   = self._params
                 K, q = p.K, p.q
                 nc  = p.noise_cov
@@ -1278,7 +1279,7 @@ class GSSMainWindow(QMainWindow):
         mode_row.addWidget(QLabel("Filter mode:"))
         self._mode_combo = QComboBox()
         self._mode_combo.addItem("Approximate IMM - H5 not required", "imm_general")
-        self._mode_combo.addItem("Exact IMM - H5 required",          "h5_exact")
+        self._mode_combo.addItem("fofgss - Exact IMM - H5 required",  "h5_exact")
         self._mode_combo.setToolTip(
             "Approximate IMM — per-step moment propagation from the filtered π_n.\n"
             "               Works for any GSS model, with or without (H5)\n"
@@ -1555,13 +1556,29 @@ class GSSMainWindow(QMainWindow):
         self._build_menu_bar()
         self._build_status_bar()
 
-        # If a model was passed, load its F and Σ_W
+        # If a model was passed, load its F and Σ_W, and select it in the combobox
+        _preset_loaded = False
         if model is not None:
             self._load_model(model)
+            cls_name = type(model).__name__
+            for idx, entry in enumerate(self._presets, start=1):
+                if entry.class_name == cls_name:
+                    self._preset_combo.setCurrentIndex(idx)
+                    _preset_loaded = True
+                    break
 
         self._refresh_simulate_button()
         self._load_settings()
         self._refresh_session_summary()
+
+        # When a preset is loaded at startup: activate B constraints on all states
+        # and ensure h5_exact is the active filter mode.
+        if _preset_loaded:
+            for tab in self._param_panel._state_tabs:
+                tab.apply_constraint("B", tab.get_delta_active())
+            idx_h5 = self._mode_combo.findData("h5_exact")
+            if idx_h5 >= 0:
+                self._mode_combo.setCurrentIndex(idx_h5)
 
     # ------------------------------------------------------------------
     # Slots
@@ -2359,6 +2376,12 @@ class GSSMainWindow(QMainWindow):
             for k in range(K):
                 self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k),
                                                    mu_list[k], b_list[k])
+
+            # Re-apply any active H5 / Δ=0 constraints to the newly loaded
+            # parameter values.  The ParamPanel signals are still blocked here,
+            # so constraint_toggled cannot propagate to _on_reset.
+            self._param_panel.reapply_active_constraints()
+
             self._P = P
             self._p_widget.set_matrix(self._P)
             self._update_stationary_display()
@@ -2779,7 +2802,7 @@ class GSSMainWindow(QMainWindow):
             self._seed_edit.setText(str(seed))
         self._auto_filter_check.setChecked(s.value("auto_filter", False, type=bool))
         self._joseph_check.setChecked(s.value("joseph", False, type=bool))
-        saved_mode = s.value("filter_mode", "imm_general")
+        saved_mode = s.value("filter_mode", "h5_exact")
         idx = self._mode_combo.findData(saved_mode)
         if idx >= 0:
             self._mode_combo.setCurrentIndex(idx)

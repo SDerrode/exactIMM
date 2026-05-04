@@ -864,6 +864,21 @@ class ParamPanel(QWidget):
     def is_valid(self) -> bool:
         return all(tab.is_valid() for tab in self._state_tabs)
 
+    def reapply_active_constraints(self) -> None:
+        """Re-evaluate all active H5 and Δ=0 constraints on each state tab.
+
+        Call this after loading external parameter values (e.g. session restore)
+        to ensure that any checked constraint boxes are re-projected onto the
+        new matrix values.  Does **not** emit ``constraint_toggled``, so no
+        simulation reset is triggered.
+        """
+        for tab in self._state_tabs:
+            if tab.get_delta_active():
+                # _recompute_delta already calls _retrigger_h5 internally
+                tab._recompute_delta()
+            else:
+                tab._retrigger_h5()
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

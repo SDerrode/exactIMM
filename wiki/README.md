@@ -15,33 +15,19 @@ These markdown files are the source for the project's GitHub Wiki.
 ## Pushing to the GitHub Wiki
 
 GitHub stores wikis in a *separate* git repository at
-`<repo>.wiki.git`. To sync the markdown sources here to the wiki:
+`<repo>.wiki.git`. The helper script `scripts/sync_wiki.sh` clones (or
+pulls) `../exactIMM.wiki/`, rsyncs the markdown sources into it
+(safely — preserves the wiki's `.git/`), commits and pushes:
 
 ```bash
-# One-time: clone the wiki next to the main repo
-cd ..
-git clone https://github.com/SDerrode/exactIMM.wiki.git
-
-# Each time you update wiki/*.md, rsync and push.
-# IMPORTANT: --exclude='.git/' is required — without it, rsync --delete
-# would wipe the wiki repo's .git/ directory (destination matches source,
-# and the local wiki/ source has no .git/). --exclude='.gitignore' keeps
-# the wiki free of a file that's only meaningful in the main repo.
-WIKI_DIR=exactIMM.wiki
-# Guard: re-clone if the directory exists but its .git/ is missing
-# (e.g. wiped by a previous bad rsync).
-if [ -d "$WIKI_DIR" ] && [ ! -d "$WIKI_DIR/.git" ]; then
-    rm -rf "$WIKI_DIR"
-    git clone https://github.com/SDerrode/exactIMM.wiki.git "$WIKI_DIR"
-fi
-rsync -av --delete \
-    --exclude='.git/' \
-    --exclude='.gitignore' \
-    --exclude='README.md' \
-    exactIMM/wiki/ "$WIKI_DIR/"
-cd "$WIKI_DIR"
-git add . && git commit -m "Update wiki" && git push
+./scripts/sync_wiki.sh             # sync + push
+./scripts/sync_wiki.sh --dry-run   # preview what would change
 ```
+
+Bootstrapping (first time only): the wiki repo must exist on GitHub.
+If you've never opened it, visit
+<https://github.com/SDerrode/exactIMM/wiki>, click *Create the first
+page*, save any placeholder, then run the script.
 
 If you prefer not to maintain a wiki, you can simply delete the
 `wiki/` directory; everything important is also in the main `README.md`.

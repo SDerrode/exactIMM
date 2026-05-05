@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/experiments/run_real_data.py
 =================================
@@ -50,7 +49,7 @@ import json
 import sys
 import time
 import warnings
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 from itertools import permutations
 from pathlib import Path
 
@@ -64,16 +63,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from prg.filter.gss_filter import GSSFilter           # noqa: E402
-from prg.learning.supervised import fit_supervised    # noqa: E402
-from prg.learning.semi_supervised import fit_semi_supervised  # noqa: E402
-from params_utils import params_from_dict             # noqa: E402
 from baselines.kalman_single import SingleKalmanFilter  # noqa: E402
+from params_utils import params_from_dict  # noqa: E402
+
+from prg.filter.gss_filter import GSSFilter  # noqa: E402
+from prg.learning.semi_supervised import fit_semi_supervised  # noqa: E402
+from prg.learning.supervised import fit_supervised  # noqa: E402
 
 DEFAULT_CSV = ROOT / "data/real/enso_sst.csv"
 DEFAULT_OUT = ROOT / "results/enso"
 DEFAULT_FIG_DIR = ROOT / "paper" / "figures" / "generated"
-TRAIN_END   = pd.Timestamp("2010-12-01")
+TRAIN_END = pd.Timestamp("2010-12-01")
 REGIME_NAMES = ("La Niña", "Neutral", "El Niño")
 
 
@@ -90,11 +90,12 @@ def load_enso(csv_path: Path, train_end: pd.Timestamp = TRAIN_END):
     rs = df["regime"].to_numpy().astype(int)
     n_tr = int((df.index <= train_end).sum())
     return {
-        "df":      df,
-        "xs":      xs, "ys": ys, "rs": rs,
+        "df": df,
+        "xs": xs,
+        "ys": ys,
+        "rs": rs,
         "n_train": n_tr,
-        "stats":   {"x": (float(mu_x), float(sd_x)),
-                    "y": (float(mu_y), float(sd_y))},
+        "stats": {"x": (float(mu_x), float(sd_x)), "y": (float(mu_y), float(sd_y))},
     }
 
 
@@ -124,9 +125,9 @@ def fisher_B_zero(xs, ys, rs, k):
 
 
 def run_e1(data, K=3):
-    xs_tr = data["xs"][:data["n_train"]]
-    ys_tr = data["ys"][:data["n_train"]]
-    rs_tr = data["rs"][:data["n_train"]]
+    xs_tr = data["xs"][: data["n_train"]]
+    ys_tr = data["ys"][: data["n_train"]]
+    rs_tr = data["rs"][: data["n_train"]]
 
     fit_raw = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint=None)
     rows = []
@@ -134,15 +135,17 @@ def run_e1(data, K=3):
         B = fit_raw["B_list"][k]
         F, p, dfr = fisher_B_zero(xs_tr, ys_tr, rs_tr, k)
         n_k = int(np.sum(rs_tr[1:] == k))
-        rows.append({
-            "k":       k,
-            "regime":  REGIME_NAMES[k],
-            "n_k":     n_k,
-            "B":       float(np.atleast_2d(B).ravel()[0]),
-            "B_fro":   float(np.linalg.norm(B, ord="fro")),
-            "F":       F,
-            "p_value": p,
-        })
+        rows.append(
+            {
+                "k": k,
+                "regime": REGIME_NAMES[k],
+                "n_k": n_k,
+                "B": float(np.atleast_2d(B).ravel()[0]),
+                "B_fro": float(np.linalg.norm(B, ord="fro")),
+                "F": F,
+                "p_value": p,
+            }
+        )
     return {"K": K, "n_train": int(rs_tr.size), "rows": rows}
 
 
@@ -151,18 +154,20 @@ def run_e1(data, K=3):
 # ---------------------------------------------------------------------------
 @dataclass
 class FilterScore:
-    name:        str
-    log_lik:     float
+    name: str
+    log_lik: float
     nll_per_obs: float
-    mse_x:       float
-    time_s:      float
+    mse_x: float
+    time_s: float
 
 
 def run_filter(name, filt, xs_te, ys_te, store=None):
     t0 = time.perf_counter()
-    N = len(ys_te); ll = 0.0; sse = 0.0
+    N = len(ys_te)
+    ll = 0.0
+    sse = 0.0
     x_hat = np.empty(N)
-    pi_n  = []
+    pi_n = []
     for i, y in enumerate(ys_te):
         r = filt.step(np.asarray(y, dtype=float).reshape(-1, 1))
         x_hat[i] = float(r.E_x.ravel()[0])
@@ -179,32 +184,37 @@ def run_filter(name, filt, xs_te, ys_te, store=None):
 
 def run_e2(data, K=3):
     n_tr = data["n_train"]
-    xs_tr, ys_tr, rs_tr = (data["xs"][:n_tr], data["ys"][:n_tr],
-                            data["rs"][:n_tr])
+    xs_tr, ys_tr, rs_tr = (data["xs"][:n_tr], data["ys"][:n_tr], data["rs"][:n_tr])
     xs_te, ys_te = data["xs"][n_tr:], data["ys"][n_tr:]
 
     fit_raw = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint=None)
-    fit_h5  = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint="b")
+    fit_h5 = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint="b")
     p_raw = params_from_dict(fit_raw)
-    p_h5  = params_from_dict(fit_h5)
+    p_h5 = params_from_dict(fit_h5)
 
     traces = {}
     scores = []
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        scores.append(run_filter("h5_exact_h5fit", GSSFilter(p_h5,  mode="h5_exact"),
-                                  xs_te, ys_te, traces))
-    scores.append(run_filter("imm_general_olsfit",
-                              GSSFilter(p_raw, mode="imm_general"),
-                              xs_te, ys_te, traces))
-    scores.append(run_filter("imm_general_h5fit",
-                              GSSFilter(p_h5,  mode="imm_general"),
-                              xs_te, ys_te, traces))
+        scores.append(
+            run_filter("h5_exact_h5fit", GSSFilter(p_h5, mode="h5_exact"), xs_te, ys_te, traces)
+        )
+    scores.append(
+        run_filter("imm_general_olsfit", GSSFilter(p_raw, mode="imm_general"), xs_te, ys_te, traces)
+    )
+    scores.append(
+        run_filter("imm_general_h5fit", GSSFilter(p_h5, mode="imm_general"), xs_te, ys_te, traces)
+    )
     kf = SingleKalmanFilter.from_regressed(xs_tr, ys_tr)
     scores.append(run_filter("kalman_k1", kf, xs_te, ys_te, traces))
 
-    return {"K": K, "scores": [asdict(s) for s in scores], "traces": traces,
-            "fit_raw": fit_raw, "fit_h5": fit_h5}
+    return {
+        "K": K,
+        "scores": [asdict(s) for s in scores],
+        "traces": traces,
+        "fit_raw": fit_raw,
+        "fit_h5": fit_h5,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -212,14 +222,15 @@ def run_e2(data, K=3):
 # ---------------------------------------------------------------------------
 EM_VARIANTS = [
     ("V0_unconstrained", dict(constraint=None, constraint_each_iter=False)),
-    ("V1_posthoc_B",     dict(constraint="b",  constraint_each_iter=False)),
-    ("V2_posthoc_A",     dict(constraint="a",  constraint_each_iter=False)),
-    ("V3_GEM_B",         dict(constraint="b",  constraint_each_iter=True)),
+    ("V1_posthoc_B", dict(constraint="b", constraint_each_iter=False)),
+    ("V2_posthoc_A", dict(constraint="a", constraint_each_iter=False)),
+    ("V3_GEM_B", dict(constraint="b", constraint_each_iter=True)),
 ]
 
 
 def best_perm_acc_ari(r_hat, r_true, K):
-    best_acc = -1.0; best_perm_arr = None
+    best_acc = -1.0
+    best_perm_arr = None
     for p in permutations(range(K)):
         pa = np.array(p)
         a = float(np.mean(pa[r_hat] == r_true))
@@ -232,8 +243,7 @@ def best_perm_acc_ari(r_hat, r_true, K):
 def run_e3(data, K=3, n_inits=5, max_iter=50, seed=42):
     n_tr = data["n_train"]
     xs_tr, ys_tr = data["xs"][:n_tr], data["ys"][:n_tr]
-    xs_te, ys_te, rs_te = (data["xs"][n_tr:], data["ys"][n_tr:],
-                            data["rs"][n_tr:])
+    xs_te, ys_te, rs_te = (data["xs"][n_tr:], data["ys"][n_tr:], data["rs"][n_tr:])
 
     out = []
     pi_test_per_variant = {}
@@ -242,17 +252,23 @@ def run_e3(data, K=3, n_inits=5, max_iter=50, seed=42):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             params, info = fit_semi_supervised(
-                xs_tr, ys_tr, K=K,
+                xs_tr,
+                ys_tr,
+                K=K,
                 constraint=cfg["constraint"],
                 constraint_each_iter=cfg["constraint_each_iter"],
-                n_inits=n_inits, max_iter=max_iter, seed=seed, verbose=False,
+                n_inits=n_inits,
+                max_iter=max_iter,
+                seed=seed,
+                verbose=False,
             )
         dt = time.perf_counter() - t0
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             f = GSSFilter(params_from_dict(params), mode="imm_general")
-            ll = 0.0; sse = 0.0
+            ll = 0.0
+            sse = 0.0
             pi_n = np.empty((len(ys_te), K))
             for i, y in enumerate(ys_te):
                 r = f.step(np.asarray(y, dtype=float).reshape(-1, 1))
@@ -265,21 +281,29 @@ def run_e3(data, K=3, n_inits=5, max_iter=50, seed=42):
         acc, ari, _ = best_perm_acc_ari(r_hat, rs_te, K)
         pi_test_per_variant[name] = pi_n
 
-        out.append({
-            "name":      name,
-            "train_LL":  float(info["best_log_lik"]),
-            "test_LL":   float(ll),
-            "test_NLL_per_obs": float(-ll / len(ys_te)),
-            "test_MSE":  float(sse / len(ys_te)),
-            "acc":       acc,
-            "ARI":       ari,
-            "n_iter":    int(info["best_n_iter"]),
-            "converged": bool(info["best_converged"]),
-            "time_s":    dt,
-            "all_train_LLs": [float(x) for x in info["all_log_liks"]],
-        })
-    return {"K": K, "n_inits": n_inits, "max_iter": max_iter, "seed": seed,
-            "variants": out, "pi_test": pi_test_per_variant}
+        out.append(
+            {
+                "name": name,
+                "train_LL": float(info["best_log_lik"]),
+                "test_LL": float(ll),
+                "test_NLL_per_obs": float(-ll / len(ys_te)),
+                "test_MSE": float(sse / len(ys_te)),
+                "acc": acc,
+                "ARI": ari,
+                "n_iter": int(info["best_n_iter"]),
+                "converged": bool(info["best_converged"]),
+                "time_s": dt,
+                "all_train_LLs": [float(x) for x in info["all_log_liks"]],
+            }
+        )
+    return {
+        "K": K,
+        "n_inits": n_inits,
+        "max_iter": max_iter,
+        "seed": seed,
+        "variants": out,
+        "pi_test": pi_test_per_variant,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -287,21 +311,25 @@ def run_e3(data, K=3, n_inits=5, max_iter=50, seed=42):
 # ---------------------------------------------------------------------------
 def _write_table(path, caption, label, col_spec, header, rows):
     """Write a self-contained \\begin{table}...\\end{table} block."""
-    lines = [
-        r"\begin{table}[ht]",
-        r"  \caption{" + caption + "}",
-        r"  \label{" + label + "}",
-        r"  \centering\small",
-        r"  \renewcommand{\arraystretch}{1.2}",
-        r"  \begin{tabular}{@{}" + col_spec + r"@{}}",
-        r"    \toprule",
-        "    " + header + r" \\",
-        r"    \midrule",
-    ] + ["    " + r for r in rows] + [
-        r"    \bottomrule",
-        r"  \end{tabular}",
-        r"\end{table}",
-    ]
+    lines = (
+        [
+            r"\begin{table}[ht]",
+            r"  \caption{" + caption + "}",
+            r"  \label{" + label + "}",
+            r"  \centering\small",
+            r"  \renewcommand{\arraystretch}{1.2}",
+            r"  \begin{tabular}{@{}" + col_spec + r"@{}}",
+            r"    \toprule",
+            "    " + header + r" \\",
+            r"    \midrule",
+        ]
+        + ["    " + r for r in rows]
+        + [
+            r"    \bottomrule",
+            r"  \end{tabular}",
+            r"\end{table}",
+        ]
+    )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -312,10 +340,13 @@ def emit_e1_tex(res, path):
         if p < 1e-4:
             return r"$<\!10^{-4}$"
         return f"{p:.3f}"
+
     rows = []
     for r in res["rows"]:
-        rows.append(f"{r['regime']} & {r['n_k']} & {r['B']:+.4f} & "
-                    f"{r['B_fro']:.4f} & {fp(r['p_value'])} \\\\")
+        rows.append(
+            f"{r['regime']} & {r['n_k']} & {r['B']:+.4f} & "
+            f"{r['B_fro']:.4f} & {fp(r['p_value'])} \\\\"
+        )
     cap = (
         r"Empirical test of (H5) on the ENSO training period"
         r" (1950--2010, 732 months). $B(k)$ is the unconstrained OLS"
@@ -323,23 +354,30 @@ def emit_e1_tex(res, path):
         r" and $p$-value is for $H_0:B(k)=0$ via a nested-model"
         r" Fisher $F$-test."
     )
-    _write_table(path, cap, "tab:enso_h5_test", "lrrrr",
-                 r"Regime & $n_k$ & $B(k)$ & $\|B(k)\|_F$ & $p$-value",
-                 rows)
+    _write_table(
+        path,
+        cap,
+        "tab:enso_h5_test",
+        "lrrrr",
+        r"Regime & $n_k$ & $B(k)$ & $\|B(k)\|_F$ & $p$-value",
+        rows,
+    )
 
 
 def emit_e2_tex(res, path):
     label = {
-        "h5_exact_h5fit":      "H5-exact (H5 fit)",
-        "imm_general_olsfit":  "IMM-general (OLS fit)",
-        "imm_general_h5fit":   "IMM-general (H5 fit)",
-        "kalman_k1":           "Kalman $K=1$",
+        "h5_exact_h5fit": "H5-exact (H5 fit)",
+        "imm_general_olsfit": "IMM-general (OLS fit)",
+        "imm_general_h5fit": "IMM-general (H5 fit)",
+        "kalman_k1": "Kalman $K=1$",
     }
     rows = []
     for s in res["scores"]:
-        rows.append(f"{label[s['name']]} & {s['log_lik']:+.2f} & "
-                    f"{s['nll_per_obs']:+.4f} & {s['mse_x']:.4f} & "
-                    f"{s['time_s']:.2f} \\\\")
+        rows.append(
+            f"{label[s['name']]} & {s['log_lik']:+.2f} & "
+            f"{s['nll_per_obs']:+.4f} & {s['mse_x']:.4f} & "
+            f"{s['time_s']:.2f} \\\\"
+        )
     cap = (
         r"Filter comparison on the ENSO test period"
         r" (2011-01 to 2026-02, 182 months)."
@@ -349,17 +387,22 @@ def emit_e2_tex(res, path):
         r" log-likelihood, NLL/obs $= -\log\hat L / N_{\rm test}$;"
         r" MSE is computed on $X$ (Niño~1+2)."
     )
-    _write_table(path, cap, "tab:enso_filter", "lrrrr",
-                 r"Filter & $\log\hat L$ & NLL/obs & MSE $X$ & time (s)",
-                 rows)
+    _write_table(
+        path,
+        cap,
+        "tab:enso_filter",
+        "lrrrr",
+        r"Filter & $\log\hat L$ & NLL/obs & MSE $X$ & time (s)",
+        rows,
+    )
 
 
 def emit_e3_tex(res, path):
     label = {
         "V0_unconstrained": "V0 unconstrained",
-        "V1_posthoc_B":     r"V1 post-hoc $\tau=B$",
-        "V2_posthoc_A":     r"V2 post-hoc $\tau=A^\dagger$",
-        "V3_GEM_B":         r"V3 GEM $\tau=B$",
+        "V1_posthoc_B": r"V1 post-hoc $\tau=B$",
+        "V2_posthoc_A": r"V2 post-hoc $\tau=A^\dagger$",
+        "V3_GEM_B": r"V3 GEM $\tau=B$",
     }
     rows = []
     for v in res["variants"]:
@@ -371,9 +414,11 @@ def emit_e3_tex(res, path):
         else:
             mse_str = f"{mse:.4f}"
             nll_str = f"{nll:+.4f}"
-        rows.append(f"{label[v['name']]} & {v['train_LL']:+.1f} & "
-                    f"{nll_str} & {mse_str} & "
-                    f"{v['acc']:.3f} & {v['ARI']:+.3f} \\\\")
+        rows.append(
+            f"{label[v['name']]} & {v['train_LL']:+.1f} & "
+            f"{nll_str} & {mse_str} & "
+            f"{v['acc']:.3f} & {v['ARI']:+.3f} \\\\"
+        )
     cap = (
         r"Semi-supervised EM variants on ENSO"
         r" ($K=3$, $n_{\mathrm{init}}=5$, $I_{\max}=50$)."
@@ -385,10 +430,15 @@ def emit_e3_tex(res, path):
         r" ($G=PM^{-1}Q-\Delta^T$ ill-conditioned), as documented"
         r" already in the simulation study (Table~\ref{tab:supervised_M1})."
     )
-    _write_table(path, cap, "tab:enso_em", "lrrrrr",
-                 r"Variant & train $\log\hat L$ & test NLL/obs & "
-                 r"test MSE $X$ & acc($R$) & ARI($R$)",
-                 rows)
+    _write_table(
+        path,
+        cap,
+        "tab:enso_em",
+        "lrrrrr",
+        r"Variant & train $\log\hat L$ & test NLL/obs & "
+        r"test MSE $X$ & acc($R$) & ARI($R$)",
+        rows,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -401,14 +451,17 @@ def main():
     )
     p.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     p.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
-    p.add_argument("--fig-dir", type=Path, default=DEFAULT_FIG_DIR,
-                   help="Where to write LaTeX tables for paper inclusion.")
+    p.add_argument(
+        "--fig-dir",
+        type=Path,
+        default=DEFAULT_FIG_DIR,
+        help="Where to write LaTeX tables for paper inclusion.",
+    )
     p.add_argument("--K", type=int, default=3)
     p.add_argument("--n-inits", type=int, default=5)
     p.add_argument("--max-iter", type=int, default=50)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--skip", choices=["e1", "e2", "e3"], action="append",
-                   default=[])
+    p.add_argument("--skip", choices=["e1", "e2", "e3"], action="append", default=[])
     args = p.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -416,70 +469,78 @@ def main():
     print(f"Loading: {args.csv}")
     data = load_enso(args.csv)
     print(f"  n_train = {data['n_train']}, n_test = {len(data['xs']) - data['n_train']}")
-    print(f"  X = std Niño 1+2  Y = std Niño 3.4")
+    print("  X = std Niño 1+2  Y = std Niño 3.4")
 
     # ------------- E1 -------------
     if "e1" not in args.skip:
         print("\n=== E1 — Empirical (H5) test ===")
         e1 = run_e1(data, K=args.K)
         for r in e1["rows"]:
-            p_str = f"{r['p_value']:.3g}" if not np.isnan(r['p_value']) else "n/a"
-            print(f"  {r['regime']:<8s} n={r['n_k']:>4d}  "
-                  f"B={r['B']:+.4f}  ||B||={r['B_fro']:.4f}  "
-                  f"F={r['F']:>6.2f}  p={p_str}")
-        (args.out_dir / "e1_table.json").write_text(
-            json.dumps(e1, indent=2), encoding="utf-8")
+            p_str = f"{r['p_value']:.3g}" if not np.isnan(r["p_value"]) else "n/a"
+            print(
+                f"  {r['regime']:<8s} n={r['n_k']:>4d}  "
+                f"B={r['B']:+.4f}  ||B||={r['B_fro']:.4f}  "
+                f"F={r['F']:>6.2f}  p={p_str}"
+            )
+        (args.out_dir / "e1_table.json").write_text(json.dumps(e1, indent=2), encoding="utf-8")
         emit_e1_tex(e1, args.fig_dir / "tab_enso_h5_test.tex")
-        print(f"  saved {args.fig_dir/'tab_enso_h5_test.tex'}")
+        print(f"  saved {args.fig_dir / 'tab_enso_h5_test.tex'}")
 
     # ------------- E2 -------------
     if "e2" not in args.skip:
         print("\n=== E2 — Filter comparison ===")
         e2 = run_e2(data, K=args.K)
         for s in e2["scores"]:
-            print(f"  {s['name']:25s}  logL={s['log_lik']:>+9.2f}  "
-                  f"NLL/obs={s['nll_per_obs']:+.4f}  MSE={s['mse_x']:.4f}  "
-                  f"t={s['time_s']:.2f}s")
+            print(
+                f"  {s['name']:25s}  logL={s['log_lik']:>+9.2f}  "
+                f"NLL/obs={s['nll_per_obs']:+.4f}  MSE={s['mse_x']:.4f}  "
+                f"t={s['time_s']:.2f}s"
+            )
         # Persist
         e2_serial = {"K": e2["K"], "scores": e2["scores"]}
         (args.out_dir / "e2_table.json").write_text(
-            json.dumps(e2_serial, indent=2), encoding="utf-8")
+            json.dumps(e2_serial, indent=2), encoding="utf-8"
+        )
         emit_e2_tex(e2, args.fig_dir / "tab_enso_filter.tex")
-        print(f"  saved {args.fig_dir/'tab_enso_filter.tex'}")
+        print(f"  saved {args.fig_dir / 'tab_enso_filter.tex'}")
 
     # ------------- E3 -------------
     if "e3" not in args.skip:
-        print(f"\n=== E3 — Semi-supervised EM (n_inits={args.n_inits}, "
-              f"max_iter={args.max_iter}) ===")
-        e3 = run_e3(data, K=args.K, n_inits=args.n_inits,
-                    max_iter=args.max_iter, seed=args.seed)
+        print(
+            f"\n=== E3 — Semi-supervised EM (n_inits={args.n_inits}, max_iter={args.max_iter}) ==="
+        )
+        e3 = run_e3(data, K=args.K, n_inits=args.n_inits, max_iter=args.max_iter, seed=args.seed)
         for v in e3["variants"]:
-            mse_str = (f"{v['test_MSE']:.4f}"
-                       if abs(v['test_MSE']) < 1e6 else f"{v['test_MSE']:.2e}")
-            print(f"  {v['name']:18s}  train_LL={v['train_LL']:>+9.1f}  "
-                  f"test_LL={v['test_LL']:>+9.2f}  "
-                  f"MSE={mse_str:>12s}  "
-                  f"acc={v['acc']:.3f}  ARI={v['ARI']:+.3f}  "
-                  f"t={v['time_s']:.1f}s")
+            mse_str = f"{v['test_MSE']:.4f}" if abs(v["test_MSE"]) < 1e6 else f"{v['test_MSE']:.2e}"
+            print(
+                f"  {v['name']:18s}  train_LL={v['train_LL']:>+9.1f}  "
+                f"test_LL={v['test_LL']:>+9.2f}  "
+                f"MSE={mse_str:>12s}  "
+                f"acc={v['acc']:.3f}  ARI={v['ARI']:+.3f}  "
+                f"t={v['time_s']:.1f}s"
+            )
 
         e3_serial = {k: v for k, v in e3.items() if k != "pi_test"}
         (args.out_dir / "e3_table.json").write_text(
-            json.dumps(e3_serial, indent=2), encoding="utf-8")
+            json.dumps(e3_serial, indent=2), encoding="utf-8"
+        )
         emit_e3_tex(e3, args.fig_dir / "tab_enso_em.tex")
-        print(f"  saved {args.fig_dir/'tab_enso_em.tex'}")
+        print(f"  saved {args.fig_dir / 'tab_enso_em.tex'}")
 
         # Regime trace CSV (only for finite-MSE variants)
         n_tr = data["n_train"]
         test_dates = data["df"].index[n_tr:]
-        rows = {"date": test_dates,
-                "x_true": data["xs"][n_tr:, 0],
-                "y_obs":  data["ys"][n_tr:, 0],
-                "r_true": data["rs"][n_tr:]}
+        rows = {
+            "date": test_dates,
+            "x_true": data["xs"][n_tr:, 0],
+            "y_obs": data["ys"][n_tr:, 0],
+            "r_true": data["rs"][n_tr:],
+        }
         for name, pi in e3["pi_test"].items():
             for k in range(args.K):
                 rows[f"{name}_pi{k}"] = pi[:, k]
         pd.DataFrame(rows).to_csv(args.out_dir / "regime_trace.csv", index=False)
-        print(f"  saved {args.out_dir/'regime_trace.csv'}")
+        print(f"  saved {args.out_dir / 'regime_trace.csv'}")
 
     print("\nAll done.")
 

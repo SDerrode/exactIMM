@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 tests/test_supervised.py
 ========================
@@ -22,8 +21,6 @@ from __future__ import annotations
 import importlib
 import pathlib
 import sys
-import tempfile
-import textwrap
 
 import numpy as np
 import pytest
@@ -41,7 +38,6 @@ from prg.learning.supervised import (
     fit_supervised,
 )
 from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -65,6 +61,7 @@ def simulated_csv(params_k2q1s1, tmp_path_factory) -> pathlib.Path:
 def fitted_params(simulated_csv) -> dict:
     """Fit (no constraint) from the shared CSV; reused across tests."""
     from prg.learning.supervised import _read_csv as rc
+
     rs, xs, ys, K, q, s = rc(simulated_csv)
     return fit_supervised(rs, xs, ys, K, q, s)
 
@@ -119,9 +116,7 @@ class TestReadCSV:
         """q=2, s=2 CSV is parsed correctly."""
         p = tmp_path / "multi.csv"
         p.write_text(
-            "n,r,x_0,x_1,y_0,y_1\n"
-            "0,0,1.0,2.0,3.0,4.0\n"
-            "1,1,5.0,6.0,7.0,8.0\n",
+            "n,r,x_0,x_1,y_0,y_1\n0,0,1.0,2.0,3.0,4.0\n1,1,5.0,6.0,7.0,8.0\n",
             encoding="utf-8",
         )
         rs, xs, ys, K, q, s = _read_csv(p)
@@ -142,11 +137,11 @@ class TestNearestSPD:
         np.testing.assert_allclose(R, M, atol=1e-10)
 
     def test_fixes_non_spd(self):
-        M = np.array([[1.0, 2.0], [2.0, 1.0]])   # not PD
+        M = np.array([[1.0, 2.0], [2.0, 1.0]])  # not PD
         R = _nearest_spd(M)
         # Must be symmetric and positive definite
         np.testing.assert_allclose(R, R.T, atol=1e-12)
-        np.linalg.cholesky(R)   # raises if not PD
+        np.linalg.cholesky(R)  # raises if not PD
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +210,7 @@ class TestFitRegime:
     def test_constraint_b(self, noise_free_data):
         """After constraint='b', the H5 equation should be satisfied."""
         from prg.utils.h5_constraint import compute_B_from_h5
+
         Z_curr, Z_next, q, s, _, _ = noise_free_data
         A, B, C, D, SU, Dt, SV, _ = _fit_regime(
             Z_curr, Z_next, q, s, constraint="b", delta_zero=False
@@ -231,10 +227,21 @@ class TestFitRegime:
 class TestFitSupervised:
     def test_output_keys(self, fitted_params):
         expected = {
-            "K", "q", "s", "P",
-            "A_list", "B_list", "C_list", "D_list",
-            "Sigma_U_list", "Delta_list", "Sigma_V_list",
-            "pi0", "mu_z0_list", "Sigma_z0_list", "b_list",
+            "K",
+            "q",
+            "s",
+            "P",
+            "A_list",
+            "B_list",
+            "C_list",
+            "D_list",
+            "Sigma_U_list",
+            "Delta_list",
+            "Sigma_V_list",
+            "pi0",
+            "mu_z0_list",
+            "Sigma_z0_list",
+            "b_list",
         }
         assert set(fitted_params.keys()) == expected
 
@@ -243,9 +250,18 @@ class TestFitSupervised:
         assert K == 2
         assert q == 1
         assert s == 1
-        for lst in ("A_list", "B_list", "C_list", "D_list",
-                    "Sigma_U_list", "Delta_list", "Sigma_V_list",
-                    "mu_z0_list", "Sigma_z0_list", "b_list"):
+        for lst in (
+            "A_list",
+            "B_list",
+            "C_list",
+            "D_list",
+            "Sigma_U_list",
+            "Delta_list",
+            "Sigma_V_list",
+            "mu_z0_list",
+            "Sigma_z0_list",
+            "b_list",
+        ):
             assert len(fitted_params[lst]) == K, f"{lst} length != K"
 
     def test_P_row_stochastic(self, fitted_params):
@@ -256,7 +272,7 @@ class TestFitSupervised:
 
     def test_Sigma_U_spd(self, fitted_params):
         for k, SU in enumerate(fitted_params["Sigma_U_list"]):
-            np.linalg.cholesky(SU)   # raises if not PD
+            np.linalg.cholesky(SU)  # raises if not PD
 
     def test_Sigma_V_spd(self, fitted_params):
         for k, SV in enumerate(fitted_params["Sigma_V_list"]):
@@ -288,7 +304,7 @@ class TestFitSupervised:
         lines = ["n,r,x_0,y_0"]
         for i in range(N - 1):
             lines.append(f"{i},0,{float(i):.1f},{float(i):.1f}")
-        lines.append(f"{N-1},1,{float(N-1):.1f},{float(N-1):.1f}")
+        lines.append(f"{N - 1},1,{float(N - 1):.1f},{float(N - 1):.1f}")
         p.write_text("\n".join(lines), encoding="utf-8")
         rs, xs, ys, K, q, s = _read_csv(p)
         with pytest.raises(ValueError, match="source"):
@@ -303,6 +319,7 @@ class TestFitSupervised:
     def test_constraint_b(self, simulated_csv):
         """Estimated B(k) should satisfy the H5 constraint."""
         from prg.utils.h5_constraint import compute_B_from_h5
+
         rs, xs, ys, K, q, s = _read_csv(simulated_csv)
         params = fit_supervised(rs, xs, ys, K, q, s, constraint="b")
         for k in range(K):
@@ -326,7 +343,7 @@ class TestFitSupervised:
 
         true_A = [params_k2q1s1.f_matrix.A(k) for k in range(K)]
         # sort by diagonal entry to align regimes
-        est_A  = sorted(est["A_list"],  key=lambda m: m[0, 0])
+        est_A = sorted(est["A_list"], key=lambda m: m[0, 0])
         true_A = sorted(true_A, key=lambda m: m[0, 0])
 
         for A_hat, A_true in zip(est_A, true_A):
@@ -395,19 +412,21 @@ class TestGenerateModelCode:
     @pytest.fixture
     def minimal_params(self):
         return {
-            "K": 2, "q": 1, "s": 1,
-            "P":           np.array([[0.9, 0.1], [0.1, 0.9]]),
-            "A_list":      [np.array([[0.8]]), np.array([[0.5]])],
-            "B_list":      [np.array([[0.1]]), np.array([[0.3]])],
-            "C_list":      [np.array([[0.2]]), np.array([[0.1]])],
-            "D_list":      [np.array([[0.7]]), np.array([[0.6]])],
-            "Sigma_U_list":[np.array([[0.1]]), np.array([[0.2]])],
-            "Delta_list":  [np.array([[0.0]]), np.array([[0.0]])],
-            "Sigma_V_list":[np.array([[0.1]]), np.array([[0.15]])],
-            "b_list":      [np.zeros((2, 1)), np.zeros((2, 1))],
-            "pi0":         None,
-            "mu_z0_list":  [np.zeros((2, 1)), np.zeros((2, 1))],
-            "Sigma_z0_list":[np.eye(2), np.eye(2)],
+            "K": 2,
+            "q": 1,
+            "s": 1,
+            "P": np.array([[0.9, 0.1], [0.1, 0.9]]),
+            "A_list": [np.array([[0.8]]), np.array([[0.5]])],
+            "B_list": [np.array([[0.1]]), np.array([[0.3]])],
+            "C_list": [np.array([[0.2]]), np.array([[0.1]])],
+            "D_list": [np.array([[0.7]]), np.array([[0.6]])],
+            "Sigma_U_list": [np.array([[0.1]]), np.array([[0.2]])],
+            "Delta_list": [np.array([[0.0]]), np.array([[0.0]])],
+            "Sigma_V_list": [np.array([[0.1]]), np.array([[0.15]])],
+            "b_list": [np.zeros((2, 1)), np.zeros((2, 1))],
+            "pi0": None,
+            "mu_z0_list": [np.zeros((2, 1)), np.zeros((2, 1))],
+            "Sigma_z0_list": [np.eye(2), np.eye(2)],
         }
 
     def test_returns_string(self, minimal_params):
@@ -441,15 +460,11 @@ class TestGenerateModelCode:
             sys.modules.pop("model_gen_test", None)
 
     def test_constraint_note_b(self, minimal_params):
-        code = _generate_model_code(
-            minimal_params, "M", "m", "x.csv", "b", False
-        )
+        code = _generate_model_code(minimal_params, "M", "m", "x.csv", "b", False)
         assert "B" in code
 
     def test_delta_zero_note(self, minimal_params):
-        code = _generate_model_code(
-            minimal_params, "M", "m", "x.csv", None, True
-        )
+        code = _generate_model_code(minimal_params, "M", "m", "x.csv", None, True)
         assert "Delta=0    : yes" in code
 
 
@@ -462,6 +477,7 @@ class TestCLI:
     def _run_main(self, argv: list[str]) -> None:
         """Run main() with patched sys.argv; raises SystemExit on failure."""
         from prg.learning.supervised import main
+
         saved = sys.argv
         sys.argv = ["supervised"] + argv
         try:
@@ -477,20 +493,27 @@ class TestCLI:
 
     def test_constraint_b_flag(self, simulated_csv, tmp_path):
         out = tmp_path / "model_cli_b.py"
-        self._run_main([
-            str(simulated_csv),
-            "--constraint", "b",
-            "--output", str(out),
-        ])
+        self._run_main(
+            [
+                str(simulated_csv),
+                "--constraint",
+                "b",
+                "--output",
+                str(out),
+            ]
+        )
         assert out.exists()
 
     def test_delta_zero_flag(self, simulated_csv, tmp_path):
         out = tmp_path / "model_cli_dz.py"
-        self._run_main([
-            str(simulated_csv),
-            "--delta-zero",
-            "--output", str(out),
-        ])
+        self._run_main(
+            [
+                str(simulated_csv),
+                "--delta-zero",
+                "--output",
+                str(out),
+            ]
+        )
         text = out.read_text(encoding="utf-8")
         assert "Delta=0    : yes" in text
 
@@ -506,10 +529,14 @@ class TestCLI:
 
     def test_model_name_option(self, simulated_csv, tmp_path):
         out = tmp_path / "my_custom_model.py"
-        self._run_main([
-            str(simulated_csv),
-            "--model-name", "my_custom_model",
-            "--output", str(out),
-        ])
+        self._run_main(
+            [
+                str(simulated_csv),
+                "--model-name",
+                "my_custom_model",
+                "--output",
+                str(out),
+            ]
+        )
         text = out.read_text(encoding="utf-8")
         assert "MyCustomModel" in text

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/classes/GSSSimulator.py
 ===========================
@@ -94,7 +93,7 @@ class GSSSimulator:
     def _reset_state(self, seed: int | None) -> None:
         """Initialise (or reinitialise) the RNG and iteration counter."""
         self._rng = np.random.default_rng(seed)
-        self._n: int = 0              # next step index to yield
+        self._n: int = 0  # next step index to yield
         self._r_prev: int | None = None
         self._z_prev: np.ndarray | None = None  # shape (dim_z, 1)
 
@@ -102,7 +101,7 @@ class GSSSimulator:
     # Iterator protocol
     # ------------------------------------------------------------------
 
-    def __iter__(self) -> "GSSSimulator":
+    def __iter__(self) -> GSSSimulator:
         return self
 
     def __next__(self) -> tuple[int, int, np.ndarray, np.ndarray]:
@@ -133,30 +132,28 @@ class GSSSimulator:
             # --- Initial step ---
             r_n = int(self._rng.choice(params.K, p=params.pi0))
             L = params.chol_z0(r_n)
-            mu = params.mu_z0(r_n)            # (dim_z, 1)
+            mu = params.mu_z0(r_n)  # (dim_z, 1)
             noise = self._rng.standard_normal((params.dim_z, 1))
             z_n = mu + L @ noise
         else:
             # --- Transition step ---
             r_n = int(self._rng.choice(params.K, p=params.P[self._r_prev]))
-            F = params.f_matrix.F(r_n)        # (dim_z, dim_z)
+            F = params.f_matrix.F(r_n)  # (dim_z, dim_z)
             L = params.noise_cov.chol_W(r_n)  # (dim_z, dim_z)
             noise = self._rng.standard_normal((params.dim_z, 1))
             z_n = F @ self._z_prev + params.b(r_n) + L @ noise
 
         if __debug__:
             if not np.all(np.isfinite(z_n)):
-                raise SimulationError(
-                    f"Non-finite values generated at step n={n}, r={r_n}."
-                )
+                raise SimulationError(f"Non-finite values generated at step n={n}, r={r_n}.")
 
         self._r_prev = r_n
         self._z_prev = z_n
         self._n += 1
 
         q = params.q
-        x_n = z_n[:q, :]     # (q, 1)
-        y_n = z_n[q:, :]     # (s, 1)
+        x_n = z_n[:q, :]  # (q, 1)
+        y_n = z_n[q:, :]  # (s, 1)
 
         return n, r_n, x_n, y_n
 
@@ -182,7 +179,9 @@ class GSSSimulator:
     # Run and save
     # ------------------------------------------------------------------
 
-    def run(self, output_dir: str | pathlib.Path | None = None, model_name: str = "gss") -> pathlib.Path:
+    def run(
+        self, output_dir: str | pathlib.Path | None = None, model_name: str = "gss"
+    ) -> pathlib.Path:
         """
         Run the full simulation and save the results to a CSV file.
 
@@ -219,10 +218,15 @@ class GSSSimulator:
 
         logger.info(
             "Starting simulation: model=%s  N=%d  K=%d  q=%d  s=%d  seed=%s",
-            model_name, self._N, params.K, q, s, seed_str,
+            model_name,
+            self._N,
+            params.K,
+            q,
+            s,
+            seed_str,
         )
 
-        self.reset()   # always start from n=0
+        self.reset()  # always start from n=0
 
         t_start = time.perf_counter()
         log_every = max(1, self._N // 10)  # log ~10 progress messages
@@ -245,15 +249,15 @@ class GSSSimulator:
 
         logger.info(
             "Simulation complete in %.3f s.  Saved %d rows to '%s'.",
-            elapsed, len(rows), filepath,
+            elapsed,
+            len(rows),
+            filepath,
         )
         self._log_empirical_stats(rows, q, s)
 
         return filepath
 
-    def _log_empirical_stats(
-        self, rows: list[list], q: int, s: int
-    ) -> None:
+    def _log_empirical_stats(self, rows: list[list], q: int, s: int) -> None:
         """Log basic empirical statistics (means, std) at DEBUG level."""
         if not rows:
             return
@@ -263,8 +267,7 @@ class GSSSimulator:
         x_names = [f"x_{i}" for i in range(q)]
         y_names = [f"y_{i}" for i in range(s)]
         names = x_names + y_names
-        stats = "  ".join(f"{n}: mean={m:.3f} std={sd:.3f}"
-                          for n, m, sd in zip(names, means, stds))
+        stats = "  ".join(f"{n}: mean={m:.3f} std={sd:.3f}" for n, m, sd in zip(names, means, stds))
         logger.debug("Empirical stats — %s", stats)
 
     # ------------------------------------------------------------------

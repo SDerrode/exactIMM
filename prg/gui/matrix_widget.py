@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/gui/matrix_widget.py
 ========================
@@ -10,28 +9,36 @@ MatrixTableWidget — editable QTableWidget for a (q+s) × (q+s) matrix with:
 """
 
 import numpy as np
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QColor, QBrush
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QSizePolicy,
+    QLabel,
+    QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-
 from prg.utils.matrix_checks import CovarianceMatrix
-
 
 _COLOUR_BAD = QColor("#ff8888")  # invalid cell
 
 # Shared pill-badge styles (used by all status labels)
-_PILL_OK  = ("font-size: 10px; padding: 1px 6px; border-radius: 3px;"
-             "background: #d4edda; color: #155724; border: 1px solid #c3e6cb;")
-_PILL_ERR = ("font-size: 10px; padding: 1px 6px; border-radius: 3px;"
-             "background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;")
+_PILL_OK = (
+    "font-size: 10px; padding: 1px 6px; border-radius: 3px;"
+    "background: #d4edda; color: #155724; border: 1px solid #c3e6cb;"
+)
+_PILL_ERR = (
+    "font-size: 10px; padding: 1px 6px; border-radius: 3px;"
+    "background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;"
+)
 
 
 # ---------------------------------------------------------------------------
 # MatrixTableWidget
 # ---------------------------------------------------------------------------
+
 
 class MatrixTableWidget(QWidget):
     """
@@ -50,7 +57,7 @@ class MatrixTableWidget(QWidget):
     """
 
     validity_changed = pyqtSignal(bool)
-    value_changed    = pyqtSignal()   # fired on every cell edit (valid or not)
+    value_changed = pyqtSignal()  # fired on every cell edit (valid or not)
 
     def __init__(
         self,
@@ -67,7 +74,7 @@ class MatrixTableWidget(QWidget):
         self._s = s
         self._n = q + s
         self._is_covariance = is_covariance
-        self._building = False          # guard against recursive itemChanged
+        self._building = False  # guard against recursive itemChanged
         self._valid = True
 
         layout = QVBoxLayout(self)
@@ -152,8 +159,10 @@ class MatrixTableWidget(QWidget):
 
     def set_block_editable(
         self,
-        row_start: int, row_end: int,
-        col_start: int, col_end: int,
+        row_start: int,
+        row_end: int,
+        col_start: int,
+        col_end: int,
         editable: bool,
     ) -> None:
         """Make a rectangular block of cells editable (True) or read-only (False).
@@ -185,9 +194,7 @@ class MatrixTableWidget(QWidget):
         fixed height so that callers cannot cause a layout shift.
         """
         self._constraint_label.setText(text)
-        self._constraint_label.setStyleSheet(
-            style if (text and style) else "font-size: 10px;"
-        )
+        self._constraint_label.setStyleSheet(style if (text and style) else "font-size: 10px;")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -200,17 +207,17 @@ class MatrixTableWidget(QWidget):
     #  │  C white │  D white │     │  Δᵀ white│  Σ_V wht │
     #  └──────────┴──────────┘     └──────────┴──────────┘
     _BLOCK_BG: dict[tuple[bool, bool], str] = {
-        (True,  True):  "#d6eaf8",   # top-left  — blue  (A)
-        (True,  False): "#d5f5e3",   # top-right — green (B)
-        (False, True):  "white",     # bot-left  — white (C)
-        (False, False): "white",     # bot-right — white (D)
+        (True, True): "#d6eaf8",  # top-left  — blue  (A)
+        (True, False): "#d5f5e3",  # top-right — green (B)
+        (False, True): "white",  # bot-left  — white (C)
+        (False, False): "white",  # bot-right — white (D)
     }
     # Saturated version: cell is auto-computed (read-only)
     _BLOCK_COMPUTED_BG: dict[tuple[bool, bool], str] = {
-        (True,  True):  "#aed6f1",   # blue  — computed A
-        (True,  False): "#a9dfbf",   # green — computed B
-        (False, True):  "#e0e0e0",   # grey  — computed C
-        (False, False): "#e0e0e0",   # grey  — computed D
+        (True, True): "#aed6f1",  # blue  — computed A
+        (True, False): "#a9dfbf",  # green — computed B
+        (False, True): "#e0e0e0",  # grey  — computed C
+        (False, False): "#e0e0e0",  # grey  — computed D
     }
 
     def _cell_bg(self, r: int, c: int) -> str:
@@ -226,7 +233,7 @@ class MatrixTableWidget(QWidget):
         """Saturated background colour for a locked / auto-computed cell."""
         if self._is_covariance:
             if r < self._q and c < self._q:
-                return "#c9a8e8"   # saturated purple — computed Σ_U
+                return "#c9a8e8"  # saturated purple — computed Σ_U
             return "#ddeeff"
         return self._BLOCK_COMPUTED_BG[(r < self._q, c < self._q)]
 
@@ -326,6 +333,7 @@ class MatrixTableWidget(QWidget):
 # StochasticMatrixWidget
 # ---------------------------------------------------------------------------
 
+
 class StochasticMatrixWidget(QWidget):
     """
     Editable K × K row-stochastic matrix.
@@ -339,7 +347,7 @@ class StochasticMatrixWidget(QWidget):
     """
 
     validity_changed = pyqtSignal(bool)
-    value_changed    = pyqtSignal()   # fired on every user edit
+    value_changed = pyqtSignal()  # fired on every user edit
 
     def __init__(
         self,
@@ -367,7 +375,7 @@ class StochasticMatrixWidget(QWidget):
         self._table.horizontalHeader().setVisible(False)
         self._table.verticalHeader().setVisible(False)
         self._table.setMinimumSize(K * 46, K * 26)
-        self._table.setMaximumSize(K * 64, K * 26 + 4)   # hauteur calée sur les lignes
+        self._table.setMaximumSize(K * 64, K * 26 + 4)  # hauteur calée sur les lignes
         for col in range(K):
             self._table.setColumnWidth(col, 56)
         for row in range(K):
@@ -488,6 +496,7 @@ class StochasticMatrixWidget(QWidget):
 # VectorWidget
 # ---------------------------------------------------------------------------
 
+
 class VectorWidget(QWidget):
     """
     Editable column vector of length n.
@@ -505,7 +514,7 @@ class VectorWidget(QWidget):
     """
 
     validity_changed = pyqtSignal(bool)
-    value_changed    = pyqtSignal()   # fired on every user edit
+    value_changed = pyqtSignal()  # fired on every user edit
 
     def __init__(
         self,
@@ -571,9 +580,7 @@ class VectorWidget(QWidget):
             for r in range(self._n):
                 val = flat[r] if r < len(flat) else 0.0
                 item = QTableWidgetItem(f"{val:.6g}")
-                item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-                )
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
                 item.setBackground(QBrush(QColor("white")))
                 item.setForeground(QBrush(QColor("black")))
                 self._table.setItem(r, 0, item)

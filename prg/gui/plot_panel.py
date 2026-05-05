@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/gui/plot_panel.py
 =====================
@@ -14,14 +13,23 @@ from matplotlib.backends.backend_qtagg import (
     NavigationToolbar2QT,
 )
 from matplotlib.figure import Figure
-from scipy.stats import norm as _norm                        # C1
-from scipy.stats import multivariate_normal as _mvn         # C1
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QComboBox, QSpinBox, QDoubleSpinBox,
-    QRadioButton, QButtonGroup, QGroupBox, QSizePolicy, QTabWidget,
+    QButtonGroup,
+    QComboBox,
+    QDoubleSpinBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QRadioButton,
+    QSizePolicy,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
+from scipy.stats import multivariate_normal as _mvn  # C1
+from scipy.stats import norm as _norm  # C1
 
 
 class PlotPanel(QWidget):
@@ -40,21 +48,21 @@ class PlotPanel(QWidget):
         self._q = q
         self._s = s
         # Subplot index offsets for readable indexing.
-        self._r_offset     = 0
-        self._pi_offset    = 1          # D6: re-enabled filtered regime posterior
-        self._x_offset     = 2
-        self._y_offset     = 2 + q
+        self._r_offset = 0
+        self._pi_offset = 1  # D6: re-enabled filtered regime posterior
+        self._x_offset = 2
+        self._y_offset = 2 + q
         self._innov_offset = 2 + q + s
-        self._n_axes       = self._innov_offset + s
+        self._n_axes = self._innov_offset + s
 
         # π_n(k) and ν^i axes are 55 % the height of the regular axes
         height_ratios = (
-            [1.0]                  # R_n
-            + [0.55]               # π_n(k)
-            + [1.0] * (q + s)      # X^i, Y^i
-            + [0.55] * s           # innovations
+            [1.0]  # R_n
+            + [0.55]  # π_n(k)
+            + [1.0] * (q + s)  # X^i, Y^i
+            + [0.55] * s  # innovations
         )
-        fig_h = 2.2 * (1 + q + s) + 1.3 * (1 + s)   # extra 0.55 row for π_n
+        fig_h = 2.2 * (1 + q + s) + 1.3 * (1 + s)  # extra 0.55 row for π_n
         self._fig = Figure(figsize=(7, fig_h), tight_layout=True)
         self._canvas = FigureCanvasQTAgg(self._fig)
         # D10: canvas should not participate in Tab-key focus cycling
@@ -67,7 +75,9 @@ class PlotPanel(QWidget):
         layout.addWidget(self._canvas)
 
         self._axes = self._fig.subplots(
-            self._n_axes, 1, sharex=True,
+            self._n_axes,
+            1,
+            sharex=True,
             gridspec_kw={"height_ratios": height_ratios},
         )
         if self._n_axes == 1:
@@ -84,8 +94,8 @@ class PlotPanel(QWidget):
         self,
         ns: list[int],
         rs: list[int],
-        xs: np.ndarray | None,   # shape (N, q), or None if no ground truth
-        ys: np.ndarray,          # shape (N, s)
+        xs: np.ndarray | None,  # shape (N, q), or None if no ground truth
+        ys: np.ndarray,  # shape (N, s)
         K: int,
     ) -> None:
         """Redraw all subplots with fresh simulation data."""
@@ -118,7 +128,8 @@ class PlotPanel(QWidget):
             ax.grid(True, linestyle=":", alpha=0.5)
             if xs is not None:
                 ax.plot(
-                    ns_arr, xs[:, i],
+                    ns_arr,
+                    xs[:, i],
                     color=colours_x[i % len(colours_x)],
                     linewidth=0.9,
                     label=rf"$X^{i}$",
@@ -126,10 +137,15 @@ class PlotPanel(QWidget):
             else:
                 ax.set_yticks([])
                 ax.text(
-                    0.5, 0.5, "no ground truth",
+                    0.5,
+                    0.5,
+                    "no ground truth",
                     transform=ax.transAxes,
-                    ha="center", va="center",
-                    fontsize=8, color="#aaaaaa", style="italic",
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                    color="#aaaaaa",
+                    style="italic",
                 )
 
         # --- Y^i components ---
@@ -137,7 +153,8 @@ class PlotPanel(QWidget):
         for i in range(self._s):
             ax = self._axes[self._y_offset + i]
             ax.plot(
-                ns_arr, ys[:, i],
+                ns_arr,
+                ys[:, i],
                 color=colours_y[i % len(colours_y)],
                 linewidth=0.9,
                 label=rf"$Y^{i}$",
@@ -156,13 +173,13 @@ class PlotPanel(QWidget):
     def add_filter_overlay(
         self,
         ns: list[int],
-        E_xs: np.ndarray,    # (N, q)
+        E_xs: np.ndarray,  # (N, q)
         Var_xs: np.ndarray,  # (N, q)
     ) -> None:
         """Overlay filtered estimates on X_i subplots (dashed + ±2σ band)."""
         self.clear_filter_overlay()
         ns_arr = np.asarray(ns)
-        colour_filt = "#d62728"   # red
+        colour_filt = "#d62728"  # red
 
         self._filter_artists: list = []
         for i in range(self._q):
@@ -170,15 +187,21 @@ class PlotPanel(QWidget):
             mu = E_xs[:, i]
             sigma = np.sqrt(np.maximum(Var_xs[:, i], 0.0))
 
-            line, = ax.plot(
-                ns_arr, mu,
-                color=colour_filt, linewidth=1.2,
-                linestyle="--", label=rf"$\mathbb{{E}}[X^{i}\mid y]$",
+            (line,) = ax.plot(
+                ns_arr,
+                mu,
+                color=colour_filt,
+                linewidth=1.2,
+                linestyle="--",
+                label=rf"$\mathbb{{E}}[X^{i}\mid y]$",
                 zorder=3,
             )
             fill = ax.fill_between(
-                ns_arr, mu - 2 * sigma, mu + 2 * sigma,
-                color=colour_filt, alpha=0.15,
+                ns_arr,
+                mu - 2 * sigma,
+                mu + 2 * sigma,
+                color=colour_filt,
+                alpha=0.15,
                 label=r"$\pm 2\sigma$",
                 zorder=2,
             )
@@ -190,22 +213,24 @@ class PlotPanel(QWidget):
     def add_pi_overlay(
         self,
         ns: list[int],
-        pis: np.ndarray,   # shape (N, K)
+        pis: np.ndarray,  # shape (N, K)
         K: int,
     ) -> None:
         """Draw filtered regime posterior π_n(k) on the dedicated subplot (D6)."""
         self.clear_pi_overlay()
         ns_arr = np.asarray(ns)
-        ax_pi  = self._axes[self._pi_offset]
+        ax_pi = self._axes[self._pi_offset]
         ax_pi.cla()
-        colours_pi = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-                      "#8c564b", "#e377c2"]
+        colours_pi = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"]
         self._pi_artists: list = []
         for k in range(K):
-            line, = ax_pi.plot(
-                ns_arr, pis[:, k],
+            (line,) = ax_pi.plot(
+                ns_arr,
+                pis[:, k],
                 color=colours_pi[k % len(colours_pi)],
-                linewidth=1.0, linestyle="-", alpha=0.9,
+                linewidth=1.0,
+                linestyle="-",
+                alpha=0.9,
                 label=rf"$\pi_n({k})$",
             )
             self._pi_artists.append(line)
@@ -230,7 +255,7 @@ class PlotPanel(QWidget):
     def update_innovations(
         self,
         ns: list[int],
-        innovations: np.ndarray,   # shape (N, s)
+        innovations: np.ndarray,  # shape (N, s)
     ) -> None:
         """Plot the filter innovation sequence on the bottom axes."""
         self.clear_innovations()
@@ -242,8 +267,9 @@ class PlotPanel(QWidget):
             ax = self._axes[self._innov_offset + i]
             ax.cla()
             ax.axhline(0, color="#999999", linewidth=0.8, linestyle="--")
-            line, = ax.plot(
-                ns_arr, innovations[:, i],
+            (line,) = ax.plot(
+                ns_arr,
+                innovations[:, i],
                 color=colours[i % len(colours)],
                 linewidth=0.7,
             )
@@ -262,7 +288,7 @@ class PlotPanel(QWidget):
         for a in getattr(self, "_innov_artists", []):
             try:
                 a.remove()
-            except (ValueError, NotImplementedError, AttributeError):
+            except ValueError, NotImplementedError, AttributeError:
                 # Artist may already be detached after a parent ax.cla().
                 pass
         self._innov_artists = []
@@ -295,7 +321,7 @@ class PlotPanel(QWidget):
         for a in artists:
             try:
                 a.remove()
-            except (ValueError, NotImplementedError, AttributeError):
+            except ValueError, NotImplementedError, AttributeError:
                 pass
         self._filter_artists = []
         # Also clear legends that may reference removed artists
@@ -370,6 +396,7 @@ class PlotPanel(QWidget):
 # PredYPanel — p(y_{n+1} | r_n=j, r_{n+1}=k, y_n)
 # ---------------------------------------------------------------------------
 
+
 class PredYPanel(QWidget):
     """Tab dedicated to the conditional distribution p(y_{n+1} | r_n=j, r_{n+1}=k, y_n).
 
@@ -396,14 +423,14 @@ class PredYPanel(QWidget):
         self._s = s
 
         # Pre-computed moments (provided by the filter after it runs)
-        self._mu_Y_jk:  list | None = None   # [K][K] ndarray (s,1)
-        self._M_t:      list | None = None   # [K][K] ndarray (s,s)
-        self._Gamma:    list | None = None   # [K][K] ndarray (s,s)
-        self._mu_Y:     list | None = None   # [K]    ndarray (s,1)
-        self._M_simple: list | None = None   # [K][K] ndarray (s,s) — signal 2 coefficient
-        self._Gamma2:   list | None = None   # [K][K] ndarray (s,s) — signal 2 covariance
-        self._b_Y:      list | None = None   # [K]    ndarray (s,1) — signal 2 bias
-        self._ys:       np.ndarray | None = None  # (N, s)
+        self._mu_Y_jk: list | None = None  # [K][K] ndarray (s,1)
+        self._M_t: list | None = None  # [K][K] ndarray (s,s)
+        self._Gamma: list | None = None  # [K][K] ndarray (s,s)
+        self._mu_Y: list | None = None  # [K]    ndarray (s,1)
+        self._M_simple: list | None = None  # [K][K] ndarray (s,s) — signal 2 coefficient
+        self._Gamma2: list | None = None  # [K][K] ndarray (s,s) — signal 2 covariance
+        self._b_Y: list | None = None  # [K]    ndarray (s,1) — signal 2 bias
+        self._ys: np.ndarray | None = None  # (N, s)
 
         self._build_ui()
         self._draw_traj_empty()
@@ -453,9 +480,9 @@ class PredYPanel(QWidget):
         traj_widget = QWidget()
         traj_layout = QVBoxLayout(traj_widget)
         traj_layout.setContentsMargins(0, 0, 0, 0)
-        self._fig_traj    = Figure(tight_layout=True)
+        self._fig_traj = Figure(tight_layout=True)
         self._canvas_traj = FigureCanvasQTAgg(self._fig_traj)
-        self._canvas_traj.setFocusPolicy(Qt.FocusPolicy.ClickFocus)   # D10
+        self._canvas_traj.setFocusPolicy(Qt.FocusPolicy.ClickFocus)  # D10
         traj_layout.addWidget(NavigationToolbar2QT(self._canvas_traj, traj_widget))
         traj_layout.addWidget(self._canvas_traj)
         self._inner_tabs.addTab(traj_widget, "Trajectory (norm.)")
@@ -464,7 +491,7 @@ class PredYPanel(QWidget):
         traj_raw_widget = QWidget()
         traj_raw_layout = QVBoxLayout(traj_raw_widget)
         traj_raw_layout.setContentsMargins(0, 0, 0, 0)
-        self._fig_traj_raw    = Figure(tight_layout=True)
+        self._fig_traj_raw = Figure(tight_layout=True)
         self._canvas_traj_raw = FigureCanvasQTAgg(self._fig_traj_raw)
         self._canvas_traj_raw.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         traj_raw_layout.addWidget(NavigationToolbar2QT(self._canvas_traj_raw, traj_raw_widget))
@@ -479,8 +506,7 @@ class PredYPanel(QWidget):
 
         # y_n controls — compact bar (no QGroupBox to avoid vertical stretch)
         ctrl_widget = QWidget()
-        ctrl_widget.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        ctrl_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ctrl_layout = QVBoxLayout(ctrl_widget)
         ctrl_layout.setContentsMargins(4, 2, 4, 2)
         ctrl_layout.setSpacing(2)
@@ -506,7 +532,7 @@ class PredYPanel(QWidget):
         self._yn_spins: list[QDoubleSpinBox] = []
         for i in range(s):
             lbl = QLabel(f"y^{i} =")
-            sp  = QDoubleSpinBox()
+            sp = QDoubleSpinBox()
             sp.setRange(-1e6, 1e6)
             sp.setValue(0.0)
             sp.setDecimals(3)
@@ -521,12 +547,12 @@ class PredYPanel(QWidget):
 
         self._src_group = QButtonGroup(self)
         self._src_group.addButton(self._src_traj, 0)
-        self._src_group.addButton(self._src_free,  1)
+        self._src_group.addButton(self._src_free, 1)
         dens_layout.addWidget(ctrl_widget)
 
-        self._fig_dens    = Figure(tight_layout=True)
+        self._fig_dens = Figure(tight_layout=True)
         self._canvas_dens = FigureCanvasQTAgg(self._fig_dens)
-        self._canvas_dens.setFocusPolicy(Qt.FocusPolicy.ClickFocus)   # D10
+        self._canvas_dens.setFocusPolicy(Qt.FocusPolicy.ClickFocus)  # D10
         dens_layout.addWidget(NavigationToolbar2QT(self._canvas_dens, dens_widget))
         dens_layout.addWidget(self._canvas_dens)
         self._inner_tabs.addTab(dens_widget, "Density")
@@ -545,24 +571,24 @@ class PredYPanel(QWidget):
 
     def set_data(
         self,
-        mu_Y_jk:  list,
-        M_t:      list,
-        Gamma:    list,
-        mu_Y:     list,
-        ys:       np.ndarray,   # (N, s)
-        M_simple: list | None = None,   # [K][K] ndarray (s,s) — signal 2 coefficient
-        Gamma2:   list | None = None,   # [K][K] ndarray (s,s) — signal 2 covariance
-        b_Y:      list | None = None,   # [K]    ndarray (s,1) — signal 2 bias
+        mu_Y_jk: list,
+        M_t: list,
+        Gamma: list,
+        mu_Y: list,
+        ys: np.ndarray,  # (N, s)
+        M_simple: list | None = None,  # [K][K] ndarray (s,s) — signal 2 coefficient
+        Gamma2: list | None = None,  # [K][K] ndarray (s,s) — signal 2 covariance
+        b_Y: list | None = None,  # [K]    ndarray (s,1) — signal 2 bias
     ) -> None:
         """Load filter moments and the observed trajectory."""
-        self._mu_Y_jk  = mu_Y_jk
-        self._M_t      = M_t
-        self._Gamma    = Gamma
-        self._mu_Y     = mu_Y
+        self._mu_Y_jk = mu_Y_jk
+        self._M_t = M_t
+        self._Gamma = Gamma
+        self._mu_Y = mu_Y
         self._M_simple = M_simple
-        self._Gamma2   = Gamma2
-        self._b_Y      = b_Y
-        self._ys       = ys
+        self._Gamma2 = Gamma2
+        self._b_Y = b_Y
+        self._ys = ys
         N = len(ys)
         # n ∈ {0…N-2} : y_n→ y_{n+1}
         self._n_spin.setRange(0, max(0, N - 2))
@@ -571,14 +597,14 @@ class PredYPanel(QWidget):
 
     def clear(self) -> None:
         """Reset the panel to its initial (no data) state."""
-        self._mu_Y_jk  = None
-        self._M_t      = None
-        self._Gamma    = None
-        self._mu_Y     = None
+        self._mu_Y_jk = None
+        self._M_t = None
+        self._Gamma = None
+        self._mu_Y = None
         self._M_simple = None
-        self._Gamma2   = None
-        self._b_Y      = None
-        self._ys       = None
+        self._Gamma2 = None
+        self._b_Y = None
+        self._ys = None
         self._draw_traj_empty()
         self._draw_traj_raw_empty()
         self._draw_density_empty()
@@ -614,8 +640,8 @@ class PredYPanel(QWidget):
     # Sous-onglet 0 : Trajectoire
     # ------------------------------------------------------------------
 
-    _COL_SIG1 = "#1f77b4"   # blue   — signal 1 (H5 exact)
-    _COL_SIG2 = "#ff7f0e"   # orange — signal 2 (exact Markov transition, éq. (f)/(h))
+    _COL_SIG1 = "#1f77b4"  # blue   — signal 1 (H5 exact)
+    _COL_SIG2 = "#ff7f0e"  # orange — signal 2 (exact Markov transition, éq. (f)/(h))
 
     def _refresh_traj(self) -> None:
         """Plot conditional signals against the observed trajectory.
@@ -640,35 +666,35 @@ class PredYPanel(QWidget):
         j = self._j_combo.currentIndex()
         k = self._k_combo.currentIndex()
         s = self._s
-        ys = self._ys            # (N, s)
-        N  = len(ys)
-        ns = np.arange(N - 1)   # indices n = 0 … N-2
+        ys = self._ys  # (N, s)
+        N = len(ys)
+        ns = np.arange(N - 1)  # indices n = 0 … N-2
 
-        y_prev = ys[:-1]         # (N-1, s) — y_n
-        y_next = ys[1:]          # (N-1, s) — y_{n+1}
+        y_prev = ys[:-1]  # (N-1, s) — y_n
+        y_next = ys[1:]  # (N-1, s) — y_{n+1}
 
         # ── Signal 1 — E[y_{n+1} | j,k, y_n] ───────────────────────────
-        mu_Y_j  = self._mu_Y[j].ravel()           # (s,)
-        mu_Y_jk = self._mu_Y_jk[j][k].ravel()    # (s,)
-        cond1   = (mu_Y_jk[None, :]
-                   + (y_prev - mu_Y_j[None, :]) @ self._M_t[j][k].T)  # (N-1, s)
-        sigs1   = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))  # (s,) constant
+        mu_Y_j = self._mu_Y[j].ravel()  # (s,)
+        mu_Y_jk = self._mu_Y_jk[j][k].ravel()  # (s,)
+        cond1 = mu_Y_jk[None, :] + (y_prev - mu_Y_j[None, :]) @ self._M_t[j][k].T  # (N-1, s)
+        sigs1 = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))  # (s,) constant
 
         # ── Signal 2 — partie linéaire de la densité de transition (Proposition, (f)/(h))
         #    On trace (M_simple[j][k] @ y_n)^i / y^i_n, sans le biais b_Y[k] :
         #    diviser b_Y[k]^i / y^i_n par y^i_n diverge quand y^i_n → 0.
         #    Le biais est visible dans l'onglet "Trajectory (raw)".
         #    σ₂ = sqrt(diag(Γ₂(j,k)))  (constante, formule (h))
-        has_sig2 = (self._M_simple is not None
-                    and self._Gamma2   is not None
-                    and self._b_Y      is not None)
+        has_sig2 = self._M_simple is not None and self._Gamma2 is not None and self._b_Y is not None
         if has_sig2:
-            cond2 = y_prev @ self._M_simple[j][k].T                           # (N-1, s)
-            sigs2 = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))   # (s,) constant
+            cond2 = y_prev @ self._M_simple[j][k].T  # (N-1, s)
+            sigs2 = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))  # (s,) constant
 
         self._fig_traj.clf()
-        axes = (self._fig_traj.subplots(s, 1, sharex=True)
-                if s > 1 else [self._fig_traj.add_subplot(1, 1, 1)])
+        axes = (
+            self._fig_traj.subplots(s, 1, sharex=True)
+            if s > 1
+            else [self._fig_traj.add_subplot(1, 1, 1)]
+        )
 
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
@@ -677,37 +703,41 @@ class PredYPanel(QWidget):
             ax = axes[i]
 
             # normaliser: y^i_n pour les deux signaux
-            safe_yn = np.where(np.abs(y_prev[:, i]) > 1e-12,
-                               y_prev[:, i], 1e-12)                    # (N-1,)
+            safe_yn = np.where(np.abs(y_prev[:, i]) > 1e-12, y_prev[:, i], 1e-12)  # (N-1,)
 
             # ── Signal 1 — cond1^i / y^i_n ───────────────────────────────
-            mu1_i  = cond1[:, i] / safe_yn                             # (N-1,)
-            sig1_i = float(sigs1[i])                                   # constant scalar
-            env1 = ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i,
-                                   color=c1, alpha=0.15)
-            line1, = ax.plot(ns, mu1_i, color=c1, linewidth=1.5)
+            mu1_i = cond1[:, i] / safe_yn  # (N-1,)
+            sig1_i = float(sigs1[i])  # constant scalar
+            env1 = ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i, color=c1, alpha=0.15)
+            (line1,) = ax.plot(ns, mu1_i, color=c1, linewidth=1.5)
 
             # ── Signal 2 — cond2^i / y^i_n ───────────────────────────────
             if has_sig2:
-                mu2_i  = cond2[:, i] / safe_yn                         # (N-1,)
-                sig2_i = float(sigs2[i])                               # constant scalar
-                env2 = ax.fill_between(ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i,
-                                       color=c2, alpha=0.15)
-                line2, = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
+                mu2_i = cond2[:, i] / safe_yn  # (N-1,)
+                sig2_i = float(sigs2[i])  # constant scalar
+                env2 = ax.fill_between(
+                    ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i, color=c2, alpha=0.15
+                )
+                (line2,) = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
 
             # ── observed y^i_{n+1} / y^i_{n+1} = 1 ──────────────────────
-            obs_line, = ax.plot(ns, np.ones(N - 1), color="#333333",
-                                linewidth=2.0, alpha=0.85, linestyle="-")
+            (obs_line,) = ax.plot(
+                ns, np.ones(N - 1), color="#333333", linewidth=2.0, alpha=0.85, linestyle="-"
+            )
 
             # ── 2-column legend ──────────────────────────────────────────
-            left_h  = [line1];   left_l  = [rf"$\mu_1/y^{i}_n$ (H5 exact)"]
-            right_h = [env1];    right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
+            left_h = [line1]
+            left_l = [rf"$\mu_1/y^{i}_n$ (H5 exact)"]
+            right_h = [env1]
+            right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
             if has_sig2:
-                left_h  += [line2];  left_l  += [rf"$\mu_2/y^{i}_n$ éq. (f)"]
-                right_h += [env2];   right_l += [rf"$\pm 2\sigma_2={sig2_i:.3g}$"]
-            left_h  += [obs_line];   left_l  += [rf"$y^{i}_n/y^{i}_n=1$"]
-            ax.legend(left_h + right_h, left_l + right_l,
-                      fontsize=8, loc="upper right", ncol=2)
+                left_h += [line2]
+                left_l += [rf"$\mu_2/y^{i}_n$ éq. (f)"]
+                right_h += [env2]
+                right_l += [rf"$\pm 2\sigma_2={sig2_i:.3g}$"]
+            left_h += [obs_line]
+            left_l += [rf"$y^{i}_n/y^{i}_n=1$"]
+            ax.legend(left_h + right_h, left_l + right_l, fontsize=8, loc="upper right", ncol=2)
 
             ax.set_ylabel(rf"$\cdot\,/\,y^{i}_n$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.4)
@@ -723,15 +753,21 @@ class PredYPanel(QWidget):
     def _draw_traj_empty(self) -> None:
         self._fig_traj.clf()
         ax = self._fig_traj.add_subplot(1, 1, 1)
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_yticks([])
         ax.text(
-            0.5, 0.5,
+            0.5,
+            0.5,
             "Run the filter in\n"
             "'Exact IMM – H5 required' mode\n"
             "to display the trajectory\n"
             r"$\mathbb{E}[y_{n+1} \mid r_n,\; r_{n+1},\; y_n]$",
-            transform=ax.transAxes, ha="center", va="center",
-            fontsize=11, color="#999999", style="italic",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#999999",
+            style="italic",
         )
         ax.grid(True, linestyle=":", alpha=0.3)
         self._canvas_traj.draw_idle()
@@ -759,32 +795,32 @@ class PredYPanel(QWidget):
         j = self._j_combo.currentIndex()
         k = self._k_combo.currentIndex()
         s = self._s
-        ys = self._ys            # (N, s)
-        N  = len(ys)
-        ns = np.arange(N - 1)   # indices n = 0 … N-2
+        ys = self._ys  # (N, s)
+        N = len(ys)
+        ns = np.arange(N - 1)  # indices n = 0 … N-2
 
-        y_prev = ys[:-1]         # (N-1, s) — y_n
-        y_next = ys[1:]          # (N-1, s) — y_{n+1}
+        y_prev = ys[:-1]  # (N-1, s) — y_n
+        y_next = ys[1:]  # (N-1, s) — y_{n+1}
 
         # ── Signal 1 ────────────────────────────────────────────────────
-        mu_Y_j  = self._mu_Y[j].ravel()
+        mu_Y_j = self._mu_Y[j].ravel()
         mu_Y_jk = self._mu_Y_jk[j][k].ravel()
-        cond1   = (mu_Y_jk[None, :]
-                   + (y_prev - mu_Y_j[None, :]) @ self._M_t[j][k].T)  # (N-1, s)
-        sigs1   = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))  # (s,)
+        cond1 = mu_Y_jk[None, :] + (y_prev - mu_Y_j[None, :]) @ self._M_t[j][k].T  # (N-1, s)
+        sigs1 = np.sqrt(np.maximum(np.diag(self._Gamma[j][k]), 1e-12))  # (s,)
 
         # ── Signal 2 — exact Markov transition density (Proposition, (f)/(h)) ────
-        has_sig2 = (self._M_simple is not None
-                    and self._Gamma2   is not None
-                    and self._b_Y      is not None)
+        has_sig2 = self._M_simple is not None and self._Gamma2 is not None and self._b_Y is not None
         if has_sig2:
-            b_k   = self._b_Y[k].ravel()
-            cond2 = b_k[None, :] + y_prev @ self._M_simple[j][k].T    # (N-1, s)
+            b_k = self._b_Y[k].ravel()
+            cond2 = b_k[None, :] + y_prev @ self._M_simple[j][k].T  # (N-1, s)
             sigs2 = np.sqrt(np.maximum(np.diag(self._Gamma2[j][k]), 1e-12))  # (s,)
 
         self._fig_traj_raw.clf()
-        axes = (self._fig_traj_raw.subplots(s, 1, sharex=True)
-                if s > 1 else [self._fig_traj_raw.add_subplot(1, 1, 1)])
+        axes = (
+            self._fig_traj_raw.subplots(s, 1, sharex=True)
+            if s > 1
+            else [self._fig_traj_raw.add_subplot(1, 1, 1)]
+        )
 
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
@@ -792,30 +828,35 @@ class PredYPanel(QWidget):
         for i in range(s):
             ax = axes[i]
 
-            mu1_i  = cond1[:, i]
+            mu1_i = cond1[:, i]
             sig1_i = float(sigs1[i])
-            env1 = ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i,
-                                   color=c1, alpha=0.15)
-            line1, = ax.plot(ns, mu1_i, color=c1, linewidth=1.5)
+            env1 = ax.fill_between(ns, mu1_i - 2 * sig1_i, mu1_i + 2 * sig1_i, color=c1, alpha=0.15)
+            (line1,) = ax.plot(ns, mu1_i, color=c1, linewidth=1.5)
 
             if has_sig2:
-                mu2_i  = cond2[:, i]
+                mu2_i = cond2[:, i]
                 sig2_i = float(sigs2[i])
-                env2 = ax.fill_between(ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i,
-                                       color=c2, alpha=0.15)
-                line2, = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
+                env2 = ax.fill_between(
+                    ns, mu2_i - 2 * sig2_i, mu2_i + 2 * sig2_i, color=c2, alpha=0.15
+                )
+                (line2,) = ax.plot(ns, mu2_i, color=c2, linewidth=1.5)
 
-            obs_line, = ax.plot(ns, y_next[:, i], color="#333333",
-                                linewidth=2.0, alpha=0.85, linestyle="-")
+            (obs_line,) = ax.plot(
+                ns, y_next[:, i], color="#333333", linewidth=2.0, alpha=0.85, linestyle="-"
+            )
 
-            left_h  = [line1];   left_l  = [rf"$\mu_1$ (H5 exact)"]
-            right_h = [env1];    right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
+            left_h = [line1]
+            left_l = [r"$\mu_1$ (H5 exact)"]
+            right_h = [env1]
+            right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
             if has_sig2:
-                left_h  += [line2];  left_l  += [rf"$\mu_2$ éq. (f)"]
-                right_h += [env2];   right_l += [rf"$\pm 2\sigma_2={sig2_i:.3g}$"]
-            left_h  += [obs_line];   left_l  += [rf"$y^{i}_{{n+1}}$"]
-            ax.legend(left_h + right_h, left_l + right_l,
-                      fontsize=8, loc="upper right", ncol=2)
+                left_h += [line2]
+                left_l += [r"$\mu_2$ éq. (f)"]
+                right_h += [env2]
+                right_l += [rf"$\pm 2\sigma_2={sig2_i:.3g}$"]
+            left_h += [obs_line]
+            left_l += [rf"$y^{i}_{{n+1}}$"]
+            ax.legend(left_h + right_h, left_l + right_l, fontsize=8, loc="upper right", ncol=2)
 
             ax.set_ylabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.4)
@@ -831,15 +872,21 @@ class PredYPanel(QWidget):
     def _draw_traj_raw_empty(self) -> None:
         self._fig_traj_raw.clf()
         ax = self._fig_traj_raw.add_subplot(1, 1, 1)
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_yticks([])
         ax.text(
-            0.5, 0.5,
+            0.5,
+            0.5,
             "Run the filter in\n"
             "'Exact IMM – H5 required' mode\n"
             "to display the trajectory\n"
             r"$\mathbb{E}[y_{n+1} \mid r_n,\; r_{n+1},\; y_n]$",
-            transform=ax.transAxes, ha="center", va="center",
-            fontsize=11, color="#999999", style="italic",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#999999",
+            style="italic",
         )
         ax.grid(True, linestyle=":", alpha=0.3)
         self._canvas_traj_raw.draw_idle()
@@ -857,15 +904,13 @@ class PredYPanel(QWidget):
         y_n = self._get_yn()
 
         # Signal 1 — exact under (H5)
-        mu1    = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_n - self._mu_Y[j])
+        mu1 = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_n - self._mu_Y[j])
         Gamma1 = self._Gamma[j][k]
 
         # Signal 2 — approximation (if available)
-        has_sig2 = (self._M_simple is not None
-                    and self._Gamma2   is not None
-                    and self._b_Y      is not None)
-        mu2    = self._b_Y[k] + self._M_simple[j][k] @ y_n if has_sig2 else None
-        Gamma2 = self._Gamma2[j][k]                         if has_sig2 else None
+        has_sig2 = self._M_simple is not None and self._Gamma2 is not None and self._b_Y is not None
+        mu2 = self._b_Y[k] + self._M_simple[j][k] @ y_n if has_sig2 else None
+        Gamma2 = self._Gamma2[j][k] if has_sig2 else None
 
         self._fig_dens.clf()
         if self._s == 1:
@@ -878,21 +923,25 @@ class PredYPanel(QWidget):
 
     def _plot_1d(
         self,
-        mu1: np.ndarray, Gamma1: np.ndarray,
-        mu2: np.ndarray | None, Gamma2: np.ndarray | None,
-        j: int, k: int, y_n: np.ndarray,
+        mu1: np.ndarray,
+        Gamma1: np.ndarray,
+        mu2: np.ndarray | None,
+        Gamma2: np.ndarray | None,
+        j: int,
+        k: int,
+        y_n: np.ndarray,
     ) -> None:
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
 
-        m1   = float(mu1[0, 0])
+        m1 = float(mu1[0, 0])
         sig1 = float(np.sqrt(max(float(Gamma1[0, 0]), 1e-12)))
         has2 = mu2 is not None
 
         # x range: union of ±4.5σ of both signals, expanded to include y_n (A5)
         x_lo, x_hi = m1 - 4.5 * sig1, m1 + 4.5 * sig1
         if has2:
-            m2   = float(mu2[0, 0])
+            m2 = float(mu2[0, 0])
             sig2 = float(np.sqrt(max(float(Gamma2[0, 0]), 1e-12)))
             x_lo = min(x_lo, m2 - 4.5 * sig2)
             x_hi = max(x_hi, m2 + 4.5 * sig2)
@@ -907,35 +956,39 @@ class PredYPanel(QWidget):
         ax = self._fig_dens.add_subplot(1, 1, 1)
 
         # ── Signal 1 ────────────────────────────────────────────────────
-        pdf1   = _norm.pdf(x, m1, sig1)
-        line1, = ax.plot(x, pdf1, color=c1, linewidth=2.0)
-        env1   = ax.fill_between(x, pdf1, where=(np.abs(x - m1) <= 2 * sig1),
-                                 color=c1, alpha=0.20)
+        pdf1 = _norm.pdf(x, m1, sig1)
+        (line1,) = ax.plot(x, pdf1, color=c1, linewidth=2.0)
+        env1 = ax.fill_between(x, pdf1, where=(np.abs(x - m1) <= 2 * sig1), color=c1, alpha=0.20)
         ax.axvline(m1, color=c1, linewidth=1.2, linestyle="--", alpha=0.8)
 
         # ── Signal 2 ────────────────────────────────────────────────────
         if has2:
-            pdf2   = _norm.pdf(x, m2, sig2)
-            line2, = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
-            env2   = ax.fill_between(x, pdf2, where=(np.abs(x - m2) <= 2 * sig2),
-                                     color=c2, alpha=0.15)
+            pdf2 = _norm.pdf(x, m2, sig2)
+            (line2,) = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
+            env2 = ax.fill_between(
+                x, pdf2, where=(np.abs(x - m2) <= 2 * sig2), color=c2, alpha=0.15
+            )
             ax.axvline(m2, color=c2, linewidth=1.2, linestyle="--", alpha=0.8)
 
         # ── y^0 marker ──────────────────────────────────────────────────
         yn_line = None
         if self._src_traj.isChecked() and self._ys is not None:
-            yn_val  = float(y_n[0, 0])
-            yn_line = ax.axvline(yn_val, color="#333333", linewidth=1.2,
-                                 linestyle=":", alpha=0.85)
+            yn_val = float(y_n[0, 0])
+            yn_line = ax.axvline(yn_val, color="#333333", linewidth=1.2, linestyle=":", alpha=0.85)
 
         # ── Légende 2 colonnes (remplissage colonne par colonne) ────────────
-        left_h  = [line1];              left_l  = [rf"$p_1$ H5 exact   $\mu_1={m1:.4g}$"]
-        right_h = [env1];               right_l = [rf"$\pm 2\sigma_1={sig1:.4g}$"]
+        left_h = [line1]
+        left_l = [rf"$p_1$ H5 exact   $\mu_1={m1:.4g}$"]
+        right_h = [env1]
+        right_l = [rf"$\pm 2\sigma_1={sig1:.4g}$"]
         if has2:
-            left_h  += [line2];         left_l  += [rf"$p_2$ éq. (f)   $\mu_2={m2:.4g}$"]
-            right_h += [env2];          right_l += [rf"$\pm 2\sigma_2={sig2:.4g}$"]
+            left_h += [line2]
+            left_l += [rf"$p_2$ éq. (f)   $\mu_2={m2:.4g}$"]
+            right_h += [env2]
+            right_l += [rf"$\pm 2\sigma_2={sig2:.4g}$"]
         if yn_line is not None:
-            left_h  += [yn_line];       left_l  += [rf"$y^0 = {yn_val:.4g}$"]
+            left_h += [yn_line]
+            left_l += [rf"$y^0 = {yn_val:.4g}$"]
         ax.legend(left_h + right_h, left_l + right_l, fontsize=9, ncol=2)
 
         ax.set_xlabel(r"$y^0_{n+1}$", fontsize=11)
@@ -949,20 +1002,26 @@ class PredYPanel(QWidget):
 
     def _plot_2d(
         self,
-        mu1: np.ndarray, Gamma1: np.ndarray,
-        mu2: np.ndarray | None, Gamma2: np.ndarray | None,
-        j: int, k: int, y_n: np.ndarray,
+        mu1: np.ndarray,
+        Gamma1: np.ndarray,
+        mu2: np.ndarray | None,
+        Gamma2: np.ndarray | None,
+        j: int,
+        k: int,
+        y_n: np.ndarray,
     ) -> None:
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
 
-        m1_0 = float(mu1[0, 0]); m1_1 = float(mu1[1, 0])
+        m1_0 = float(mu1[0, 0])
+        m1_1 = float(mu1[1, 0])
         s1_0 = float(np.sqrt(max(float(Gamma1[0, 0]), 1e-12)))
         s1_1 = float(np.sqrt(max(float(Gamma1[1, 1]), 1e-12)))
 
         has2 = mu2 is not None
         if has2:
-            m2_0 = float(mu2[0, 0]); m2_1 = float(mu2[1, 0])
+            m2_0 = float(mu2[0, 0])
+            m2_1 = float(mu2[1, 0])
             s2_0 = float(np.sqrt(max(float(Gamma2[0, 0]), 1e-12)))
             s2_1 = float(np.sqrt(max(float(Gamma2[1, 1]), 1e-12)))
 
@@ -971,61 +1030,86 @@ class PredYPanel(QWidget):
         yn_1 = float(y_n[1, 0]) if yn_traj else None
 
         def _marginal(ax, dim, m1v, s1v, m2v=None, s2v=None, xlabel="", yn_val=None):
-            lo = m1v - 4.5 * s1v; hi = m1v + 4.5 * s1v
+            lo = m1v - 4.5 * s1v
+            hi = m1v + 4.5 * s1v
             if m2v is not None:
-                lo = min(lo, m2v - 4.5 * s2v); hi = max(hi, m2v + 4.5 * s2v)
+                lo = min(lo, m2v - 4.5 * s2v)
+                hi = max(hi, m2v + 4.5 * s2v)
             if yn_val is not None:
                 # A4 fix: capture span BEFORE modifying lo, then expand symmetrically
-                span   = hi - lo
+                span = hi - lo
                 margin = max(0.10 * span, 1e-6)
                 lo = min(lo, yn_val - margin)
                 hi = max(hi, yn_val + margin)
-            x    = np.linspace(lo, hi, 400)
+            x = np.linspace(lo, hi, 400)
             pdf1 = _norm.pdf(x, m1v, s1v)
-            ln1, = ax.plot(x, pdf1, color=c1, linewidth=2.0)
-            ev1  = ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v),
-                                   color=c1, alpha=0.20)
+            (ln1,) = ax.plot(x, pdf1, color=c1, linewidth=2.0)
+            ev1 = ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v), color=c1, alpha=0.20)
             ax.axvline(m1v, color=c1, linewidth=1.0, linestyle="--", alpha=0.8)
-            left_h  = [ln1];  left_l  = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$"]
-            right_h = [ev1];  right_l = [rf"$\pm 2\sigma_1$"]
+            left_h = [ln1]
+            left_l = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$"]
+            right_h = [ev1]
+            right_l = [r"$\pm 2\sigma_1$"]
             if m2v is not None:
                 pdf2 = _norm.pdf(x, m2v, s2v)
-                ln2, = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
-                ev2  = ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
-                                       color=c2, alpha=0.15)
+                (ln2,) = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
+                ev2 = ax.fill_between(
+                    x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v), color=c2, alpha=0.15
+                )
                 ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
-                left_h  += [ln2];  left_l  += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$"]
-                right_h += [ev2];  right_l += [rf"$\pm 2\sigma_2$"]
+                left_h += [ln2]
+                left_l += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$"]
+                right_h += [ev2]
+                right_l += [r"$\pm 2\sigma_2$"]
             # ── Observation y_n[dim] (barre noire pointillée) ─────────────
             if yn_val is not None:
-                yn_line = ax.axvline(yn_val, color="#333333", linewidth=1.2,
-                                     linestyle=":", alpha=0.85)
-                left_h += [yn_line]; left_l += [rf"$y^{dim}_n={yn_val:.4g}$"]
-            ax.set_xlabel(xlabel, fontsize=10); ax.set_ylabel("density", fontsize=9)
+                yn_line = ax.axvline(
+                    yn_val, color="#333333", linewidth=1.2, linestyle=":", alpha=0.85
+                )
+                left_h += [yn_line]
+                left_l += [rf"$y^{dim}_n={yn_val:.4g}$"]
+            ax.set_xlabel(xlabel, fontsize=10)
+            ax.set_ylabel("density", fontsize=9)
             ax.legend(left_h + right_h, left_l + right_l, fontsize=7, ncol=2)
             ax.grid(True, linestyle=":", alpha=0.4)
 
         ax0 = self._fig_dens.add_subplot(1, 3, 1)
-        _marginal(ax0, 0, m1_0, s1_0,
-                  m2_0 if has2 else None, s2_0 if has2 else None,
-                  xlabel=r"$y^0_{n+1}$", yn_val=yn_0)
-        ax0.set_title(rf"Marginal $y^0$", fontsize=9)
+        _marginal(
+            ax0,
+            0,
+            m1_0,
+            s1_0,
+            m2_0 if has2 else None,
+            s2_0 if has2 else None,
+            xlabel=r"$y^0_{n+1}$",
+            yn_val=yn_0,
+        )
+        ax0.set_title(r"Marginal $y^0$", fontsize=9)
 
         ax1 = self._fig_dens.add_subplot(1, 3, 2)
-        _marginal(ax1, 1, m1_1, s1_1,
-                  m2_1 if has2 else None, s2_1 if has2 else None,
-                  xlabel=r"$y^1_{n+1}$", yn_val=yn_1)
-        ax1.set_title(rf"Marginal $y^1$", fontsize=9)
+        _marginal(
+            ax1,
+            1,
+            m1_1,
+            s1_1,
+            m2_1 if has2 else None,
+            s2_1 if has2 else None,
+            xlabel=r"$y^1_{n+1}$",
+            yn_val=yn_1,
+        )
+        ax1.set_title(r"Marginal $y^1$", fontsize=9)
 
         ax2 = self._fig_dens.add_subplot(1, 3, 3)
         # Signal 1 — contours bleus
         gx = np.linspace(m1_0 - 4 * s1_0, m1_0 + 4 * s1_0, 100)
         gy = np.linspace(m1_1 - 4 * s1_1, m1_1 + 4 * s1_1, 100)
         if has2:
-            gx = np.linspace(min(m1_0 - 4*s1_0, m2_0 - 4*s2_0),
-                             max(m1_0 + 4*s1_0, m2_0 + 4*s2_0), 100)
-            gy = np.linspace(min(m1_1 - 4*s1_1, m2_1 - 4*s2_1),
-                             max(m1_1 + 4*s1_1, m2_1 + 4*s2_1), 100)
+            gx = np.linspace(
+                min(m1_0 - 4 * s1_0, m2_0 - 4 * s2_0), max(m1_0 + 4 * s1_0, m2_0 + 4 * s2_0), 100
+            )
+            gy = np.linspace(
+                min(m1_1 - 4 * s1_1, m2_1 - 4 * s2_1), max(m1_1 + 4 * s1_1, m2_1 + 4 * s2_1), 100
+            )
         XX, YY = np.meshgrid(gx, gy)
         pos = np.stack([XX, YY], axis=-1)
         G1sym = (Gamma1 + Gamma1.T) / 2
@@ -1035,8 +1119,9 @@ class PredYPanel(QWidget):
             ax2.contour(XX, YY, ZZ1, levels=8, colors=[c1], alpha=0.60, linewidths=0.8)
         except Exception:
             pass
-        ax2.scatter([m1_0], [m1_1], color=c1, s=50, zorder=5,
-                    label=rf"$\mu_1 = ({m1_0:.3g},\,{m1_1:.3g})$")
+        ax2.scatter(
+            [m1_0], [m1_1], color=c1, s=50, zorder=5, label=rf"$\mu_1 = ({m1_0:.3g},\,{m1_1:.3g})$"
+        )
         # Signal 2 — contours oranges (superposés)
         if has2:
             G2sym = (Gamma2 + Gamma2.T) / 2
@@ -1046,69 +1131,98 @@ class PredYPanel(QWidget):
                 ax2.contour(XX, YY, ZZ2, levels=8, colors=[c2], alpha=0.70, linewidths=0.8)
             except Exception:
                 pass
-            ax2.scatter([m2_0], [m2_1], color=c2, s=50, zorder=5, marker="D",
-                        label=rf"$\mu_2 = ({m2_0:.3g},\,{m2_1:.3g})$")
+            ax2.scatter(
+                [m2_0],
+                [m2_1],
+                color=c2,
+                s=50,
+                zorder=5,
+                marker="D",
+                label=rf"$\mu_2 = ({m2_0:.3g},\,{m2_1:.3g})$",
+            )
         # ── Observed y_n (black cross) ────────────────────────────────────
         if yn_traj:
-            ax2.scatter([yn_0], [yn_1], color="#333333", s=80, zorder=6,
-                        marker="x", linewidths=2,
-                        label=rf"$y_n=({yn_0:.3g},\,{yn_1:.3g})$")
-        ax2.set_xlabel(r"$y^0_{n+1}$", fontsize=10); ax2.set_ylabel(r"$y^1_{n+1}$", fontsize=10)
+            ax2.scatter(
+                [yn_0],
+                [yn_1],
+                color="#333333",
+                s=80,
+                zorder=6,
+                marker="x",
+                linewidths=2,
+                label=rf"$y_n=({yn_0:.3g},\,{yn_1:.3g})$",
+            )
+        ax2.set_xlabel(r"$y^0_{n+1}$", fontsize=10)
+        ax2.set_ylabel(r"$y^1_{n+1}$", fontsize=10)
         ax2.set_title("Joint density", fontsize=9)
-        ax2.legend(fontsize=8); ax2.grid(True, linestyle=":", alpha=0.3)
+        ax2.legend(fontsize=8)
+        ax2.grid(True, linestyle=":", alpha=0.3)
         n_lbl = f"  n = {self._n_spin.value()}" if self._src_traj.isChecked() else ""
         self._fig_dens.suptitle(
-            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)${n_lbl}", fontsize=10)
+            rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)${n_lbl}", fontsize=10
+        )
 
     def _plot_nd(
         self,
-        mu1: np.ndarray, Gamma1: np.ndarray,
-        mu2: np.ndarray | None, Gamma2: np.ndarray | None,
-        j: int, k: int, y_n: np.ndarray,
+        mu1: np.ndarray,
+        Gamma1: np.ndarray,
+        mu2: np.ndarray | None,
+        Gamma2: np.ndarray | None,
+        j: int,
+        k: int,
+        y_n: np.ndarray,
     ) -> None:
         c1 = self._COL_SIG1
         c2 = self._COL_SIG2
         has2 = mu2 is not None
         yn_traj = self._src_traj.isChecked() and self._ys is not None
-        s = self._s; ncols = min(s, 3); nrows = (s + ncols - 1) // ncols
+        s = self._s
+        ncols = min(s, 3)
+        nrows = (s + ncols - 1) // ncols
         for i in range(s):
-            ax   = self._fig_dens.add_subplot(nrows, ncols, i + 1)
-            m1v  = float(mu1[i, 0])
-            s1v  = float(np.sqrt(max(float(Gamma1[i, i]), 1e-12)))
+            ax = self._fig_dens.add_subplot(nrows, ncols, i + 1)
+            m1v = float(mu1[i, 0])
+            s1v = float(np.sqrt(max(float(Gamma1[i, i]), 1e-12)))
             lo, hi = m1v - 4.5 * s1v, m1v + 4.5 * s1v
             if has2:
                 m2v = float(mu2[i, 0])
                 s2v = float(np.sqrt(max(float(Gamma2[i, i]), 1e-12)))
-                lo  = min(lo, m2v - 4.5 * s2v)
-                hi  = max(hi, m2v + 4.5 * s2v)
+                lo = min(lo, m2v - 4.5 * s2v)
+                hi = max(hi, m2v + 4.5 * s2v)
             yn_val_i = float(y_n[i, 0]) if yn_traj else None
             # A5 fix: expand range to include y_n with margin
             if yn_val_i is not None:
-                span   = hi - lo
+                span = hi - lo
                 margin = max(0.10 * span, 1e-6)
                 lo = min(lo, yn_val_i - margin)
                 hi = max(hi, yn_val_i + margin)
-            x    = np.linspace(lo, hi, 400)
+            x = np.linspace(lo, hi, 400)
             pdf1 = _norm.pdf(x, m1v, s1v)
-            ln1, = ax.plot(x, pdf1, color=c1, linewidth=2.0)
-            ev1  = ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v),
-                                   color=c1, alpha=0.20)
+            (ln1,) = ax.plot(x, pdf1, color=c1, linewidth=2.0)
+            ev1 = ax.fill_between(x, pdf1, where=(np.abs(x - m1v) <= 2 * s1v), color=c1, alpha=0.20)
             ax.axvline(m1v, color=c1, linewidth=1.0, linestyle="--", alpha=0.8)
-            left_h  = [ln1];  left_l  = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$"]
-            right_h = [ev1];  right_l = [rf"$\pm 2\sigma_1$"]
+            left_h = [ln1]
+            left_l = [rf"$p_1$  $\mu={m1v:.3g}$, $\sigma={s1v:.3g}$"]
+            right_h = [ev1]
+            right_l = [r"$\pm 2\sigma_1$"]
             if has2:
                 pdf2 = _norm.pdf(x, m2v, s2v)
-                ln2, = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
-                ev2  = ax.fill_between(x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v),
-                                       color=c2, alpha=0.15)
+                (ln2,) = ax.plot(x, pdf2, color=c2, linewidth=2.0, linestyle="--")
+                ev2 = ax.fill_between(
+                    x, pdf2, where=(np.abs(x - m2v) <= 2 * s2v), color=c2, alpha=0.15
+                )
                 ax.axvline(m2v, color=c2, linewidth=1.0, linestyle="--", alpha=0.8)
-                left_h  += [ln2];  left_l  += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$"]
-                right_h += [ev2];  right_l += [rf"$\pm 2\sigma_2$"]
+                left_h += [ln2]
+                left_l += [rf"$p_2$  $\mu={m2v:.3g}$, $\sigma={s2v:.3g}$"]
+                right_h += [ev2]
+                right_l += [r"$\pm 2\sigma_2$"]
             # ── Observed y_n[i] (black dotted vertical line) ─────────────
             if yn_val_i is not None:
-                yn_line = ax.axvline(yn_val_i, color="#333333", linewidth=1.2,
-                                     linestyle=":", alpha=0.85)
-                left_h += [yn_line]; left_l += [rf"$y^{i}_n={yn_val_i:.4g}$"]
+                yn_line = ax.axvline(
+                    yn_val_i, color="#333333", linewidth=1.2, linestyle=":", alpha=0.85
+                )
+                left_h += [yn_line]
+                left_l += [rf"$y^{i}_n={yn_val_i:.4g}$"]
             ax.set_xlabel(rf"$y^{i}_{{n+1}}$", fontsize=10)
             ax.set_ylabel("density", fontsize=9)
             ax.set_title(rf"Marginal $y^{i}$", fontsize=9)
@@ -1117,18 +1231,27 @@ class PredYPanel(QWidget):
         n_lbl = f"  n = {self._n_spin.value()}" if self._src_traj.isChecked() else ""
         self._fig_dens.suptitle(
             rf"$p(y_{{n+1}} \mid r_n={j},\; r_{{n+1}}={k},\; y_n)${n_lbl}  [marginales]",
-            fontsize=10)
+            fontsize=10,
+        )
 
     def _draw_density_empty(self) -> None:
         self._fig_dens.clf()
         ax = self._fig_dens.add_subplot(1, 1, 1)
-        ax.set_xticks([]); ax.set_yticks([])
-        ax.text(0.5, 0.5,
-                "Run the filter in\n"
-                "'Exact IMM – H5 required' mode\n"
-                "to display\n"
-                r"$p(y_{n+1} \mid r_n,\; r_{n+1},\; y_n)$",
-                transform=ax.transAxes, ha="center", va="center",
-                fontsize=11, color="#999999", style="italic")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.text(
+            0.5,
+            0.5,
+            "Run the filter in\n"
+            "'Exact IMM – H5 required' mode\n"
+            "to display\n"
+            r"$p(y_{n+1} \mid r_n,\; r_{n+1},\; y_n)$",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#999999",
+            style="italic",
+        )
         ax.grid(True, linestyle=":", alpha=0.3)
         self._canvas_dens.draw_idle()

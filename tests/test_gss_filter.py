@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 tests/test_gss_filter.py
 ========================
@@ -28,9 +27,8 @@ import numpy as np
 import pytest
 
 from prg.classes.GSSParams import GSSParams
-from prg.filter.gss_filter import FilterResult, GSSFilter
+from prg.filter.gss_filter import GSSFilter
 from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -82,9 +80,9 @@ class TestFilterResult:
     def test_shapes(self, params, filt):
         y = np.array([[0.5]])
         res = filt.step(y)
-        assert res.E_x.shape  == (params.q, 1)
+        assert res.E_x.shape == (params.q, 1)
         assert res.E_xx.shape == (params.q, params.q)
-        assert res.pi.shape   == (params.K,)
+        assert res.pi.shape == (params.K,)
 
     def test_pi_sums_to_one(self, params, filt):
         y = np.array([[0.5]])
@@ -130,9 +128,9 @@ class TestRecursion:
         for i in range(10):
             y = np.random.default_rng(i).standard_normal((params.s, 1))
             res = filt.step(y)
-            assert res.E_x.shape  == (params.q, 1)
+            assert res.E_x.shape == (params.q, 1)
             assert res.E_xx.shape == (params.q, params.q)
-            assert res.pi.shape   == (params.K,)
+            assert res.pi.shape == (params.K,)
 
     def test_pi_always_valid(self, params, filt):
         rng = np.random.default_rng(99)
@@ -160,7 +158,7 @@ class TestRecursion:
         res1 = f1.step(y_col)
         res2 = f2.step(y_flat)
         assert np.allclose(res1.E_x, res2.E_x)
-        assert np.allclose(res1.pi,  res2.pi)
+        assert np.allclose(res1.pi, res2.pi)
 
 
 # ---------------------------------------------------------------------------
@@ -179,17 +177,17 @@ class TestReset:
     def test_reset_gives_same_results(self, params):
         """Two passes over the same sequence must yield identical outputs."""
         filt = GSSFilter(params)
-        rng  = np.random.default_rng(42)
-        ys   = [rng.standard_normal((params.s, 1)) for _ in range(20)]
+        rng = np.random.default_rng(42)
+        ys = [rng.standard_normal((params.s, 1)) for _ in range(20)]
 
-        results_first  = [filt.step(y) for y in ys]
+        results_first = [filt.step(y) for y in ys]
         filt.reset()
         results_second = [filt.step(y) for y in ys]
 
         for r1, r2 in zip(results_first, results_second):
-            assert np.allclose(r1.E_x,  r2.E_x)
+            assert np.allclose(r1.E_x, r2.E_x)
             assert np.allclose(r1.E_xx, r2.E_xx)
-            assert np.allclose(r1.pi,   r2.pi)
+            assert np.allclose(r1.pi, r2.pi)
 
 
 # ---------------------------------------------------------------------------
@@ -255,17 +253,11 @@ class TestRunCsv:
         filtered estimates.
         """
         with tempfile.TemporaryDirectory() as tmp:
-            sim_path, df_run = GSSFilter(params).run(
-                N=80, seed=11, output_dir=tmp
-            )
+            sim_path, df_run = GSSFilter(params).run(N=80, seed=11, output_dir=tmp)
             df_csv = GSSFilter(params).run_csv(sim_path)
 
-        assert np.allclose(
-            df_run["E_x_0"].values, df_csv["E_x_0"].values, atol=1e-12
-        )
-        assert np.allclose(
-            df_run["p_r_0"].values, df_csv["p_r_0"].values, atol=1e-12
-        )
+        assert np.allclose(df_run["E_x_0"].values, df_csv["E_x_0"].values, atol=1e-12)
+        assert np.allclose(df_run["p_r_0"].values, df_csv["p_r_0"].values, atol=1e-12)
 
     def test_csv_has_sq_err_when_x_present(self, params):
         with tempfile.TemporaryDirectory() as tmp:
@@ -280,9 +272,7 @@ class TestRunCsv:
         # Build a y-only CSV
         rng = np.random.default_rng(0)
         rows = [{"n": i, "y_0": float(rng.standard_normal())} for i in range(20)]
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
             pd.DataFrame(rows).to_csv(tmp.name, index=False)
             df = GSSFilter(params).run_csv(tmp.name)
         assert "sq_err" not in df.columns
@@ -301,9 +291,7 @@ class TestStatisticalSanity:
         """
         _, df = GSSFilter(params).run(N=2000, seed=0)
         filter_mse = df["sq_err"].mean()
-        assert filter_mse < 0.8, (
-            f"Filter MSE {filter_mse:.3f} is not below naive baseline 0.8"
-        )
+        assert filter_mse < 0.8, f"Filter MSE {filter_mse:.3f} is not below naive baseline 0.8"
 
     def test_posterior_variance_decreases_on_average(self, params):
         """
@@ -311,7 +299,7 @@ class TestStatisticalSanity:
         variance of 1.0.
         """
         _, df = GSSFilter(params).run(N=500, seed=1)
-        mean_var = df["V_x_0"].iloc[50:].mean()   # skip transient
+        mean_var = df["V_x_0"].iloc[50:].mean()  # skip transient
         assert mean_var < 0.8
 
     def test_regime_probabilities_not_degenerate(self, params):
@@ -346,21 +334,21 @@ class TestOptionB:
         filt_a = GSSFilter(params)
         filt_b = GSSFilter(params)
         rng = np.random.default_rng(77)
-        ys  = [rng.standard_normal((params.s, 1)) for _ in range(30)]
+        ys = [rng.standard_normal((params.s, 1)) for _ in range(30)]
         for y in ys:
             ra = filt_a.step(y)
             rb = filt_b.step(y)
-            assert np.allclose(ra.E_x, rb.E_x,  atol=1e-14)
-            assert np.allclose(ra.pi,  rb.pi,   atol=1e-14)
+            assert np.allclose(ra.E_x, rb.E_x, atol=1e-14)
+            assert np.allclose(ra.pi, rb.pi, atol=1e-14)
 
     def test_e_xx_geq_e_x_squared(self, params):
         """
         E[X²|y] ≥ E[X|y]²  must hold at every step (Var ≥ 0 in 1-D).
         """
         filt = GSSFilter(params)
-        rng  = np.random.default_rng(55)
+        rng = np.random.default_rng(55)
         for _ in range(30):
-            y   = rng.standard_normal((params.s, 1))
+            y = rng.standard_normal((params.s, 1))
             res = filt.step(y)
             # scalar case: E_xx[0,0] >= E_x[0,0]**2
             assert float(res.E_xx[0, 0]) >= float(res.E_x[0, 0]) ** 2 - 1e-10
@@ -377,9 +365,9 @@ class TestJosephForm:
 
     def test_joseph_constructor(self, params):
         """The joseph flag is exposed via constructor and property."""
-        f_short  = GSSFilter(params, mode="h5_exact")
+        f_short = GSSFilter(params, mode="h5_exact")
         f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
-        assert f_short.joseph  is False
+        assert f_short.joseph is False
         assert f_joseph.joseph is True
         assert "joseph=True" in repr(f_joseph)
 
@@ -389,12 +377,12 @@ class TestJosephForm:
         per-regime posterior covariance (the centred Schur complement is
         the same matrix, computed two different ways).
         """
-        f_short  = GSSFilter(params, mode="h5_exact")
+        f_short = GSSFilter(params, mode="h5_exact")
         f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
         for k in range(params.K):
-            assert np.allclose(
-                f_short._P_post[k], f_joseph._P_post[k], atol=1e-9
-            ), f"Joseph vs short form mismatch for regime k={k}"
+            assert np.allclose(f_short._P_post[k], f_joseph._P_post[k], atol=1e-9), (
+                f"Joseph vs short form mismatch for regime k={k}"
+            )
 
     def test_joseph_filter_outputs_match(self, params):
         """
@@ -403,21 +391,21 @@ class TestJosephForm:
         rounding only).
         """
         rng = np.random.default_rng(2024)
-        ys  = [rng.standard_normal((params.s, 1)) for _ in range(50)]
-        f_short  = GSSFilter(params, mode="h5_exact")
+        ys = [rng.standard_normal((params.s, 1)) for _ in range(50)]
+        f_short = GSSFilter(params, mode="h5_exact")
         f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
         for y in ys:
             r_s = f_short.step(y)
             r_j = f_joseph.step(y)
             assert np.allclose(r_s.E_x, r_j.E_x, atol=1e-9)
-            assert np.allclose(r_s.pi,  r_j.pi,  atol=1e-9)
+            assert np.allclose(r_s.pi, r_j.pi, atol=1e-9)
 
     def test_joseph_psd(self, params):
         """Joseph posterior covariance must be PSD by construction."""
         filt = GSSFilter(params, joseph=True, mode="h5_exact")
-        rng  = np.random.default_rng(99)
+        rng = np.random.default_rng(99)
         for _ in range(30):
-            y   = rng.standard_normal((params.s, 1))
+            y = rng.standard_normal((params.s, 1))
             res = filt.step(y)
             eigvals = np.linalg.eigvalsh(res.Var_x)
             assert np.all(eigvals >= -1e-10)
@@ -450,8 +438,8 @@ class TestStationaryMoments:
         filt = GSSFilter(params, mode="h5_exact")
         K = params.K
         for k in range(K):
-            F  = params.f_matrix.F(k)
-            b  = params.b(k)
+            F = params.f_matrix.F(k)
+            b = params.b(k)
             mu_pred = F @ sum(filt._p_rev[j, k] * filt._mu_z[j] for j in range(K)) + b
             assert np.allclose(filt._mu_z[k], mu_pred, atol=1e-8)
 
@@ -471,6 +459,7 @@ class TestFilterModes:
 
     def test_explicit_h5_exact(self, params):
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             filt = GSSFilter(params, mode="h5_exact")
@@ -479,6 +468,7 @@ class TestFilterModes:
     def test_h5_warns_on_non_h5_model(self, params):
         """Model_gss_K2_q1_s1 has B(k) != 0, so h5_exact must warn."""
         import warnings
+
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")
             GSSFilter(params, mode="h5_exact")
@@ -488,14 +478,13 @@ class TestFilterModes:
 
     def test_imm_general_no_warning(self, params):
         import warnings
+
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")
             GSSFilter(params, mode="imm_general")
         # imm_general must not emit the (H5) warning
         h5_ws = [
-            w for w in ws
-            if issubclass(w.category, RuntimeWarning)
-            and "h5_exact" in str(w.message)
+            w for w in ws if issubclass(w.category, RuntimeWarning) and "h5_exact" in str(w.message)
         ]
         assert h5_ws == []
 
@@ -509,9 +498,10 @@ class TestFilterModes:
         (MSE much smaller than h5_exact's biased estimate).
         """
         import warnings
+
         _, df_gen = GSSFilter(params, mode="imm_general").run(N=300, seed=11)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            _, df_h5  = GSSFilter(params, mode="h5_exact").run(N=300, seed=11)
+            _, df_h5 = GSSFilter(params, mode="h5_exact").run(N=300, seed=11)
         # On a non-(H5) model, imm_general should have strictly lower MSE.
         assert df_gen["sq_err"].mean() < df_h5["sq_err"].mean()

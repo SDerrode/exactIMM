@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/gui/main_window.py
 ======================
@@ -45,23 +44,37 @@ import csv
 import datetime
 import pathlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
 import numpy as np
-from scipy.stats import chi2 as _chi2_dist
-from scipy.stats import jarque_bera as _jb
-from scipy.stats import norm as _norm_dist     # C3 / C1: hoisted from InnovHistDialog
-
-from prg.filter.gss_filter import GSSFilter
-
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
+from PyQt6.QtCore import QSettings, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QLabel, QSpinBox, QLineEdit, QPushButton,
-    QDialog, QMessageBox, QSizePolicy, QSplitter,
-    QFileDialog, QFrame, QComboBox, QCheckBox, QProgressBar,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QSplitter,
     QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
+from scipy.stats import chi2 as _chi2_dist
+from scipy.stats import jarque_bera as _jb
+from scipy.stats import norm as _norm_dist  # C3 / C1: hoisted from InnovHistDialog
+
+from prg.filter.gss_filter import GSSFilter
 
 # ---------------------------------------------------------------------------
 # C3 — Named constants for plot colours and diagnostic thresholds
@@ -69,22 +82,28 @@ from PyQt6.QtWidgets import (
 
 # Matplotlib series colours (tab10 palette, first 5)
 _COL_X = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]  # hidden components
-_COL_Y = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]             # observed components
+_COL_Y = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]  # observed components
 _COL_R = ["#555555", "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]  # regime colours
 
 # Diagnostic FWER target (used in Bonferroni correction for innovation tests)
-_INNOV_ALPHA_FAM: float = 0.05   # family-wise error rate over 2·s tests
+_INNOV_ALPHA_FAM: float = 0.05  # family-wise error rate over 2·s tests
 
 # ---------------------------------------------------------------------------
 # White-noise test (Ljung-Box)
 # ---------------------------------------------------------------------------
 
-_PILL_OK    = ("font-size: 10px; padding: 2px 8px; border-radius: 3px;"
-               "background: #d4edda; color: #155724; border: 1px solid #c3e6cb;")
-_PILL_WARN  = ("font-size: 10px; padding: 2px 8px; border-radius: 3px;"
-               "background: #fff3cd; color: #856404; border: 1px solid #ffc107;")
-_PILL_ERR   = ("font-size: 10px; padding: 2px 8px; border-radius: 3px;"
-               "background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;")
+_PILL_OK = (
+    "font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+    "background: #d4edda; color: #155724; border: 1px solid #c3e6cb;"
+)
+_PILL_WARN = (
+    "font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+    "background: #fff3cd; color: #856404; border: 1px solid #ffc107;"
+)
+_PILL_ERR = (
+    "font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+    "background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;"
+)
 
 
 def _ljung_box(x: np.ndarray, lags: int | None = None) -> tuple[float, float, int]:
@@ -101,13 +120,10 @@ def _ljung_box(x: np.ndarray, lags: int | None = None) -> tuple[float, float, in
     h = min(h, n - 1)
     x = x - x.mean()
     var = float(np.var(x))
-    if var < 1e-30:                         # constant series
+    if var < 1e-30:  # constant series
         return 0.0, 1.0, h
     # Sample autocorrelations ρ_k, k = 1…h
-    rho_sq = np.array([
-        (np.dot(x[k:], x[:-k]) / (n * var)) ** 2
-        for k in range(1, h + 1)
-    ])
+    rho_sq = np.array([(np.dot(x[k:], x[:-k]) / (n * var)) ** 2 for k in range(1, h + 1)])
     Q = float(n * (n + 2) * np.sum(rho_sq / (n - np.arange(1, h + 1))))
     p = float(1.0 - _chi2_dist.cdf(Q, df=h))
     return Q, p, h
@@ -131,21 +147,21 @@ def _shape_diagnostics(x: np.ndarray) -> tuple[float, float, float, float]:
     if n < 4:
         return 0.0, 0.0, 0.0, 1.0
     xc = np.asarray(x, dtype=float) - float(np.mean(x))
-    sigma2 = float(np.mean(xc ** 2))
-    if sigma2 < 1e-30:                      # constant series
+    sigma2 = float(np.mean(xc**2))
+    if sigma2 < 1e-30:  # constant series
         return 0.0, 0.0, 0.0, 1.0
     sigma = float(np.sqrt(sigma2))
     z = xc / sigma
-    S    = float(np.mean(z ** 3))
-    Kurt = float(np.mean(z ** 4) - 3.0)
+    S = float(np.mean(z**3))
+    Kurt = float(np.mean(z**4) - 3.0)
     try:
-        jb_res = _jb(x)                    # SciPy returns (statistic, pvalue)
-        JB     = float(jb_res[0])
-        p      = float(jb_res[1])
-    except Exception:                       # noqa: BLE001
+        jb_res = _jb(x)  # SciPy returns (statistic, pvalue)
+        JB = float(jb_res[0])
+        p = float(jb_res[1])
+    except Exception:  # noqa: BLE001
         # Manual fallback (matches SciPy formula exactly)
-        JB = n * (S ** 2 / 6.0 + Kurt ** 2 / 24.0)
-        p  = float(1.0 - _chi2_dist.cdf(JB, df=2))
+        JB = n * (S**2 / 6.0 + Kurt**2 / 24.0)
+        p = float(1.0 - _chi2_dist.cdf(JB, df=2))
     return S, Kurt, JB, p
 
 
@@ -193,19 +209,19 @@ def _standardise_innovations(
                 w = float(mix_w[j, k])
                 if w < 1e-12:
                     continue
-                delta = mu_Y_jk[j][k] - mu_marg       # (s, 1)
+                delta = mu_Y_jk[j][k] - mu_marg  # (s, 1)
                 S += w * (Gamma[j][k] + delta @ delta.T)
     else:
         # Sample covariance fallback (imm_general mode)
-        raw = innovations.T    # (s, N)
+        raw = innovations.T  # (s, N)
         S = np.cov(raw) if s > 1 else np.array([[float(np.var(innovations[:, 0]))]])
 
     # Cholesky + solve: ν̃ = L⁻¹ ν  →  each column has unit variance
     try:
         L = np.linalg.cholesky(_sym_reg(S, 1e-10))
-        return np.linalg.solve(L, innovations.T).T   # (N, s)
+        return np.linalg.solve(L, innovations.T).T  # (N, s)
     except np.linalg.LinAlgError:
-        return innovations   # give up and return raw
+        return innovations  # give up and return raw
 
 
 def _sym_reg(M: np.ndarray, eps: float = 1e-10) -> np.ndarray:
@@ -218,6 +234,7 @@ def _sym_reg(M: np.ndarray, eps: float = 1e-10) -> np.ndarray:
 # Stationary distribution helper
 # ---------------------------------------------------------------------------
 
+
 def _stationary_dist(P: np.ndarray) -> np.ndarray | None:
     """Stationary distribution of a row-stochastic matrix (left eigenvector)."""
     try:
@@ -225,7 +242,7 @@ def _stationary_dist(P: np.ndarray) -> np.ndarray | None:
         idx = int(np.argmin(np.abs(vals - 1.0)))
         pi = np.real(vecs[:, idx])
         pi = np.maximum(pi, 0.0)
-        s  = pi.sum()
+        s = pi.sum()
         return pi / s if s > 1e-12 else None
     except np.linalg.LinAlgError:
         return None
@@ -234,6 +251,7 @@ def _stationary_dist(P: np.ndarray) -> np.ndarray | None:
 # ---------------------------------------------------------------------------
 # Histogram dialogs
 # ---------------------------------------------------------------------------
+
 
 class _InnovHistDialog(QDialog):
     """Non-modal dialog: innovation histograms, ACF, and scatter (D4/D5/D12).
@@ -255,11 +273,11 @@ class _InnovHistDialog(QDialog):
     def __init__(
         self,
         innovations: np.ndarray,
-        mix_params:  dict | None       = None,
-        pis:         np.ndarray | None = None,   # D11: (N, K) filtered posteriors
-        mu_Y:        list | None       = None,   # [K] ndarray (s,1) — stationary means
-        S_YY:        list | None       = None,   # [K] ndarray (s,s) — stationary cov
-        ys:          np.ndarray | None = None,   # (N, s) observations
+        mix_params: dict | None = None,
+        pis: np.ndarray | None = None,  # D11: (N, K) filtered posteriors
+        mu_Y: list | None = None,  # [K] ndarray (s,1) — stationary means
+        S_YY: list | None = None,  # [K] ndarray (s,s) — stationary cov
+        ys: np.ndarray | None = None,  # (N, s) observations
         parent=None,
     ):
         super().__init__(parent)
@@ -269,13 +287,15 @@ class _InnovHistDialog(QDialog):
         self._innovations = innovations
 
         from matplotlib.backends.backend_qtagg import (
-            FigureCanvasQTAgg, NavigationToolbar2QT,
+            FigureCanvasQTAgg,
+            NavigationToolbar2QT,
         )
         from matplotlib.figure import Figure
-        _norm = _norm_dist   # C1/C3: use module-level import
 
-        s      = innovations.shape[1]
-        N      = innovations.shape[0]
+        _norm = _norm_dist  # C1/C3: use module-level import
+
+        s = innovations.shape[1]
+        N = innovations.shape[0]
         layout = QVBoxLayout(self)
 
         inner_tabs = QTabWidget()
@@ -289,22 +309,27 @@ class _InnovHistDialog(QDialog):
         hist_w = QWidget()
         hist_l = QVBoxLayout(hist_w)
         hist_l.setContentsMargins(0, 0, 0, 0)
-        fig_h   = Figure(figsize=(max(4, 3.5 * s), 3.8), tight_layout=True)
-        can_h   = FigureCanvasQTAgg(fig_h)
-        can_h.setFocusPolicy(Qt.FocusPolicy.ClickFocus)    # D10
+        fig_h = Figure(figsize=(max(4, 3.5 * s), 3.8), tight_layout=True)
+        can_h = FigureCanvasQTAgg(fig_h)
+        can_h.setFocusPolicy(Qt.FocusPolicy.ClickFocus)  # D10
         hist_l.addWidget(NavigationToolbar2QT(can_h, hist_w))
         hist_l.addWidget(can_h)
 
         for i in range(s):
             ax = fig_h.add_subplot(1, s, i + 1)
-            x  = innovations[:, i]
-            ax.hist(x, bins=40, density=True,
-                    color=colours[i % len(colours)], alpha=0.70,
-                    label="empirical")
+            x = innovations[:, i]
+            ax.hist(
+                x,
+                bins=40,
+                density=True,
+                color=colours[i % len(colours)],
+                alpha=0.70,
+                label="empirical",
+            )
 
             # x-grid slightly wider than the data range
             pad = 0.5 * float(x.std()) if x.std() > 1e-10 else 0.5
-            xg  = np.linspace(float(x.min()) - pad, float(x.max()) + pad, 400)
+            xg = np.linspace(float(x.min()) - pad, float(x.max()) + pad, 400)
 
             if mix_params is not None:
                 # ── Theoretical Gaussian mixture ──────────────────────────
@@ -312,37 +337,46 @@ class _InnovHistDialog(QDialog):
                 #
                 # δ̃_{jk} = μ_{Y,jk}[i] − Σ_{k'} P(j,k') μ_{Y,jk'}[i]
                 #         = within-previous-regime centred mean
-                w     = mix_params["w"]        # (K, K) — already normalised
+                w = mix_params["w"]  # (K, K) — already normalised
                 K_mix = w.shape[0]
-                Gam   = mix_params["Gamma"]    # [K][K] (s, s)
+                Gam = mix_params["Gamma"]  # [K][K] (s, s)
                 muYjk = mix_params["mu_Y_jk"]  # [K][K] (s, 1)
 
                 pdf_mix = np.zeros_like(xg)
                 for j in range(K_mix):
                     pi_j = max(float(w[j, :].sum()), 1e-12)
-                    prev_mean_j_i = sum(
-                        float(w[j, kk]) * float(muYjk[j][kk][i, 0])
-                        for kk in range(K_mix)
-                    ) / pi_j
+                    prev_mean_j_i = (
+                        sum(float(w[j, kk]) * float(muYjk[j][kk][i, 0]) for kk in range(K_mix))
+                        / pi_j
+                    )
                     for k in range(K_mix):
                         wjk = float(w[j, k])
                         if wjk < 1e-10:
                             continue
                         delta = float(muYjk[j][k][i, 0]) - prev_mean_j_i
                         var_i = float(Gam[j][k][i, i])
-                        sig   = float(np.sqrt(max(var_i, 1e-12)))
+                        sig = float(np.sqrt(max(var_i, 1e-12)))
                         pdf_mix += wjk * _norm.pdf(xg, delta, sig)
 
-                ax.plot(xg, pdf_mix, "k-", linewidth=1.8,
-                        label=rf"$\sum_{{jk}}w_{{jk}}\,\mathcal{{N}}(\tilde{{\delta}}_{{jk}},\Gamma_{{jk}})$"
-                              f"  ({K_mix}² terms)")
+                ax.plot(
+                    xg,
+                    pdf_mix,
+                    "k-",
+                    linewidth=1.8,
+                    label=rf"$\sum_{{jk}}w_{{jk}}\,\mathcal{{N}}(\tilde{{\delta}}_{{jk}},\Gamma_{{jk}})$"
+                    f"  ({K_mix}² terms)",
+                )
             else:
                 # ── Fallback: best-fit single Gaussian ───────────────────
                 mu_e, sig_e = float(x.mean()), float(x.std())
                 if sig_e > 1e-10:
-                    ax.plot(xg, _norm.pdf(xg, mu_e, sig_e),
-                            "k--", linewidth=1.5,
-                            label=f"N({mu_e:.3f}, {sig_e:.3f}²)")
+                    ax.plot(
+                        xg,
+                        _norm.pdf(xg, mu_e, sig_e),
+                        "k--",
+                        linewidth=1.5,
+                        label=f"N({mu_e:.3f}, {sig_e:.3f}²)",
+                    )
 
             ax.set_title(rf"$\nu^{i}$   (N = {N})", fontsize=10)
             ax.set_xlabel("value", fontsize=9)
@@ -359,33 +393,32 @@ class _InnovHistDialog(QDialog):
         acf_l = QVBoxLayout(acf_w)
         acf_l.setContentsMargins(0, 0, 0, 0)
         max_lag = min(40, max(5, N // 10))
-        fig_a   = Figure(figsize=(max(4, 3.5 * s), 3.2), tight_layout=True)
-        can_a   = FigureCanvasQTAgg(fig_a)
-        can_a.setFocusPolicy(Qt.FocusPolicy.ClickFocus)    # D10
+        fig_a = Figure(figsize=(max(4, 3.5 * s), 3.2), tight_layout=True)
+        can_a = FigureCanvasQTAgg(fig_a)
+        can_a.setFocusPolicy(Qt.FocusPolicy.ClickFocus)  # D10
         acf_l.addWidget(NavigationToolbar2QT(can_a, acf_w))
         acf_l.addWidget(can_a)
         conf95 = 1.96 / float(np.sqrt(N))
 
         for i in range(s):
             ax = fig_a.add_subplot(1, s, i + 1)
-            x  = innovations[:, i]
+            x = innovations[:, i]
             xc = x - x.mean()
             c0 = float(np.dot(xc, xc)) / N
             if c0 > 1e-30:
-                acf_vals = np.array([
-                    float(np.dot(xc[:N - lag], xc[lag:])) / (N * c0)
-                    for lag in range(1, max_lag + 1)
-                ])
+                acf_vals = np.array(
+                    [
+                        float(np.dot(xc[: N - lag], xc[lag:])) / (N * c0)
+                        for lag in range(1, max_lag + 1)
+                    ]
+                )
             else:
                 acf_vals = np.zeros(max_lag)
             lags = np.arange(1, max_lag + 1)
-            ax.bar(lags, acf_vals, color=colours[i % len(colours)],
-                   alpha=0.75, width=0.8)
-            ax.axhline(0,       color="k",       linewidth=0.6)
-            ax.axhline( conf95, color="#999999",  linewidth=1.0,
-                        linestyle="--", label=f"±1.96/√N")
-            ax.axhline(-conf95, color="#999999",  linewidth=1.0,
-                        linestyle="--")
+            ax.bar(lags, acf_vals, color=colours[i % len(colours)], alpha=0.75, width=0.8)
+            ax.axhline(0, color="k", linewidth=0.6)
+            ax.axhline(conf95, color="#999999", linewidth=1.0, linestyle="--", label="±1.96/√N")
+            ax.axhline(-conf95, color="#999999", linewidth=1.0, linestyle="--")
             ax.set_xlim(0, max_lag + 1)
             ax.set_ylim(-1.05, 1.05)
             ax.set_xlabel("lag", fontsize=9)
@@ -404,12 +437,11 @@ class _InnovHistDialog(QDialog):
             sc_l = QVBoxLayout(sc_w)
             sc_l.setContentsMargins(0, 0, 0, 0)
             n_pairs = s * (s - 1) // 2
-            ncols   = min(n_pairs, 3)
-            nrows   = (n_pairs + ncols - 1) // ncols
-            fig_s   = Figure(figsize=(max(4, 3.5 * ncols), 3.2 * nrows),
-                             tight_layout=True)
-            can_s   = FigureCanvasQTAgg(fig_s)
-            can_s.setFocusPolicy(Qt.FocusPolicy.ClickFocus)    # D10
+            ncols = min(n_pairs, 3)
+            nrows = (n_pairs + ncols - 1) // ncols
+            fig_s = Figure(figsize=(max(4, 3.5 * ncols), 3.2 * nrows), tight_layout=True)
+            can_s = FigureCanvasQTAgg(fig_s)
+            can_s.setFocusPolicy(Qt.FocusPolicy.ClickFocus)  # D10
             sc_l.addWidget(NavigationToolbar2QT(can_s, sc_w))
             sc_l.addWidget(can_s)
 
@@ -417,11 +449,10 @@ class _InnovHistDialog(QDialog):
             for a_i in range(s):
                 for b_i in range(a_i + 1, s):
                     ax = fig_s.add_subplot(nrows, ncols, idx)
-                    ax.scatter(innovations[:, a_i], innovations[:, b_i],
-                               s=4, alpha=0.40, color="#555555")
-                    rho = float(np.corrcoef(
-                        innovations[:, a_i], innovations[:, b_i]
-                    )[0, 1])
+                    ax.scatter(
+                        innovations[:, a_i], innovations[:, b_i], s=4, alpha=0.40, color="#555555"
+                    )
+                    rho = float(np.corrcoef(innovations[:, a_i], innovations[:, b_i])[0, 1])
                     ax.set_xlabel(rf"$\nu^{a_i}$", fontsize=9)
                     ax.set_ylabel(rf"$\nu^{b_i}$", fontsize=9)
                     ax.set_title(
@@ -453,10 +484,7 @@ class _InnovHistDialog(QDialog):
 
             # Decide whether we can build soft-weighted residuals
             use_resid = (
-                mu_Y is not None
-                and ys is not None
-                and len(mu_Y) == K
-                and ys.shape == (N, s)
+                mu_Y is not None and ys is not None and len(mu_Y) == K and ys.shape == (N, s)
             )
             has_theory = use_resid and S_YY is not None and len(S_YY) == K
 
@@ -464,7 +492,8 @@ class _InnovHistDialog(QDialog):
             preg_l = QVBoxLayout(preg_w)
             preg_l.setContentsMargins(2, 2, 2, 2)
 
-            nrows = K; ncols = s
+            nrows = K
+            ncols = s
             fig_pr = Figure(
                 figsize=(max(4, 3.5 * ncols), max(2.5, 2.5 * nrows)),
                 tight_layout=True,
@@ -475,7 +504,7 @@ class _InnovHistDialog(QDialog):
             # Pre-compute residuals for all regimes (shape (N, s) each)
             if use_resid:
                 resid_all = [
-                    ys - mu_Y[k].ravel()[np.newaxis, :]   # (N, s)
+                    ys - mu_Y[k].ravel()[np.newaxis, :]  # (N, s)
                     for k in range(K)
                 ]
 
@@ -483,22 +512,22 @@ class _InnovHistDialog(QDialog):
                 c = regime_colours[k % len(regime_colours)]
 
                 if use_resid:
-                    w_k   = pis[:, k]            # (N,) soft weights π_n(k)
-                    n_eff = float(w_k.sum())     # effective count
-                    xi_all = resid_all[k]        # (N, s)  y_n − µ_Y(k)
-                    w_norm = w_k / max(n_eff, 1e-12)   # normalised
+                    w_k = pis[:, k]  # (N,) soft weights π_n(k)
+                    n_eff = float(w_k.sum())  # effective count
+                    xi_all = resid_all[k]  # (N, s)  y_n − µ_Y(k)
+                    w_norm = w_k / max(n_eff, 1e-12)  # normalised
                 else:
                     # Fallback: hard-assigned marginal innovations
-                    mask  = np.argmax(pis, axis=1) == k
+                    mask = np.argmax(pis, axis=1) == k
                     n_eff = float(mask.sum())
-                    xi_all = innovations[mask]   # (N_k, s)
-                    w_k    = None
+                    xi_all = innovations[mask]  # (N_k, s)
+                    w_k = None
                     w_norm = None
 
                 for i in range(s):
                     ax = fig_pr.add_subplot(nrows, ncols, k * ncols + i + 1)
                     if n_eff > 1:
-                        xi = xi_all[:, i]        # (N,) or (N_k,)
+                        xi = xi_all[:, i]  # (N,) or (N_k,)
 
                         # ── Axis limits: clip to ±5σ of theoretical (or ±3 empirical σ)
                         if has_theory:
@@ -506,39 +535,45 @@ class _InnovHistDialog(QDialog):
                             x_lo, x_hi = -5.0 * sig_th, 5.0 * sig_th
                         else:
                             if w_norm is not None:
-                                mu_e  = float(np.dot(w_norm, xi))
+                                mu_e = float(np.dot(w_norm, xi))
                                 std_e = float(np.sqrt(np.dot(w_norm, (xi - mu_e) ** 2)))
                             else:
                                 mu_e, std_e = float(xi.mean()), float(xi.std())
                             std_e = max(std_e, 1e-3)
-                            x_lo  = mu_e - 3.5 * std_e
-                            x_hi  = mu_e + 3.5 * std_e
+                            x_lo = mu_e - 3.5 * std_e
+                            x_hi = mu_e + 3.5 * std_e
 
                         n_bins = max(10, min(int(n_eff) // 50, 300))
-                        ax.hist(xi,
-                                bins=n_bins,
-                                range=(x_lo, x_hi),
-                                weights=w_k,
-                                density=True,
-                                color=c, alpha=0.5)
+                        ax.hist(
+                            xi,
+                            bins=n_bins,
+                            range=(x_lo, x_hi),
+                            weights=w_k,
+                            density=True,
+                            color=c,
+                            alpha=0.5,
+                        )
                         ax.set_xlim(x_lo, x_hi)
 
                         xg = np.linspace(x_lo, x_hi, 400)
                         if has_theory:
-                            ax.plot(xg, _norm.pdf(xg, 0.0, sig_th),
-                                    "k-", linewidth=1.6,
-                                    label=rf"$\mathcal{{N}}(0,\,\Sigma_{{YY}}({k}))$")
+                            ax.plot(
+                                xg,
+                                _norm.pdf(xg, 0.0, sig_th),
+                                "k-",
+                                linewidth=1.6,
+                                label=rf"$\mathcal{{N}}(0,\,\Sigma_{{YY}}({k}))$",
+                            )
                             ax.legend(fontsize=7)
                         else:
                             if std_e > 1e-10:
-                                ax.plot(xg, _norm.pdf(xg, mu_e, std_e),
-                                        color=c, linewidth=1.5)
+                                ax.plot(xg, _norm.pdf(xg, mu_e, std_e), color=c, linewidth=1.5)
 
                         # ── Weighted shape statistics ──────────────────────
                         if w_norm is not None:
-                            mu_w  = float(np.dot(w_norm, xi))
-                            xc    = xi - mu_w
-                            std_w = float(np.sqrt(np.dot(w_norm, xc ** 2)))
+                            mu_w = float(np.dot(w_norm, xi))
+                            xc = xi - mu_w
+                            std_w = float(np.sqrt(np.dot(w_norm, xc**2)))
                             if std_w > 1e-10:
                                 S2 = float(np.dot(w_norm, (xc / std_w) ** 3))
                                 K2 = float(np.dot(w_norm, (xc / std_w) ** 4)) - 3.0
@@ -551,15 +586,21 @@ class _InnovHistDialog(QDialog):
 
                         kind = "soft-resid" if use_resid else "ν"
                         ax.set_title(
-                            f"k={k}  {kind}^{i}   N_eff={n_eff:.0f}\n"
-                            f"{stats_str}",
+                            f"k={k}  {kind}^{i}   N_eff={n_eff:.0f}\n{stats_str}",
                             fontsize=8,
                         )
                     else:
                         ax.set_title(f"k={k}   N_eff={n_eff:.0f}", fontsize=8)
-                        ax.text(0.5, 0.5, "n/a", transform=ax.transAxes,
-                                ha="center", va="center",
-                                fontsize=9, color="#aaa")
+                        ax.text(
+                            0.5,
+                            0.5,
+                            "n/a",
+                            transform=ax.transAxes,
+                            ha="center",
+                            va="center",
+                            fontsize=9,
+                            color="#aaa",
+                        )
 
                     if use_resid:
                         ax.set_xlabel(rf"$y^{i} - \mu_{{Y,{k}}}^{i}$", fontsize=8)
@@ -588,7 +629,8 @@ class _InnovHistDialog(QDialog):
     def _on_export_csv(self) -> None:
         """Save innovation columns to a CSV file."""
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export innovations",
+            self,
+            "Export innovations",
             "innovations.csv",
             "CSV files (*.csv);;All files (*)",
         )
@@ -604,10 +646,11 @@ class _InnovHistDialog(QDialog):
                 for n, row in enumerate(innov):
                     w.writerow([n] + list(row))
             QMessageBox.information(
-                self, "Export OK",
+                self,
+                "Export OK",
                 f"Innovations saved to:\n{pathlib.Path(path).resolve()}",
             )
-        except Exception as exc:   # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Export error", str(exc))
 
 
@@ -629,10 +672,10 @@ class _RegimeDiagDialog(QDialog):
 
     def __init__(
         self,
-        K:   int,
-        rs:  list,                     # true regime sequence, length N
-        P:   np.ndarray,               # (K, K) transition matrix
-        pis: np.ndarray | None = None, # (N, K) filtered posteriors (None → no filter)
+        K: int,
+        rs: list,  # true regime sequence, length N
+        P: np.ndarray,  # (K, K) transition matrix
+        pis: np.ndarray | None = None,  # (N, K) filtered posteriors (None → no filter)
         parent=None,
     ):
         super().__init__(parent)
@@ -641,27 +684,27 @@ class _RegimeDiagDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         from matplotlib.backends.backend_qtagg import (
-            FigureCanvasQTAgg, NavigationToolbar2QT,
+            FigureCanvasQTAgg,
+            NavigationToolbar2QT,
         )
         from matplotlib.figure import Figure
-        from scipy.stats import geom as _geom_dist
 
         rs_arr = np.asarray(rs, dtype=int)
         N = len(rs_arr)
 
-        layout  = QVBoxLayout(self)
-        tabs    = QTabWidget()
+        layout = QVBoxLayout(self)
+        tabs = QTabWidget()
         layout.addWidget(tabs)
 
         colours = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
 
         # ── Tab 1: Confusion matrix ───────────────────────────────────
         if pis is not None:
-            conf_w  = QWidget()
-            conf_l  = QVBoxLayout(conf_w)
+            conf_w = QWidget()
+            conf_l = QVBoxLayout(conf_w)
             conf_l.setContentsMargins(4, 4, 4, 4)
 
-            r_pred = np.argmax(pis, axis=1)          # (N,) predicted regime
+            r_pred = np.argmax(pis, axis=1)  # (N,) predicted regime
 
             # K×K confusion matrix (rows = true, cols = predicted)
             conf = np.zeros((K, K), dtype=int)
@@ -679,8 +722,7 @@ class _RegimeDiagDialog(QDialog):
             else:
                 acc_bg, acc_fg, acc_bd = "#f8d7da", "#721c24", "#f5c6cb"
             acc_lbl = QLabel(
-                f"Overall regime accuracy:  {accuracy:.1%}  "
-                f"(N = {N},  argmax π_n  vs  r_n)"
+                f"Overall regime accuracy:  {accuracy:.1%}  (N = {N},  argmax π_n  vs  r_n)"
             )
             acc_lbl.setStyleSheet(
                 f"font-weight: bold; font-size: 11px; color: {acc_fg};"
@@ -691,29 +733,25 @@ class _RegimeDiagDialog(QDialog):
             conf_l.addWidget(acc_lbl)
 
             # ── Matplotlib heatmap ──
-            fig_c  = Figure(figsize=(max(3.5, 1.8 * K), max(3.0, 1.6 * K)),
-                            tight_layout=True)
-            can_c  = FigureCanvasQTAgg(fig_c)
+            fig_c = Figure(figsize=(max(3.5, 1.8 * K), max(3.0, 1.6 * K)), tight_layout=True)
+            can_c = FigureCanvasQTAgg(fig_c)
             can_c.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
-            ax_c   = fig_c.add_subplot(1, 1, 1)
+            ax_c = fig_c.add_subplot(1, 1, 1)
 
             # Normalize by true-count per row
             row_sums = conf.sum(axis=1, keepdims=True).clip(1)
             conf_norm = conf / row_sums
 
-            im = ax_c.imshow(conf_norm, vmin=0, vmax=1, cmap="Blues",
-                             aspect="equal")
-            fig_c.colorbar(im, ax=ax_c, fraction=0.046, pad=0.04,
-                           label="Recall per row")
+            im = ax_c.imshow(conf_norm, vmin=0, vmax=1, cmap="Blues", aspect="equal")
+            fig_c.colorbar(im, ax=ax_c, fraction=0.046, pad=0.04, label="Recall per row")
 
             for i in range(K):
                 for j in range(K):
                     n_ij = conf[i, j]
-                    pct  = conf_norm[i, j]
-                    txt  = f"{n_ij}\n({pct:.1%})"
-                    col  = "white" if pct > 0.6 else "#333333"
-                    ax_c.text(j, i, txt, ha="center", va="center",
-                              fontsize=9, color=col)
+                    pct = conf_norm[i, j]
+                    txt = f"{n_ij}\n({pct:.1%})"
+                    col = "white" if pct > 0.6 else "#333333"
+                    ax_c.text(j, i, txt, ha="center", va="center", fontsize=9, color=col)
 
             ticks = list(range(K))
             ax_c.set_xticks(ticks)
@@ -721,26 +759,24 @@ class _RegimeDiagDialog(QDialog):
             ax_c.set_xticklabels([f"Pred k={k}" for k in ticks])
             ax_c.set_yticklabels([f"True k={k}" for k in ticks])
             ax_c.set_xlabel("Predicted (argmax π_n)", fontsize=10)
-            ax_c.set_ylabel("True (r_n)",             fontsize=10)
-            ax_c.set_title(f"Confusion matrix  —  accuracy = {accuracy:.1%}",
-                           fontsize=10)
+            ax_c.set_ylabel("True (r_n)", fontsize=10)
+            ax_c.set_title(f"Confusion matrix  —  accuracy = {accuracy:.1%}", fontsize=10)
 
             conf_l.addWidget(NavigationToolbar2QT(can_c, conf_w))
             conf_l.addWidget(can_c)
 
             # ── Per-regime recall/precision text ──
             for k in range(K):
-                recall    = conf[k, k] / max(conf[k, :].sum(), 1)
+                recall = conf[k, k] / max(conf[k, :].sum(), 1)
                 precision = conf[k, k] / max(conf[:, k].sum(), 1)
                 lbl = QLabel(
                     f"  k={k}:  recall = {recall:.1%}"
                     f"   precision = {precision:.1%}"
-                    f"   support = {conf[k,:].sum()}"
+                    f"   support = {conf[k, :].sum()}"
                 )
                 # Explicit foreground so the label reads on both light & dark themes
                 lbl.setStyleSheet(
-                    "font-size: 10px; color: palette(windowText);"
-                    "background: transparent;"
+                    "font-size: 10px; color: palette(windowText);background: transparent;"
                 )
                 conf_l.addWidget(lbl)
 
@@ -753,8 +789,7 @@ class _RegimeDiagDialog(QDialog):
 
         ncols = min(K, 3)
         nrows = (K + ncols - 1) // ncols
-        fig_d = Figure(figsize=(max(4, 4.5 * ncols), 3.5 * nrows),
-                       tight_layout=True)
+        fig_d = Figure(figsize=(max(4, 4.5 * ncols), 3.5 * nrows), tight_layout=True)
         can_d = FigureCanvasQTAgg(fig_d)
         can_d.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
@@ -773,38 +808,48 @@ class _RegimeDiagDialog(QDialog):
                 runs.append(run_len)
 
             ax_d = fig_d.add_subplot(nrows, ncols, k + 1)
-            c    = colours[k % len(colours)]
+            c = colours[k % len(colours)]
 
             if runs:
                 runs_arr = np.asarray(runs, dtype=float)
-                max_len  = int(runs_arr.max())
-                bins     = np.arange(0.5, max_len + 2.5, 1)
-                ax_d.hist(runs_arr, bins=bins, density=True,
-                          color=c, alpha=0.55, label="observed")
+                max_len = int(runs_arr.max())
+                bins = np.arange(0.5, max_len + 2.5, 1)
+                ax_d.hist(runs_arr, bins=bins, density=True, color=c, alpha=0.55, label="observed")
 
                 # Theoretical Geom(p) where p = 1 − P_kk
                 p_kk = float(P[k, k])
                 q_kk = max(1e-9, 1.0 - p_kk)
                 xs_t = np.arange(1, max_len + 2)
-                pmf  = (1 - q_kk) ** (xs_t - 1) * q_kk   # Geom(q_kk) PMF
-                ax_d.step(xs_t - 0.5, pmf, where="post",
-                          color=c, linewidth=1.5, linestyle="--",
-                          label=f"Geom(1−P_{k}{k}={q_kk:.3f})")
+                pmf = (1 - q_kk) ** (xs_t - 1) * q_kk  # Geom(q_kk) PMF
+                ax_d.step(
+                    xs_t - 0.5,
+                    pmf,
+                    where="post",
+                    color=c,
+                    linewidth=1.5,
+                    linestyle="--",
+                    label=f"Geom(1−P_{k}{k}={q_kk:.3f})",
+                )
                 ax_d.set_xlabel("Run length", fontsize=9)
-                ax_d.set_ylabel("Density",    fontsize=9)
+                ax_d.set_ylabel("Density", fontsize=9)
                 mean_obs = float(runs_arr.mean())
-                mean_th  = 1.0 / q_kk if q_kk > 0 else float("inf")
+                mean_th = 1.0 / q_kk if q_kk > 0 else float("inf")
                 ax_d.set_title(
-                    f"Regime k={k}   "
-                    f"({len(runs)} runs,  "
-                    f"mean {mean_obs:.1f} / th. {mean_th:.1f})",
+                    f"Regime k={k}   ({len(runs)} runs,  mean {mean_obs:.1f} / th. {mean_th:.1f})",
                     fontsize=9,
                 )
                 ax_d.legend(fontsize=8)
             else:
-                ax_d.text(0.5, 0.5, f"No runs in regime k={k}",
-                          transform=ax_d.transAxes,
-                          ha="center", va="center", fontsize=9, color="#aaa")
+                ax_d.text(
+                    0.5,
+                    0.5,
+                    f"No runs in regime k={k}",
+                    transform=ax_d.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=9,
+                    color="#aaa",
+                )
                 ax_d.set_title(f"Regime k={k}", fontsize=9)
             ax_d.grid(True, linestyle=":", alpha=0.5)
 
@@ -822,11 +867,10 @@ from prg.classes.FMatrix import FMatrix
 from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
 from prg.classes.NoiseCovariance import GSSNoiseCovariance
-from prg.models.presets import PRESETS
 from prg.gui.matrix_widget import StochasticMatrixWidget
 from prg.gui.param_panel import ParamPanel
 from prg.gui.plot_panel import PlotPanel, PredYPanel
-
+from prg.models.presets import PRESETS
 
 # ---------------------------------------------------------------------------
 # Session state — single source of truth for everything produced by Simulate /
@@ -852,15 +896,15 @@ class _SessionState:
     UI but not silently corrected).
     """
 
-    data: tuple | None = None              # (ns, rs, xs, ys, seed_used)
-    params: object | None = None           # GSSParams (avoids circular import)
+    data: tuple | None = None  # (ns, rs, xs, ys, seed_used)
+    params: object | None = None  # GSSParams (avoids circular import)
     params_signature: tuple | None = None  # bytes signature of GUI at capture
     innovations: np.ndarray | None = None  # (N, s)
     # D5: filter arrays kept for session persistence
-    filter_E_xs:   np.ndarray | None = None   # (N, q)
-    filter_Var_xs: np.ndarray | None = None   # (N, q)
-    filter_pis:    np.ndarray | None = None   # (N, K)
-    filter_log_lik: float | None    = None
+    filter_E_xs: np.ndarray | None = None  # (N, q)
+    filter_Var_xs: np.ndarray | None = None  # (N, q)
+    filter_pis: np.ndarray | None = None  # (N, K)
+    filter_log_lik: float | None = None
 
     # ----- Predicates --------------------------------------------------
 
@@ -881,16 +925,16 @@ class _SessionState:
         self.params = None
         self.params_signature = None
         self.innovations = None
-        self.filter_E_xs   = None
+        self.filter_E_xs = None
         self.filter_Var_xs = None
-        self.filter_pis    = None
+        self.filter_pis = None
         self.filter_log_lik = None
 
     def begin_simulation(self, params: object, signature: tuple | None) -> None:
         """About to launch a new Simulate: capture params, drop stale results."""
         self.params = params
         self.params_signature = signature
-        self.innovations = None      # filter result no longer matches
+        self.innovations = None  # filter result no longer matches
 
     def store_data(self, ns, rs, xs, ys, seed) -> None:
         self.data = (ns, rs, xs, ys, seed)
@@ -898,20 +942,19 @@ class _SessionState:
     def store_innovations(self, innov: np.ndarray) -> None:
         self.innovations = innov
 
-    def store_filter_results(                               # D5
+    def store_filter_results(  # D5
         self,
         E_xs: np.ndarray,
         Var_xs: np.ndarray,
         pis: np.ndarray,
         log_lik_total: float,
     ) -> None:
-        self.filter_E_xs   = E_xs
+        self.filter_E_xs = E_xs
         self.filter_Var_xs = Var_xs
-        self.filter_pis    = pis
+        self.filter_pis = pis
         self.filter_log_lik = log_lik_total
 
-    def load_external(self, ns, rs, xs, ys, params: object,
-                      signature: tuple | None) -> None:
+    def load_external(self, ns, rs, xs, ys, params: object, signature: tuple | None) -> None:
         """User loaded an external CSV: store it with the live GUI params."""
         self.data = (ns, rs, xs, ys, None)
         self.params = params
@@ -922,6 +965,7 @@ class _SessionState:
 # ---------------------------------------------------------------------------
 # Background workers
 # ---------------------------------------------------------------------------
+
 
 class _SimWorker(QThread):
     """Run GSSSimulator in a background thread."""
@@ -944,7 +988,7 @@ class _SimWorker(QThread):
             CHECK_EVERY = 256
             for i, (n, r, x, y) in enumerate(sim):
                 if (i & (CHECK_EVERY - 1)) == 0 and self.isInterruptionRequested():
-                    return                       # silent abort: no signal emitted
+                    return  # silent abort: no signal emitted
                 ns.append(n)
                 rs.append(r)
                 xs_rows.append(x.ravel())
@@ -961,33 +1005,33 @@ class _FilterWorker(QThread):
 
     # E_xs (N,q), Var_xs (N,q), pis (N,K), innovations (N,s), log_lik_total (float)
     finished = pyqtSignal(object, object, object, object, float)
-    progress = pyqtSignal(int, int)   # (n_done, N_total) — D8
+    progress = pyqtSignal(int, int)  # (n_done, N_total) — D8
     error = pyqtSignal(str)
 
     def __init__(
         self,
         params: GSSParams,
-        ys: np.ndarray,   # (N, s)
+        ys: np.ndarray,  # (N, s)
         joseph: bool = False,
-        mode:   str  = "imm_general",
+        mode: str = "imm_general",
         parent=None,
     ):
         super().__init__(parent)
         self._params = params
         self._ys = ys
         self._joseph = joseph
-        self._mode   = mode
+        self._mode = mode
 
     def run(self) -> None:
         try:
             filt = GSSFilter(self._params, joseph=self._joseph, mode=self._mode)
-            E_xs_list:    list[np.ndarray] = []
-            Var_xs_list:  list[np.ndarray] = []
-            pis_list:     list[np.ndarray] = []
-            innov_list:   list[np.ndarray] = []
+            E_xs_list: list[np.ndarray] = []
+            Var_xs_list: list[np.ndarray] = []
+            pis_list: list[np.ndarray] = []
+            innov_list: list[np.ndarray] = []
             log_lik_total: float = 0.0
             N = len(self._ys)
-            PROGRESS_EVERY = max(1, N // 50)   # D8: ~50 progress updates
+            PROGRESS_EVERY = max(1, N // 50)  # D8: ~50 progress updates
             CHECK_EVERY = 256
             for i, y_row in enumerate(self._ys):
                 if (i & (CHECK_EVERY - 1)) == 0 and self.isInterruptionRequested():
@@ -1008,46 +1052,48 @@ class _FilterWorker(QThread):
             # added only when the filter was run in h5_exact mode.
             self.cond_moments: dict = {}
             if hasattr(filt, "_mu_Y") and hasattr(filt, "_S_YY"):
-                self.cond_moments["mu_Y"] = filt._mu_Y    # [K] ndarray (s,1)
-                self.cond_moments["S_YY"] = filt._S_YY    # [K] ndarray (s,s)
+                self.cond_moments["mu_Y"] = filt._mu_Y  # [K] ndarray (s,1)
+                self.cond_moments["S_YY"] = filt._S_YY  # [K] ndarray (s,s)
 
             if hasattr(filt, "_mu_Y_jk"):
                 # ── h5_exact: Signal 2 — exact Markov transition density ──────
                 # Per the Markovianité Proposition (formulas (f) and (h)):
                 #   μ₂(j,k) = b_Y(k) + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n      (f)
                 #   Γ₂(j,k) = Σ_{V,k} + C_k (Σ_{U,j} − Δ_j Σ_{V,j}^{-1} Δ_j^T) C_k^T  (h)
-                p   = self._params
+                p = self._params
                 K, q = p.K, p.q
-                nc  = p.noise_cov
-                M_simple  = [[None] * K for _ in range(K)]
-                Gamma2    = [[None] * K for _ in range(K)]
-                b_Y       = [p.b(k)[q:]  for k in range(K)]  # [K] ndarray (s,1)
+                nc = p.noise_cov
+                M_simple = [[None] * K for _ in range(K)]
+                Gamma2 = [[None] * K for _ in range(K)]
+                b_Y = [p.b(k)[q:] for k in range(K)]  # [K] ndarray (s,1)
                 for j in range(K):
-                    SV_j     = nc.Sigma_V(j)                        # (s,s)
+                    SV_j = nc.Sigma_V(j)  # (s,s)
                     SV_j_inv = np.linalg.inv(SV_j)
-                    D_j      = nc.Delta(j)                          # (q,s)
-                    SU_j     = nc.Sigma_U(j)                        # (q,q)
-                    Schur_j  = SU_j - D_j @ SV_j_inv @ D_j.T       # (q,q)
+                    D_j = nc.Delta(j)  # (q,s)
+                    SU_j = nc.Sigma_U(j)  # (q,q)
+                    Schur_j = SU_j - D_j @ SV_j_inv @ D_j.T  # (q,q)
                     for k in range(K):
                         F_k = p.f_matrix.F(k)
-                        C_k = F_k[q:, :q]                           # (s,q)
-                        D_k = F_k[q:, q:]                           # (s,s)
-                        SV_k = nc.Sigma_V(k)                        # (s,s)
-                        M_simple[j][k] = D_k + C_k @ D_j @ SV_j_inv   # (s,s)
-                        Gamma2[j][k]   = SV_k + C_k @ Schur_j @ C_k.T # (s,s)
+                        C_k = F_k[q:, :q]  # (s,q)
+                        D_k = F_k[q:, q:]  # (s,s)
+                        SV_k = nc.Sigma_V(k)  # (s,s)
+                        M_simple[j][k] = D_k + C_k @ D_j @ SV_j_inv  # (s,s)
+                        Gamma2[j][k] = SV_k + C_k @ Schur_j @ C_k.T  # (s,s)
 
                 # Stationary mixture weights w_{jk} = π_∞(j) P(j,k)  (K,K)
                 mix_w = filt._pi_inf[:, None] * p.P
 
-                self.cond_moments.update({
-                    "mu_Y_jk": filt._mu_Y_jk,
-                    "M_t":     filt._M_t,
-                    "Gamma":   filt._Gamma,
-                    "M_simple": M_simple,   # (s,s) signal 2 coefficient matrix
-                    "Gamma2":   Gamma2,     # (s,s) signal 2 constant covariance
-                    "b_Y":      b_Y,        # [K]   ndarray (s,1) — signal 2 bias
-                    "mix_w":    mix_w,      # (K,K) stationary mixture weights
-                })
+                self.cond_moments.update(
+                    {
+                        "mu_Y_jk": filt._mu_Y_jk,
+                        "M_t": filt._M_t,
+                        "Gamma": filt._Gamma,
+                        "M_simple": M_simple,  # (s,s) signal 2 coefficient matrix
+                        "Gamma2": Gamma2,  # (s,s) signal 2 constant covariance
+                        "b_Y": b_Y,  # [K]   ndarray (s,1) — signal 2 bias
+                        "mix_w": mix_w,  # (K,K) stationary mixture weights
+                    }
+                )
 
             self.finished.emit(
                 np.array(E_xs_list),
@@ -1060,10 +1106,10 @@ class _FilterWorker(QThread):
             self.error.emit(str(exc))
 
 
-
 # ---------------------------------------------------------------------------
 # Wait dialog (modal, no close button)
 # ---------------------------------------------------------------------------
+
 
 class _WaitDialog(QDialog):
     """Modal wait dialog with progress bar and optional Cancel button.
@@ -1094,7 +1140,7 @@ class _WaitDialog(QDialog):
         layout.addWidget(self._msg_lbl)
 
         self._bar = QProgressBar()
-        self._bar.setRange(0, 0)            # indeterminate by default
+        self._bar.setRange(0, 0)  # indeterminate by default
         self._bar.setTextVisible(True)
         self._bar.setFormat("%p%")
         self._bar.setMinimumWidth(260)
@@ -1109,9 +1155,7 @@ class _WaitDialog(QDialog):
         if on_cancel is not None:
             btn_cancel = QPushButton("Cancel")
             btn_cancel.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn_cancel.setStyleSheet(
-                "padding: 4px 16px; font-size: 11px;"
-            )
+            btn_cancel.setStyleSheet("padding: 4px 16px; font-size: 11px;")
             btn_cancel.clicked.connect(on_cancel)
             btn_cancel.clicked.connect(self.reject)
             layout.addWidget(btn_cancel, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1138,6 +1182,7 @@ class _WaitDialog(QDialog):
 # ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
+
 
 class GSSMainWindow(QMainWindow):
     """Interactive GSS simulator window."""
@@ -1169,11 +1214,9 @@ class GSSMainWindow(QMainWindow):
         self._worker: _SimWorker | None = None
         self._filter_worker: _FilterWorker | None = None
         self._wait_dlg: _WaitDialog | None = None
-        self._op_t0: float = time.perf_counter()   # C4: initialised in constructor
+        self._op_t0: float = time.perf_counter()  # C4: initialised in constructor
 
-        self.setWindowTitle(
-            f"exactIMM — GSS Simulator  (K={K}, q={q}, s={s})"
-        )
+        self.setWindowTitle(f"exactIMM — GSS Simulator  (K={K}, q={q}, s={s})")
 
         # ── central widget ────────────────────────────────────────────
         central = QWidget()
@@ -1236,7 +1279,7 @@ class GSSMainWindow(QMainWindow):
 
         p_section.addStretch()
         left_layout.addLayout(p_section)
-        self._update_stationary_display()   # initialise avec la valeur par défaut
+        self._update_stationary_display()  # initialise avec la valeur par défaut
 
         # N field
         n_row = QHBoxLayout()
@@ -1255,8 +1298,10 @@ class GSSMainWindow(QMainWindow):
         self._seed_edit = QLineEdit()
         self._seed_edit.setPlaceholderText("empty = random")
         self._seed_edit.setMaximumWidth(120)
-        self._seed_edit.textChanged.connect(self._on_seed_text_changed)   # A2: validate
-        self._seed_edit.editingFinished.connect(self._on_sim_params_changed)  # A1: not per-keystroke
+        self._seed_edit.textChanged.connect(self._on_seed_text_changed)  # A2: validate
+        self._seed_edit.editingFinished.connect(
+            self._on_sim_params_changed
+        )  # A1: not per-keystroke
         seed_row.addWidget(self._seed_edit)
         left_layout.addLayout(seed_row)
 
@@ -1279,7 +1324,7 @@ class GSSMainWindow(QMainWindow):
         mode_row.addWidget(QLabel("Filter mode:"))
         self._mode_combo = QComboBox()
         self._mode_combo.addItem("Approximate IMM - H5 not required", "imm_general")
-        self._mode_combo.addItem("exactIMM - Exact IMM - H5 required",  "h5_exact")
+        self._mode_combo.addItem("exactIMM - Exact IMM - H5 required", "h5_exact")
         self._mode_combo.setToolTip(
             "Approximate IMM — per-step moment propagation from the filtered π_n.\n"
             "               Works for any GSS model, with or without (H5)\n"
@@ -1310,13 +1355,12 @@ class GSSMainWindow(QMainWindow):
 
         # Gray out the Joseph checkbox unless mode is h5_exact
         def _sync_joseph_enabled():
-            self._joseph_check.setEnabled(
-                self._mode_combo.currentData() == "h5_exact"
-            )
+            self._joseph_check.setEnabled(self._mode_combo.currentData() == "h5_exact")
+
         self._mode_combo.currentIndexChanged.connect(lambda _: _sync_joseph_enabled())
         _sync_joseph_enabled()
 
-        left_layout.addStretch()   # pushes buttons to the bottom of the panel
+        left_layout.addStretch()  # pushes buttons to the bottom of the panel
 
         # Buttons — grille 2×2
         #   [Simulate]        [Filter]
@@ -1327,7 +1371,7 @@ class GSSMainWindow(QMainWindow):
 
         self._btn_simulate = QPushButton("Simulate")
         self._btn_simulate.setFixedHeight(36)
-        self._btn_simulate.setToolTip("Run a new simulation  (Ctrl+R)")           # B2
+        self._btn_simulate.setToolTip("Run a new simulation  (Ctrl+R)")  # B2
         self._btn_simulate.clicked.connect(self._on_simulate)
 
         self._btn_filter = QPushButton("Filter")
@@ -1350,13 +1394,17 @@ class GSSMainWindow(QMainWindow):
         self._btn_export = QPushButton("Export model…")
         self._btn_export.setFixedHeight(36)
         self._btn_export.setEnabled(False)
-        self._btn_export.setToolTip("Export current parameters as a Python model file  (Ctrl+E)")  # B6
+        self._btn_export.setToolTip(
+            "Export current parameters as a Python model file  (Ctrl+E)"
+        )  # B6
         self._btn_export.clicked.connect(self._on_export_model)
 
         self._btn_export_plots = QPushButton("Export plots…")
         self._btn_export_plots.setFixedHeight(36)
         self._btn_export_plots.setEnabled(False)
-        self._btn_export_plots.setToolTip("Save current plots to PDF / PNG / SVG  (Ctrl+Shift+E)")  # B6
+        self._btn_export_plots.setToolTip(
+            "Save current plots to PDF / PNG / SVG  (Ctrl+Shift+E)"
+        )  # B6
         self._btn_export_plots.clicked.connect(self._on_export_plots)
 
         self._btn_innov_hist = QPushButton("📊 Innov. histograms…")
@@ -1397,17 +1445,17 @@ class GSSMainWindow(QMainWindow):
         self._btn_reset.setToolTip("Clear all results and reset the plots  (Ctrl+Shift+R)")  # B7
         self._btn_reset.clicked.connect(self._on_reset)
 
-        btn_grid.addWidget(self._btn_simulate,    0, 0)
-        btn_grid.addWidget(self._btn_filter,      0, 1)
-        btn_grid.addWidget(self._btn_save,        1, 0)
-        btn_grid.addWidget(self._btn_load,        1, 1)
-        btn_grid.addWidget(self._btn_export,      2, 0)
-        btn_grid.addWidget(self._btn_export_plots,2, 1)
-        btn_grid.addWidget(self._btn_innov_hist,   3, 0)
-        btn_grid.addWidget(self._btn_regime_diag,  3, 1)
+        btn_grid.addWidget(self._btn_simulate, 0, 0)
+        btn_grid.addWidget(self._btn_filter, 0, 1)
+        btn_grid.addWidget(self._btn_save, 1, 0)
+        btn_grid.addWidget(self._btn_load, 1, 1)
+        btn_grid.addWidget(self._btn_export, 2, 0)
+        btn_grid.addWidget(self._btn_export_plots, 2, 1)
+        btn_grid.addWidget(self._btn_innov_hist, 3, 0)
+        btn_grid.addWidget(self._btn_regime_diag, 3, 1)
         btn_grid.addWidget(self._btn_save_session, 4, 0)
         btn_grid.addWidget(self._btn_load_session, 4, 1)
-        btn_grid.addWidget(self._btn_reset,        5, 0, 1, 2)
+        btn_grid.addWidget(self._btn_reset, 5, 0, 1, 2)
 
         left_layout.addLayout(btn_grid)
 
@@ -1491,8 +1539,10 @@ class GSSMainWindow(QMainWindow):
         header_style = "font-size: 9px; color: #555555; font-style: italic;"
         h_lb = QLabel("Ljung-Box")
         h_jb = QLabel("Skew · Kurt")
-        h_lb.setStyleSheet(header_style);  h_lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        h_jb.setStyleSheet(header_style);  h_jb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h_lb.setStyleSheet(header_style)
+        h_lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h_jb.setStyleSheet(header_style)
+        h_jb.setAlignment(Qt.AlignmentFlag.AlignCenter)
         innov_grid.addWidget(h_lb, 0, 1)
         innov_grid.addWidget(h_jb, 0, 2)
 
@@ -1502,11 +1552,15 @@ class GSSMainWindow(QMainWindow):
             name = QLabel(f"ν^{i}")
             name.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             name.setStyleSheet("font-size: 10px;")
-            lb = QLabel();  lb.setAlignment(Qt.AlignmentFlag.AlignCenter);  lb.setFixedHeight(20)
-            jb = QLabel();  jb.setAlignment(Qt.AlignmentFlag.AlignCenter);  jb.setFixedHeight(20)
+            lb = QLabel()
+            lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lb.setFixedHeight(20)
+            jb = QLabel()
+            jb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            jb.setFixedHeight(20)
             innov_grid.addWidget(name, i + 1, 0)
-            innov_grid.addWidget(lb,   i + 1, 1)
-            innov_grid.addWidget(jb,   i + 1, 2)
+            innov_grid.addWidget(lb, i + 1, 1)
+            innov_grid.addWidget(jb, i + 1, 2)
             self._innov_lb_badges.append(lb)
             self._innov_jb_badges.append(jb)
         innov_grid.setColumnStretch(1, 1)
@@ -1524,9 +1578,7 @@ class GSSMainWindow(QMainWindow):
 
         # ── right panel — QTabWidget avec deux onglets ───────────────
         self._right_tabs = QTabWidget()
-        self._right_tabs.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        self._right_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # Onglet 0 : trajectoires simulation / filtre (inchangé)
         self._plot_panel = PlotPanel(q, s)
@@ -1599,9 +1651,7 @@ class GSSMainWindow(QMainWindow):
         base_label = "Filter"
         if self._state.params_signature is None:
             self._btn_filter.setText(base_label)
-            self._btn_filter.setToolTip(
-                "Run the optimal filter on the simulation  (Ctrl+F)"
-            )
+            self._btn_filter.setToolTip("Run the optimal filter on the simulation  (Ctrl+F)")
             self._btn_filter.setStyleSheet("")
             return
         live_sig = self._params_signature()
@@ -1619,9 +1669,7 @@ class GSSMainWindow(QMainWindow):
             )
         else:
             self._btn_filter.setText(base_label)
-            self._btn_filter.setToolTip(
-                "Run the optimal filter on the simulation  (Ctrl+F)"
-            )
+            self._btn_filter.setToolTip("Run the optimal filter on the simulation  (Ctrl+F)")
             self._btn_filter.setStyleSheet("")
 
     def _on_sim_params_changed(self) -> None:
@@ -1634,11 +1682,11 @@ class GSSMainWindow(QMainWindow):
         """Show red border when seed text cannot be parsed as an integer (A2)."""
         stripped = text.strip()
         if not stripped:
-            self._seed_edit.setStyleSheet("")       # empty → random, neutral
+            self._seed_edit.setStyleSheet("")  # empty → random, neutral
         else:
             try:
                 int(stripped)
-                self._seed_edit.setStyleSheet("")   # valid integer
+                self._seed_edit.setStyleSheet("")  # valid integer
             except ValueError:
                 self._seed_edit.setStyleSheet(
                     "border: 1px solid #cc0000; background-color: #fff0f0;"
@@ -1688,16 +1736,16 @@ class GSSMainWindow(QMainWindow):
                 continue
             try:
                 w.finished.disconnect()
-            except (TypeError, RuntimeError):
+            except TypeError, RuntimeError:
                 pass
             try:
                 w.error.disconnect()
-            except (TypeError, RuntimeError):
+            except TypeError, RuntimeError:
                 pass
             if hasattr(w, "progress"):
                 try:
                     w.progress.disconnect()
-                except (TypeError, RuntimeError):
+                except TypeError, RuntimeError:
                     pass
             if w.isRunning():
                 w.requestInterruption()
@@ -1731,8 +1779,7 @@ class GSSMainWindow(QMainWindow):
         self._op_t0 = time.perf_counter()
         self.statusBar().showMessage(f"Simulating  N = {N}…")
 
-        self._wait_dlg = _WaitDialog(
-            f"Simulating  N = {N}…", on_cancel=self._on_reset, parent=self)
+        self._wait_dlg = _WaitDialog(f"Simulating  N = {N}…", on_cancel=self._on_reset, parent=self)
         self._wait_dlg.show()
 
         self._worker = _SimWorker(params, N, seed, parent=self)
@@ -1812,12 +1859,12 @@ class GSSMainWindow(QMainWindow):
             msg += "  ⚠ using parameters captured at last Simulate (GUI values differ)"
         self.statusBar().showMessage(msg)
 
-        self._wait_dlg = _WaitDialog(
-            "Filtering…", on_cancel=self._on_reset, parent=self)
+        self._wait_dlg = _WaitDialog("Filtering…", on_cancel=self._on_reset, parent=self)
         self._wait_dlg.show()
 
         self._filter_worker = _FilterWorker(
-            self._state.params, ys,
+            self._state.params,
+            ys,
             joseph=self._joseph_check.isChecked(),
             mode=self._mode_combo.currentData(),
             parent=self,
@@ -1833,16 +1880,16 @@ class GSSMainWindow(QMainWindow):
 
     def _on_filter_finished(
         self,
-        E_xs:          np.ndarray,   # (N, q)
-        Var_xs:        np.ndarray,   # (N, q)
-        pis:           np.ndarray,   # (N, K)
-        innovations:   np.ndarray,   # (N, s)
+        E_xs: np.ndarray,  # (N, q)
+        Var_xs: np.ndarray,  # (N, q)
+        pis: np.ndarray,  # (N, K)
+        innovations: np.ndarray,  # (N, s)
         log_lik_total: float,
     ) -> None:
         if self.sender() is not self._filter_worker:
             return
         if not self._state.has_data():
-            return                       # state cleared while filter was running
+            return  # state cleared while filter was running
         if self._wait_dlg:
             self._wait_dlg.accept()
             self._wait_dlg = None
@@ -1865,14 +1912,15 @@ class GSSMainWindow(QMainWindow):
         self._sync_menu_actions()
 
         # ── Predicted-Y tab ──────────────────────────────────────────
-        if (
-            self._filter_worker is not None
-            and hasattr(self._filter_worker, "cond_moments")
-        ):
+        if self._filter_worker is not None and hasattr(self._filter_worker, "cond_moments"):
             cm = self._filter_worker.cond_moments
             _, _, _, ys, _ = self._state.data
             self._pred_y_panel.set_data(
-                cm["mu_Y_jk"], cm["M_t"], cm["Gamma"], cm["mu_Y"], ys,
+                cm["mu_Y_jk"],
+                cm["M_t"],
+                cm["Gamma"],
+                cm["mu_Y"],
+                ys,
                 M_simple=cm.get("M_simple"),
                 Gamma2=cm.get("Gamma2"),
                 b_Y=cm.get("b_Y"),
@@ -1881,24 +1929,20 @@ class GSSMainWindow(QMainWindow):
 
         elapsed = time.perf_counter() - getattr(self, "_op_t0", time.perf_counter())
         self.statusBar().showMessage(
-            f"Filter complete — N = {N}, log L = {log_lik_total:.4g}  "
-            f"({elapsed:.2f}s).",
+            f"Filter complete — N = {N}, log L = {log_lik_total:.4g}  ({elapsed:.2f}s).",
             8000,
         )
 
         # ── Innovation diagnostics (C5: extracted helper) ─────────────
-        _mix_w    = None
+        _mix_w = None
         _Gamma_cm = None
-        _muY_jk   = None
-        if (
-            self._filter_worker is not None
-            and hasattr(self._filter_worker, "cond_moments")
-        ):
+        _muY_jk = None
+        if self._filter_worker is not None and hasattr(self._filter_worker, "cond_moments"):
             cm_diag = self._filter_worker.cond_moments
             if all(k in cm_diag for k in ("mix_w", "Gamma", "mu_Y_jk")):
-                _mix_w    = cm_diag["mix_w"]
+                _mix_w = cm_diag["mix_w"]
                 _Gamma_cm = cm_diag["Gamma"]
-                _muY_jk   = cm_diag["mu_Y_jk"]
+                _muY_jk = cm_diag["mu_Y_jk"]
 
         self._apply_innovation_diagnostics(innovations, _mix_w, _Gamma_cm, _muY_jk)
 
@@ -1906,27 +1950,25 @@ class GSSMainWindow(QMainWindow):
 
     def _apply_filter_quality_frame(
         self,
-        ns:            list,
-        xs:            np.ndarray | None,
-        E_xs:          np.ndarray,
+        ns: list,
+        xs: np.ndarray | None,
+        E_xs: np.ndarray,
         log_lik_total: float,
     ) -> None:
         """Refresh the Filter quality frame (log L, MSE, RMSE, per-component)."""
         N = len(ns)
         mean_ll = log_lik_total / N if N > 0 else float("nan")
-        self._loglik_label.setText(
-            f"log L = {log_lik_total:.4g}   (mean = {mean_ll:.4g})"
-        )
+        self._loglik_label.setText(f"log L = {log_lik_total:.4g}   (mean = {mean_ll:.4g})")
 
         if xs is not None:
-            err          = xs - E_xs
-            mse_per_comp = np.mean(err ** 2, axis=0)
-            mse_global   = float(mse_per_comp.mean())
-            rmse_global  = float(np.sqrt(mse_global))
+            err = xs - E_xs
+            mse_per_comp = np.mean(err**2, axis=0)
+            mse_global = float(mse_per_comp.mean())
+            rmse_global = float(np.sqrt(mse_global))
             self._mse_global_label.setText(f"MSE  = {mse_global:.5g}")
             self._rmse_label.setText(f"RMSE = {rmse_global:.5g}")
             sig_std = float(xs.std()) if xs.std() > 0 else 1.0
-            ratio   = rmse_global / sig_std
+            ratio = rmse_global / sig_std
             if ratio < 0.20:
                 bg, fg, border = "#d4edda", "#155724", "#c3e6cb"
                 quality_icon = "✓"
@@ -1945,8 +1987,7 @@ class GSSMainWindow(QMainWindow):
 
         self._mse_title.setText(title_text)
         self._mse_frame.setStyleSheet(
-            f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
-            f" border-radius: 4px; }}"
+            f"QFrame {{ background-color: {bg}; border: 1px solid {border}; border-radius: 4px; }}"
         )
         title_style = f"font-weight: bold; font-size: 11px; color: {fg};"
         value_style = f"font-size: 10px; color: {fg};"
@@ -1973,9 +2014,9 @@ class GSSMainWindow(QMainWindow):
     def _apply_innovation_diagnostics(
         self,
         innovations: np.ndarray,
-        mix_w:   np.ndarray | None = None,
+        mix_w: np.ndarray | None = None,
         Gamma_cm: object = None,
-        muY_jk:   object = None,
+        muY_jk: object = None,
     ) -> None:
         """Update Ljung-Box + shape badge pills in the innovation diagnostics frame.
 
@@ -1990,10 +2031,10 @@ class GSSMainWindow(QMainWindow):
             innov_std = innovations
         std_mode = "h5 S" if mix_w is not None else "sample S"
 
-        n_tests        = max(1, 2 * self._s)
-        alpha_fam      = _INNOV_ALPHA_FAM        # C3: named constant
-        alpha_lb       = alpha_fam / n_tests
-        thresh_lb_ok   = 2.0 * alpha_lb
+        n_tests = max(1, 2 * self._s)
+        alpha_fam = _INNOV_ALPHA_FAM  # C3: named constant
+        alpha_lb = alpha_fam / n_tests
+        thresh_lb_ok = 2.0 * alpha_lb
         thresh_lb_warn = alpha_lb
         bonf_note = (
             f"Bonferroni-corrected threshold: α_per = {alpha_lb:.4g} "
@@ -2003,11 +2044,11 @@ class GSSMainWindow(QMainWindow):
         for i in range(self._s):
             _, p_lb, h_lb = _ljung_box(innovations[:, i])
             if p_lb > thresh_lb_ok:
-                style, icon, verdict = _PILL_OK,   "✓", "white"
+                style, icon, verdict = _PILL_OK, "✓", "white"
             elif p_lb > thresh_lb_warn:
                 style, icon, verdict = _PILL_WARN, "~", "border"
             else:
-                style, icon, verdict = _PILL_ERR,  "✗", "autocor."
+                style, icon, verdict = _PILL_ERR, "✗", "autocor."
             self._innov_lb_badges[i].setText(f"{icon} {verdict}  p={p_lb:.3f}")
             self._innov_lb_badges[i].setStyleSheet(style)
             self._innov_lb_badges[i].setToolTip(
@@ -2016,11 +2057,11 @@ class GSSMainWindow(QMainWindow):
             )
             S, K, JB, p_jb = _shape_diagnostics(innov_std[:, i])
             if abs(S) < 0.25 and abs(K) < 0.50:
-                style, icon = _PILL_OK,   "✓"
+                style, icon = _PILL_OK, "✓"
             elif abs(S) < 0.50 and abs(K) < 1.00:
                 style, icon = _PILL_WARN, "~"
             else:
-                style, icon = _PILL_ERR,  "✗"
+                style, icon = _PILL_ERR, "✗"
             self._innov_jb_badges[i].setText(f"{icon}  S={S:+.2f}  K={K:+.2f}")
             self._innov_jb_badges[i].setStyleSheet(style)
             self._innov_jb_badges[i].setToolTip(
@@ -2051,14 +2092,13 @@ class GSSMainWindow(QMainWindow):
         # A14: guard against exporting with invalid parameters
         if not (self._param_panel.is_valid() and self._p_widget.is_valid()):
             QMessageBox.warning(
-                self, "Invalid parameters",
+                self,
+                "Invalid parameters",
                 "One or more parameters are currently invalid.\n"
                 "Fix all highlighted cells before exporting the model.",
             )
             return
-        default_name = (
-            f"model_gss_K{self._K}_q{self._q}_s{self._s}_custom.py"
-        )
+        default_name = f"model_gss_K{self._K}_q{self._q}_s{self._s}_custom.py"
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Python model",
@@ -2066,7 +2106,7 @@ class GSSMainWindow(QMainWindow):
             "Python files (*.py);;All files (*)",
         )
         if not path:
-            return   # user cancelled
+            return  # user cancelled
 
         code = self._generate_model_code(pathlib.Path(path).stem)
         try:
@@ -2107,11 +2147,11 @@ class GSSMainWindow(QMainWindow):
             "CSV saved",
             f"File saved:\n{filepath.resolve()}",
         )
-        self._push_recent_csv(str(filepath))   # D9
+        self._push_recent_csv(str(filepath))  # D9
 
     def _on_preset_selected(self, index: int) -> None:
         """Load a preset model; restart the window if K/q/s differ."""
-        if index == 0:          # placeholder item
+        if index == 0:  # placeholder item
             return
         entry = self._presets[index - 1]
         try:
@@ -2151,7 +2191,8 @@ class GSSMainWindow(QMainWindow):
         try:
             self._plot_panel.save_figure(path)
             QMessageBox.information(
-                self, "Export plots",
+                self,
+                "Export plots",
                 f"Figure saved:\n{pathlib.Path(path).resolve()}",
             )
         except Exception as exc:  # noqa: BLE001
@@ -2184,7 +2225,8 @@ class GSSMainWindow(QMainWindow):
             missing = [c for c in required if c not in headers]
             if missing:
                 QMessageBox.warning(
-                    self, "Load error",
+                    self,
+                    "Load error",
                     f"Missing column(s): {missing}\n"
                     f"Expected at least: n, r, y_0 … y_{self._s - 1}\n"
                     f"Found: {headers}",
@@ -2194,16 +2236,14 @@ class GSSMainWindow(QMainWindow):
             # --- Parse ---
             ns = [int(float(row["n"])) for row in rows]
             rs = [int(float(row["r"])) for row in rows]
-            ys = np.array(
-                [[float(row[f"y_{i}"]) for i in range(self._s)] for row in rows]
-            )
+            ys = np.array([[float(row[f"y_{i}"]) for i in range(self._s)] for row in rows])
 
             x_cols = [f"x_{i}" for i in range(self._q)]
-            has_x  = all(c in headers for c in x_cols)
-            xs     = (
-                np.array([[float(row[f"x_{i}"]) for i in range(self._q)]
-                          for row in rows])
-                if has_x else None
+            has_x = all(c in headers for c in x_cols)
+            xs = (
+                np.array([[float(row[f"x_{i}"]) for i in range(self._q)] for row in rows])
+                if has_x
+                else None
             )
 
         except Exception as exc:  # noqa: BLE001
@@ -2213,7 +2253,10 @@ class GSSMainWindow(QMainWindow):
         # --- Update state ---
         live_params = self._build_gss_params()  # uses current GUI params
         self._state.load_external(
-            ns, rs, xs, ys,
+            ns,
+            rs,
+            xs,
+            ys,
             params=live_params,
             signature=self._params_signature(),
         )
@@ -2223,7 +2266,7 @@ class GSSMainWindow(QMainWindow):
         self._plot_panel.update_plots(ns, rs, xs, ys, self._K)
 
         self._btn_filter.setEnabled(self._state.can_filter())
-        self._btn_save.setEnabled(False)        # nothing new generated
+        self._btn_save.setEnabled(False)  # nothing new generated
         self._btn_export_plots.setEnabled(True)
         self._btn_regime_diag.setEnabled(True)  # B7/B8
         self._sync_menu_actions()
@@ -2234,7 +2277,7 @@ class GSSMainWindow(QMainWindow):
             info += "  (no ground-truth X)"
         self._set_status(info)
         self.statusBar().showMessage(info, 6000)
-        self._push_recent_csv(path)   # D9
+        self._push_recent_csv(path)  # D9
 
     # ------------------------------------------------------------------
     # D5 / B10 — Save / Load complete session
@@ -2243,10 +2286,12 @@ class GSSMainWindow(QMainWindow):
     def _on_save_session(self) -> None:
         """Save params + sim data + filter results to a .exactIMM file."""
         import io
+
         default_dir = pathlib.Path("data/sessions")
         default_dir.mkdir(parents=True, exist_ok=True)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save session",
+            self,
+            "Save session",
             str(default_dir / "session.exactIMM"),
             "exactIMM sessions (*.exactIMM);;All files (*)",
         )
@@ -2256,59 +2301,54 @@ class GSSMainWindow(QMainWindow):
             path += ".exactIMM"
 
         # Collect GUI parameters
-        F_list   = self._param_panel.get_F_list()
-        SW_list  = self._param_panel.get_Sigma_W_list()
-        mu_list  = self._param_panel.get_mu_z0_list()
-        b_list   = self._param_panel.get_b_list()
-        P        = self._p_widget.get_matrix()
+        F_list = self._param_panel.get_F_list()
+        SW_list = self._param_panel.get_Sigma_W_list()
+        mu_list = self._param_panel.get_mu_z0_list()
+        b_list = self._param_panel.get_b_list()
+        P = self._p_widget.get_matrix()
         if F_list is None or SW_list is None:
             QMessageBox.warning(
-                self, "Save session",
+                self,
+                "Save session",
                 "Cannot save: one or more parameter matrices are invalid.",
             )
             return
 
         arrays: dict = {
-            "_K":           np.array(self._K),
-            "_q":           np.array(self._q),
-            "_s":           np.array(self._s),
-            "_filter_mode": np.array(self._mode_combo.currentData() or "imm_general",
-                                     dtype=object),
-            "_joseph":      np.array(self._joseph_check.isChecked()),
-            "_P":           P,
+            "_K": np.array(self._K),
+            "_q": np.array(self._q),
+            "_s": np.array(self._s),
+            "_filter_mode": np.array(self._mode_combo.currentData() or "imm_general", dtype=object),
+            "_joseph": np.array(self._joseph_check.isChecked()),
+            "_P": P,
         }
         for k in range(self._K):
             q, s = self._q, self._s
-            arrays[f"_F_{k}"]  = F_list[k]
+            arrays[f"_F_{k}"] = F_list[k]
             arrays[f"_SW_{k}"] = SW_list[k]
-            arrays[f"_mu_{k}"] = mu_list[k]  if mu_list  else np.zeros((q + s, 1))
-            arrays[f"_b_{k}"]  = b_list[k]   if b_list   else np.zeros((q + s, 1))
+            arrays[f"_mu_{k}"] = mu_list[k] if mu_list else np.zeros((q + s, 1))
+            arrays[f"_b_{k}"] = b_list[k] if b_list else np.zeros((q + s, 1))
 
         has_data = self._state.has_data()
         arrays["_has_data"] = np.array(has_data)
         if has_data:
             ns, rs, xs, ys, seed_used = self._state.data
             has_xs = xs is not None
-            arrays["_ns"]     = np.array(ns, dtype=np.int32)
-            arrays["_rs"]     = np.array(rs, dtype=np.int32)
-            arrays["_ys"]     = ys
+            arrays["_ns"] = np.array(ns, dtype=np.int32)
+            arrays["_rs"] = np.array(rs, dtype=np.int32)
+            arrays["_ys"] = ys
             arrays["_has_xs"] = np.array(has_xs)
-            arrays["_xs"]     = xs if has_xs else np.zeros(0, dtype=np.float64)
-            arrays["_seed"]   = np.array(
-                seed_used if seed_used is not None else -1, dtype=np.int64
-            )
+            arrays["_xs"] = xs if has_xs else np.zeros(0, dtype=np.float64)
+            arrays["_seed"] = np.array(seed_used if seed_used is not None else -1, dtype=np.int64)
 
-        has_filt = (
-            self._state.has_filter()
-            and self._state.filter_E_xs is not None
-        )
+        has_filt = self._state.has_filter() and self._state.filter_E_xs is not None
         arrays["_has_filter"] = np.array(has_filt)
         if has_filt:
             arrays["_innovations"] = self._state.innovations
-            arrays["_E_xs"]       = self._state.filter_E_xs
-            arrays["_Var_xs"]     = self._state.filter_Var_xs
-            arrays["_pis"]        = self._state.filter_pis
-            arrays["_log_lik"]    = np.array(self._state.filter_log_lik or 0.0)
+            arrays["_E_xs"] = self._state.filter_E_xs
+            arrays["_Var_xs"] = self._state.filter_Var_xs
+            arrays["_pis"] = self._state.filter_pis
+            arrays["_log_lik"] = np.array(self._state.filter_log_lik or 0.0)
 
         try:
             buf = io.BytesIO()
@@ -2320,15 +2360,14 @@ class GSSMainWindow(QMainWindow):
             return
 
         self._set_status(f"Session saved: {pathlib.Path(path).name}")
-        self.statusBar().showMessage(
-            f"Session saved to {pathlib.Path(path).resolve()}", 6000
-        )
-        self._push_recent_session(path)   # D9
+        self.statusBar().showMessage(f"Session saved to {pathlib.Path(path).resolve()}", 6000)
+        self._push_recent_session(path)  # D9
 
     def _on_load_session(self) -> None:
         """Restore a .exactIMM session (params + data + filter)."""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load session",
+            self,
+            "Load session",
             str(pathlib.Path("data/sessions")),
             "exactIMM sessions (*.exactIMM *.npz);;All files (*)",
         )
@@ -2344,7 +2383,8 @@ class GSSMainWindow(QMainWindow):
 
         if K != self._K or q != self._q or s != self._s:
             QMessageBox.warning(
-                self, "Dimension mismatch",
+                self,
+                "Dimension mismatch",
                 f"Session has K={K}, q={q}, s={s} but the current window "
                 f"has K={self._K}, q={self._q}, s={self._s}.\n\n"
                 "Close this window and open one with the matching dimensions "
@@ -2357,16 +2397,16 @@ class GSSMainWindow(QMainWindow):
         self._param_panel.blockSignals(True)
         self._p_widget.blockSignals(True)
         try:
-            P      = npz["_P"]
-            F_list = [npz[f"_F_{k}"]  for k in range(K)]
-            SW_list= [npz[f"_SW_{k}"] for k in range(K)]
-            mu_list= [npz[f"_mu_{k}"] for k in range(K)]
-            b_list = [npz[f"_b_{k}"]  for k in range(K)]
+            P = npz["_P"]
+            F_list = [npz[f"_F_{k}"] for k in range(K)]
+            SW_list = [npz[f"_SW_{k}"] for k in range(K)]
+            mu_list = [npz[f"_mu_{k}"] for k in range(K)]
+            b_list = [npz[f"_b_{k}"] for k in range(K)]
 
-            A_list  = [f[:q, :q] for f in F_list]
-            B_list  = [f[:q, q:] for f in F_list]
-            C_list  = [f[q:, :q] for f in F_list]
-            D_list  = [f[q:, q:] for f in F_list]
+            A_list = [f[:q, :q] for f in F_list]
+            B_list = [f[:q, q:] for f in F_list]
+            C_list = [f[q:, :q] for f in F_list]
+            D_list = [f[q:, q:] for f in F_list]
             SU_list = [sw[:q, :q] for sw in SW_list]
             Dl_list = [sw[:q, q:] for sw in SW_list]
             SV_list = [sw[q:, q:] for sw in SW_list]
@@ -2374,8 +2414,7 @@ class GSSMainWindow(QMainWindow):
             fm = FMatrix(K, q, s, A_list, B_list, C_list, D_list)
             nc = GSSNoiseCovariance(K, q, s, SU_list, Dl_list, SV_list)
             for k in range(K):
-                self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k),
-                                                   mu_list[k], b_list[k])
+                self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu_list[k], b_list[k])
 
             # Re-apply any active H5 / Δ=0 constraints to the newly loaded
             # parameter values.  The ParamPanel signals are still blocked here,
@@ -2386,8 +2425,9 @@ class GSSMainWindow(QMainWindow):
             self._p_widget.set_matrix(self._P)
             self._update_stationary_display()
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Load session error",
-                                 f"Failed to restore parameters:\n{exc}")
+            QMessageBox.critical(
+                self, "Load session error", f"Failed to restore parameters:\n{exc}"
+            )
             return
         finally:
             self._param_panel.blockSignals(False)
@@ -2420,11 +2460,11 @@ class GSSMainWindow(QMainWindow):
         ys_arr: np.ndarray = np.zeros((0, s))
         if has_data:
             try:
-                ns       = npz["_ns"].tolist()
-                rs       = npz["_rs"].tolist()
-                ys_arr   = npz["_ys"]
-                has_xs   = bool(npz["_has_xs"])
-                xs_arr   = npz["_xs"] if has_xs else None
+                ns = npz["_ns"].tolist()
+                rs = npz["_rs"].tolist()
+                ys_arr = npz["_ys"]
+                has_xs = bool(npz["_has_xs"])
+                xs_arr = npz["_xs"] if has_xs else None
                 seed_val = int(npz["_seed"])
                 seed_val = seed_val if seed_val >= 0 else None
 
@@ -2438,17 +2478,18 @@ class GSSMainWindow(QMainWindow):
                 self._btn_export_plots.setEnabled(True)
                 self._btn_regime_diag.setEnabled(True)  # B7/B8
             except Exception as exc:  # noqa: BLE001
-                QMessageBox.warning(self, "Load session",
-                                    f"Could not restore simulation data:\n{exc}")
+                QMessageBox.warning(
+                    self, "Load session", f"Could not restore simulation data:\n{exc}"
+                )
 
         # --- 3. Restore filter results ---
         has_filt = bool(npz["_has_filter"]) if "_has_filter" in npz else False
         if has_filt and has_data and "_E_xs" in npz:
             try:
-                E_xs          = npz["_E_xs"]
-                Var_xs        = npz["_Var_xs"]
-                pis           = npz["_pis"]
-                innovations   = npz["_innovations"]
+                E_xs = npz["_E_xs"]
+                Var_xs = npz["_Var_xs"]
+                pis = npz["_pis"]
+                innovations = npz["_innovations"]
                 log_lik_total = float(npz["_log_lik"])
 
                 self._state.store_innovations(innovations)
@@ -2467,15 +2508,16 @@ class GSSMainWindow(QMainWindow):
                 # regime diag already enabled from data restore above
 
             except Exception as exc:  # noqa: BLE001
-                QMessageBox.warning(self, "Load session",
-                                    f"Could not restore filter results:\n{exc}")
+                QMessageBox.warning(
+                    self, "Load session", f"Could not restore filter results:\n{exc}"
+                )
 
         self._sync_menu_actions()
         self._refresh_filter_button_drift_indicator()
         name = pathlib.Path(path).name
         self._set_status(f"Session loaded: {name}")
         self.statusBar().showMessage(f"Session loaded from {name}", 6000)
-        self._push_recent_session(path)   # D9: update recent-sessions menu
+        self._push_recent_session(path)  # D9: update recent-sessions menu
 
     # ------------------------------------------------------------------
     # Menu bar, status bar, settings
@@ -2587,13 +2629,10 @@ class GSSMainWindow(QMainWindow):
         # B7/B8: regime diagnostics
         self._act_regime_diag = QAction("&Regime diagnostics…", self)
         self._act_regime_diag.setShortcut(QKeySequence("Ctrl+D"))
-        self._act_regime_diag.setStatusTip(
-            "Confusion matrix and regime-duration histograms"
-        )
+        self._act_regime_diag.setStatusTip("Confusion matrix and regime-duration histograms")
         self._act_regime_diag.setEnabled(False)
         self._act_regime_diag.triggered.connect(self._on_regime_diag)
         view_menu.addAction(self._act_regime_diag)
-
 
     # ------------------------------------------------------------------
     # D9 / B4 — Recent files helpers
@@ -2680,6 +2719,7 @@ class GSSMainWindow(QMainWindow):
         try:
             with open(path, newline="", encoding="utf-8") as fh:
                 import csv as _csv_mod
+
                 reader = _csv_mod.DictReader(fh)
                 rows = list(reader)
         except Exception as exc:  # noqa: BLE001
@@ -2692,10 +2732,11 @@ class GSSMainWindow(QMainWindow):
 
         headers = list(rows[0].keys())
         required = ["n", "r"] + [f"y_{i}" for i in range(self._s)]
-        missing  = [c for c in required if c not in headers]
+        missing = [c for c in required if c not in headers]
         if missing:
             QMessageBox.warning(
-                self, "Load error",
+                self,
+                "Load error",
                 f"Missing column(s): {missing}\n"
                 f"Expected at least: n, r, y_0 … y_{self._s - 1}\n"
                 f"Found: {headers}",
@@ -2703,22 +2744,24 @@ class GSSMainWindow(QMainWindow):
             return
 
         try:
-            ns  = [int(float(row["n"])) for row in rows]
-            rs  = [int(float(row["r"])) for row in rows]
-            ys  = np.array([[float(row[f"y_{i}"]) for i in range(self._s)]
-                            for row in rows])
+            ns = [int(float(row["n"])) for row in rows]
+            rs = [int(float(row["r"])) for row in rows]
+            ys = np.array([[float(row[f"y_{i}"]) for i in range(self._s)] for row in rows])
             x_cols = [f"x_{i}" for i in range(self._q)]
-            has_x  = all(c in headers for c in x_cols)
-            xs     = (np.array([[float(row[f"x_{i}"]) for i in range(self._q)]
-                                for row in rows]) if has_x else None)
+            has_x = all(c in headers for c in x_cols)
+            xs = (
+                np.array([[float(row[f"x_{i}"]) for i in range(self._q)] for row in rows])
+                if has_x
+                else None
+            )
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Load error", str(exc))
             return
 
         live_params = self._build_gss_params()
-        self._state.load_external(ns, rs, xs, ys,
-                                  params=live_params,
-                                  signature=self._params_signature())
+        self._state.load_external(
+            ns, rs, xs, ys, params=live_params, signature=self._params_signature()
+        )
         self._refresh_filter_button_drift_indicator()
         self._plot_panel.clear_filter_overlay()
         self._plot_panel.update_plots(ns, rs, xs, ys, self._K)
@@ -2733,7 +2776,7 @@ class GSSMainWindow(QMainWindow):
             info += "  (no ground-truth X)"
         self._set_status(info)
         self.statusBar().showMessage(info, 6000)
-        self._push_recent_csv(path)   # refresh menu with this path on top
+        self._push_recent_csv(path)  # refresh menu with this path on top
 
     def _load_session_from(self, path: str) -> None:
         """Load a session directly (called from Recent sessions menu)."""
@@ -2742,8 +2785,7 @@ class GSSMainWindow(QMainWindow):
         try:
             npz = np.load(path, allow_pickle=True)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Load session error",
-                                 f"Cannot read session file:\n{exc}")
+            QMessageBox.critical(self, "Load session error", f"Cannot read session file:\n{exc}")
             return
         self._restore_session_from_npz(npz, path)
 
@@ -2762,9 +2804,7 @@ class GSSMainWindow(QMainWindow):
         self._seed_edit.textChanged.connect(self._refresh_session_summary)
         self._auto_filter_check.toggled.connect(self._refresh_session_summary)
         self._joseph_check.toggled.connect(self._refresh_session_summary)
-        self._mode_combo.currentIndexChanged.connect(
-            lambda _: self._refresh_session_summary()
-        )
+        self._mode_combo.currentIndexChanged.connect(lambda _: self._refresh_session_summary())
 
     def _refresh_session_summary(self) -> None:
         """Update the right-hand permanent label in the status bar."""
@@ -2811,13 +2851,13 @@ class GSSMainWindow(QMainWindow):
         if geom is not None:
             try:
                 self.restoreGeometry(geom)
-            except Exception:                                       # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 pass
         split = s.value("splitter")
         if split is not None:
             try:
                 self._splitter.restoreState(split)
-            except Exception:                                       # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 pass
 
     def _save_settings(self) -> None:
@@ -2834,7 +2874,7 @@ class GSSMainWindow(QMainWindow):
         s.remove("mc_on")
         s.remove("M")
 
-    def closeEvent(self, event) -> None:                            # noqa: N802
+    def closeEvent(self, event) -> None:  # noqa: N802
         self._cancel_active_workers()
         self._save_settings()
         super().closeEvent(event)
@@ -2863,7 +2903,11 @@ class GSSMainWindow(QMainWindow):
         ns, rs, xs, ys, _ = self._state.data
         pis = self._state.filter_pis  # None if filter not run
         dlg = _RegimeDiagDialog(
-            K=self._K, rs=rs, P=self._P, pis=pis, parent=self,
+            K=self._K,
+            rs=rs,
+            P=self._P,
+            pis=pis,
+            parent=self,
         )
         dlg.show()
 
@@ -2872,24 +2916,21 @@ class GSSMainWindow(QMainWindow):
         if not self._state.has_filter():
             return
         mix_params = None
-        mu_Y_pr   = None    # [K] ndarray (s,1) — stationary regime means
-        S_YY_pr   = None    # [K] ndarray (s,s) — stationary regime Y-covariances
-        ys_pr     = None    # (N, s) observations (for per-regime residuals)
+        mu_Y_pr = None  # [K] ndarray (s,1) — stationary regime means
+        S_YY_pr = None  # [K] ndarray (s,s) — stationary regime Y-covariances
+        ys_pr = None  # (N, s) observations (for per-regime residuals)
 
-        if (
-            self._filter_worker is not None
-            and hasattr(self._filter_worker, "cond_moments")
-        ):
+        if self._filter_worker is not None and hasattr(self._filter_worker, "cond_moments"):
             cm = self._filter_worker.cond_moments
             if all(k in cm for k in ("mix_w", "Gamma", "mu_Y_jk")):
                 mix_params = {
-                    "w":       cm["mix_w"],      # (K,K)
-                    "Gamma":   cm["Gamma"],      # [K][K] (s,s)
-                    "mu_Y_jk": cm["mu_Y_jk"],   # [K][K] (s,1)
+                    "w": cm["mix_w"],  # (K,K)
+                    "Gamma": cm["Gamma"],  # [K][K] (s,s)
+                    "mu_Y_jk": cm["mu_Y_jk"],  # [K][K] (s,1)
                 }
             # Per-regime residuals: always available after stationary prior commit
-            mu_Y_pr = cm.get("mu_Y")            # [K] ndarray (s,1)
-            S_YY_pr = cm.get("S_YY")            # [K] ndarray (s,s)
+            mu_Y_pr = cm.get("mu_Y")  # [K] ndarray (s,1)
+            S_YY_pr = cm.get("S_YY")  # [K] ndarray (s,s)
 
         if self._state.data is not None:
             _, _, _, ys_pr, _ = self._state.data  # (N, s)
@@ -2897,7 +2938,7 @@ class GSSMainWindow(QMainWindow):
         dlg = _InnovHistDialog(
             self._state.innovations,
             mix_params=mix_params,
-            pis=self._state.filter_pis,   # D11: per-regime tab
+            pis=self._state.filter_pis,  # D11: per-regime tab
             mu_Y=mu_Y_pr,
             S_YY=S_YY_pr,
             ys=ys_pr,
@@ -2913,16 +2954,14 @@ class GSSMainWindow(QMainWindow):
             self._btn_simulate.setStyleSheet("")
             self._set_status("")
         else:
-            self._btn_simulate.setStyleSheet(
-                "border: 2px solid #cc0000; color: #cc0000;"
-            )
+            self._btn_simulate.setStyleSheet("border: 2px solid #cc0000; color: #cc0000;")
             self._set_status("Invalid parameter(s) — fix before simulating.", error=True)
         self._sync_menu_actions()
 
     def _sync_menu_actions(self) -> None:
         """Mirror every QPushButton's enabled state into its matching QAction."""
         if not hasattr(self, "_act_simulate"):
-            return   # menu bar not built yet
+            return  # menu bar not built yet
         self._act_simulate.setEnabled(self._btn_simulate.isEnabled())
         self._act_filter.setEnabled(self._btn_filter.isEnabled())
         self._act_save.setEnabled(self._btn_save.isEnabled())
@@ -2965,11 +3004,11 @@ class GSSMainWindow(QMainWindow):
 
         Returns None if any widget is currently invalid.
         """
-        F  = self._param_panel.get_F_list()
-        S  = self._param_panel.get_Sigma_W_list()
+        F = self._param_panel.get_F_list()
+        S = self._param_panel.get_Sigma_W_list()
         mu = self._param_panel.get_mu_z0_list()
-        b  = self._param_panel.get_b_list()
-        P  = self._p_widget.get_matrix()
+        b = self._param_panel.get_b_list()
+        P = self._p_widget.get_matrix()
         if any(x is None for x in (F, S, mu, b, P)):
             return None
         return (
@@ -2989,13 +3028,19 @@ class GSSMainWindow(QMainWindow):
         mu_z0_list = self._param_panel.get_mu_z0_list()
         b_list = self._param_panel.get_b_list()
         P = self._p_widget.get_matrix()
-        if F_list is None or Sigma_W_list is None or mu_z0_list is None or b_list is None or P is None:
+        if (
+            F_list is None
+            or Sigma_W_list is None
+            or mu_z0_list is None
+            or b_list is None
+            or P is None
+        ):
             self._set_status("Invalid parameter(s).", error=True)
             return None
 
         # Decompose Sigma_W(k) into blocks Sigma_U, Delta, Sigma_V
         Sigma_U_list = [sw[:q, :q] for sw in Sigma_W_list]
-        Delta_list   = [sw[:q, q:] for sw in Sigma_W_list]
+        Delta_list = [sw[:q, q:] for sw in Sigma_W_list]
         Sigma_V_list = [sw[q:, q:] for sw in Sigma_W_list]
 
         # Decompose F(k) into blocks A, B, C, D
@@ -3011,14 +3056,16 @@ class GSSMainWindow(QMainWindow):
             Sigma_z0_list = [np.eye(q + s) for _ in range(K)]
 
             params = GSSParams(
-                K=K, q=q, s=s,
+                K=K,
+                q=q,
+                s=s,
                 P=P,
                 f_matrix=f_matrix,
                 noise_cov=noise_cov,
-                pi0=None,               # stationary
+                pi0=None,  # stationary
                 mu_z0_list=mu_z0_list,  # from GUI
                 Sigma_z0_list=Sigma_z0_list,
-                b_list=b_list,          # from GUI
+                b_list=b_list,  # from GUI
             )
         except Exception as exc:  # noqa: BLE001
             self._set_status(f"Parameter error: {exc}", error=True)
@@ -3042,20 +3089,20 @@ class GSSMainWindow(QMainWindow):
         class_name = "".join(w.capitalize() for w in file_stem.split("_"))
 
         # Collect parameters from GUI
-        F_list        = self._param_panel.get_F_list()
-        Sigma_W_list  = self._param_panel.get_Sigma_W_list()
-        mu_z0_list    = self._param_panel.get_mu_z0_list()
-        b_list        = self._param_panel.get_b_list()
-        P             = self._p_widget.get_matrix()
+        F_list = self._param_panel.get_F_list()
+        Sigma_W_list = self._param_panel.get_Sigma_W_list()
+        mu_z0_list = self._param_panel.get_mu_z0_list()
+        b_list = self._param_panel.get_b_list()
+        P = self._p_widget.get_matrix()
 
         # Decompose blocks
-        A_list       = [f[:q,  :q]  for f in F_list]
-        B_list       = [f[:q,  q:]  for f in F_list]
-        C_list       = [f[q:,  :q]  for f in F_list]
-        D_list       = [f[q:,  q:]  for f in F_list]
-        Sigma_U_list = [sw[:q, :q]  for sw in Sigma_W_list]
-        Delta_list   = [sw[:q, q:]  for sw in Sigma_W_list]
-        Sigma_V_list = [sw[q:, q:]  for sw in Sigma_W_list]
+        A_list = [f[:q, :q] for f in F_list]
+        B_list = [f[:q, q:] for f in F_list]
+        C_list = [f[q:, :q] for f in F_list]
+        D_list = [f[q:, q:] for f in F_list]
+        Sigma_U_list = [sw[:q, :q] for sw in Sigma_W_list]
+        Delta_list = [sw[:q, q:] for sw in Sigma_W_list]
+        Sigma_V_list = [sw[q:, q:] for sw in Sigma_W_list]
 
         def _fmt_arr(arr: np.ndarray) -> str:
             """Format a 2-D numpy array as a compact np.array(...) literal.
@@ -3065,8 +3112,8 @@ class GSSMainWindow(QMainWindow):
                              [0.0, 0.7]])
             """
             prefix = "np.array(["
-            align  = " " * len(prefix)         # align continuation rows
-            rows   = []
+            align = " " * len(prefix)  # align continuation rows
+            rows = []
             for r in range(arr.shape[0]):
                 vals = ", ".join(f"{v:.8g}" for v in arr[r])
                 rows.append(f"[{vals}]")
@@ -3078,7 +3125,7 @@ class GSSMainWindow(QMainWindow):
 
             field_indent : spaces before each item (matches class body indent).
             """
-            pad = " " * (field_indent + 1)   # one extra to align past '['
+            pad = " " * (field_indent + 1)  # one extra to align past '['
             items = [_fmt_arr(a) for a in arrays]
             if len(items) == 1:
                 return f"[{items[0]}]"
@@ -3089,13 +3136,13 @@ class GSSMainWindow(QMainWindow):
         lines += [
             "#!/usr/bin/env python3",
             "# -*- coding: utf-8 -*-",
-            f'"""',
+            '"""',
             f"prg/models/{file_stem}.py",
             f"{'=' * (len('prg/models/') + len(file_stem) + 3)}",
             f"GSS model: K={K} states, q={q} (hidden), s={s} (observed).",
             "",
             "Generated by exactIMM GUI.",
-            f'"""',
+            '"""',
             "",
             "from __future__ import annotations",
             "",
@@ -3174,10 +3221,10 @@ class GSSMainWindow(QMainWindow):
             fm = FMatrix(K, q, s, p["A_list"], p["B_list"], p["C_list"], p["D_list"])
 
             mu_list = p.get("mu_z0_list")
-            b_list  = p.get("b_list")
+            b_list = p.get("b_list")
             for k in range(K):
                 mu = np.asarray(mu_list[k]) if mu_list is not None else None
-                b  = np.asarray(b_list[k])  if b_list  is not None else None
+                b = np.asarray(b_list[k]) if b_list is not None else None
                 self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu, b)
 
             if p.get("P") is not None:

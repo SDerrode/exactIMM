@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/gui/main.py
 ===============
@@ -25,10 +24,10 @@ from prg.gui.main_window import GSSMainWindow
 from prg.models.base_gss_model import BaseGSSModel
 from prg.models.presets import PRESETS
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_model(model_name: str) -> BaseGSSModel:
     """Dynamically import and instantiate a model from prg/models/."""
@@ -36,24 +35,24 @@ def _load_model(model_name: str) -> BaseGSSModel:
     for _, obj in inspect.getmembers(module, inspect.isclass):
         if issubclass(obj, BaseGSSModel) and obj is not BaseGSSModel:
             return obj()
-    raise ImportError(
-        f"No BaseGSSModel subclass found in prg.models.{model_name}"
-    )
+    raise ImportError(f"No BaseGSSModel subclass found in prg.models.{model_name}")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="GSS Simulator — interactive PyQt6 GUI",
     )
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         metavar="NAME",
         help="Model name in prg/models/ (e.g. model_gss_K2_q1_s1). "
-             "Overrides -K/-q/-s when provided.",
+        "Overrides -K/-q/-s when provided.",
     )
     parser.add_argument("-K", type=int, default=2, help="Number of Markov states (default 2)")
     parser.add_argument("-q", type=int, default=1, help="Hidden dimension (default 1)")
@@ -102,9 +101,9 @@ def main() -> None:
 
         win.restart_with_model.connect(_on_restart)
         win.show()
-        app.exec()          # blocks until the window is closed
+        app.exec()  # blocks until the window is closed
 
-        if not _next:       # normal exit — no restart requested
+        if not _next:  # normal exit — no restart requested
             break
 
         # Prepare next iteration

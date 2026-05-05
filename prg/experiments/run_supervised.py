@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/experiments/run_supervised.py
 ==================================
@@ -36,15 +35,13 @@ import argparse
 import logging
 import pathlib
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
 
-from prg.classes.FMatrix import FMatrix
 from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
-from prg.classes.NoiseCovariance import GSSNoiseCovariance
 from prg.experiments.metrics import compute_rmse
 from prg.experiments.models_paper import get_params
 from prg.experiments.run_simulations import _params_from_dict
@@ -60,15 +57,16 @@ logger = logging.getLogger("exactIMM.experiments.supervised")
 # Protocol constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL   = "M1"          # only M1 for §6.3
-DEFAULT_N_LIST  = (200, 500, 1_000, 2_000)
-DEFAULT_N_RUNS  = 100
-DEFAULT_PROJS   = (None, "b", "a", "su")   # τ ∈ {none, B, A, Σ_U}
+DEFAULT_MODEL = "M1"  # only M1 for §6.3
+DEFAULT_N_LIST = (200, 500, 1_000, 2_000)
+DEFAULT_N_RUNS = 100
+DEFAULT_PROJS = (None, "b", "a", "su")  # τ ∈ {none, B, A, Σ_U}
 DEFAULT_OUT_DIR = pathlib.Path("data") / "experiments"
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_params(d: dict) -> GSSParams:
     """Build GSSParams from a parameter dict (same as run_simulations)."""
@@ -76,11 +74,16 @@ def _build_params(d: dict) -> GSSParams:
 
 
 def _rel_frob_F(
-    A_est: np.ndarray, B_est: np.ndarray,
-    C_est: np.ndarray, D_est: np.ndarray,
-    A_true: np.ndarray, B_true: np.ndarray,
-    C_true: np.ndarray, D_true: np.ndarray,
-    q: int, s: int,
+    A_est: np.ndarray,
+    B_est: np.ndarray,
+    C_est: np.ndarray,
+    D_est: np.ndarray,
+    A_true: np.ndarray,
+    B_true: np.ndarray,
+    C_true: np.ndarray,
+    D_true: np.ndarray,
+    q: int,
+    s: int,
 ) -> float:
     """
     Relative Frobenius error of the full transition matrix F.
@@ -88,9 +91,9 @@ def _rel_frob_F(
     ‖F_est − F_true‖_F / ‖F_true‖_F
     with F = [[A, B], [C, D]]  (dimension (q+s) × (q+s)).
     """
-    F_est  = np.block([[A_est,  B_est],  [C_est,  D_est]])
+    F_est = np.block([[A_est, B_est], [C_est, D_est]])
     F_true = np.block([[A_true, B_true], [C_true, D_true]])
-    denom  = np.linalg.norm(F_true, "fro")
+    denom = np.linalg.norm(F_true, "fro")
     if denom < 1e-14:
         return float("nan")
     return float(np.linalg.norm(F_est - F_true, "fro") / denom)
@@ -114,8 +117,10 @@ def _max_h5_residual(est: dict) -> float:
     K, q = est["K"], est["q"]
     max_rel = 0.0
     for k in range(K):
-        A  = est["A_list"][k];  B  = est["B_list"][k]
-        C  = est["C_list"][k];  D  = est["D_list"][k]
+        A = est["A_list"][k]
+        B = est["B_list"][k]
+        C = est["C_list"][k]
+        D = est["D_list"][k]
         SU = est["Sigma_U_list"][k]
         Dt = est["Delta_list"][k]
         SV = est["Sigma_V_list"][k]
@@ -123,9 +128,9 @@ def _max_h5_residual(est: dict) -> float:
             F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
         except np.linalg.LinAlgError:
             return float("nan")
-        Z     = Dt.T @ A + SV @ B.T
+        Z = Dt.T @ A + SV @ B.T
         scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
-        rel   = float(np.linalg.norm(F, "fro")) / scale
+        rel = float(np.linalg.norm(F, "fro")) / scale
         max_rel = max(max_rel, rel)
     return max_rel
 
@@ -149,6 +154,7 @@ def _filter_rmse(
     float  RMSE normalised by q.
     """
     import warnings
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         filt = GSSFilter(params, mode="h5_exact")
@@ -169,10 +175,11 @@ def _filter_rmse(
 # Single-trial runner
 # ---------------------------------------------------------------------------
 
+
 def run_supervised_trial(
     model_name: str,
-    N:          int,
-    seed:       int,
+    N: int,
+    seed: int,
     projections: Sequence[str | None] = DEFAULT_PROJS,
 ) -> list[dict]:
     """
@@ -201,15 +208,18 @@ def run_supervised_trial(
     # ------------------------------------------------------------------
     # Build true params
     # ------------------------------------------------------------------
-    true_d  = get_params(model_name)
-    true_p  = _build_params(true_d)
+    true_d = get_params(model_name)
+    true_p = _build_params(true_d)
     K, q, s = true_p.K, true_p.q, true_p.s
 
     # True F and b per regime
-    true_F  = [np.block([[true_d["A_list"][k], true_d["B_list"][k]],
-                         [true_d["C_list"][k], true_d["D_list"][k]]])
-               for k in range(K)]
-    true_b  = true_d["b_list"]   # list of (q+s, 1)
+    true_F = [
+        np.block(
+            [[true_d["A_list"][k], true_d["B_list"][k]], [true_d["C_list"][k], true_d["D_list"][k]]]
+        )
+        for k in range(K)
+    ]
+    true_b = true_d["b_list"]  # list of (q+s, 1)
 
     # ------------------------------------------------------------------
     # Simulate
@@ -221,9 +231,9 @@ def run_supervised_trial(
         xs_list.append(x.ravel())
         ys_list.append(y.ravel())
 
-    rs = np.array(rs_list, dtype=int)   # (N,)
-    xs = np.array(xs_list)              # (N, q)
-    ys = np.array(ys_list)              # (N, s)
+    rs = np.array(rs_list, dtype=int)  # (N,)
+    xs = np.array(xs_list)  # (N, q)
+    ys = np.array(ys_list)  # (N, s)
 
     # ------------------------------------------------------------------
     # Oracle filter RMSE (true params, h5_exact)
@@ -239,7 +249,12 @@ def run_supervised_trial(
         proj_label = proj if proj is not None else "none"
         try:
             est = fit_supervised(
-                rs, xs, ys, K, q, s,
+                rs,
+                xs,
+                ys,
+                K,
+                q,
+                s,
                 constraint=proj,
                 delta_zero=False,
                 verbose=False,
@@ -247,80 +262,96 @@ def run_supervised_trial(
         except (ValueError, np.linalg.LinAlgError) as exc:
             logger.warning(
                 "supervised fit failed: model=%s N=%d seed=%d proj=%s — %s",
-                model_name, N, seed, proj_label, exc,
+                model_name,
+                N,
+                seed,
+                proj_label,
+                exc,
             )
-            rows.append({
-                "model": model_name, "N": N, "seed": seed,
-                "projection": proj_label,
-                "rel_err_F": float("nan"),
-                "rel_err_b": float("nan"),
-                "h5_residual": float("nan"),
-                "rmse_estimated": float("nan"),
-                "rmse_oracle": oracle_rmse,
-            })
+            rows.append(
+                {
+                    "model": model_name,
+                    "N": N,
+                    "seed": seed,
+                    "projection": proj_label,
+                    "rel_err_F": float("nan"),
+                    "rel_err_b": float("nan"),
+                    "h5_residual": float("nan"),
+                    "rmse_estimated": float("nan"),
+                    "rmse_oracle": oracle_rmse,
+                }
+            )
             continue
 
         # --- Parameter errors (averaged over regimes) ------------------
         rel_F_vals, rel_b_vals = [], []
         for k in range(K):
-            rel_F_vals.append(_rel_frob_F(
-                est["A_list"][k], est["B_list"][k],
-                est["C_list"][k], est["D_list"][k],
-                true_d["A_list"][k], true_d["B_list"][k],
-                true_d["C_list"][k], true_d["D_list"][k],
-                q, s,
-            ))
-            rel_b_vals.append(_rel_frob(
-                est["b_list"][k], true_b[k]
-            ))
+            rel_F_vals.append(
+                _rel_frob_F(
+                    est["A_list"][k],
+                    est["B_list"][k],
+                    est["C_list"][k],
+                    est["D_list"][k],
+                    true_d["A_list"][k],
+                    true_d["B_list"][k],
+                    true_d["C_list"][k],
+                    true_d["D_list"][k],
+                    q,
+                    s,
+                )
+            )
+            rel_b_vals.append(_rel_frob(est["b_list"][k], true_b[k]))
 
         rel_err_F = float(np.nanmean(rel_F_vals))
         rel_err_b = float(np.nanmean(rel_b_vals))
-        h5_res    = _max_h5_residual(est)
+        h5_res = _max_h5_residual(est)
 
         # --- Filter with estimated params (h5_exact) -------------------
         # Guard: if any matrix is non-finite or has huge norm (ill-conditioned
         # projection), skip the filter and report nan.
-        _all_mats = (
-            est["A_list"] + est["B_list"] + est["C_list"] + est["D_list"]
-        )
-        _valid = all(
-            np.isfinite(M).all() and np.linalg.norm(M, "fro") < 1e4
-            for M in _all_mats
-        )
+        _all_mats = est["A_list"] + est["B_list"] + est["C_list"] + est["D_list"]
+        _valid = all(np.isfinite(M).all() and np.linalg.norm(M, "fro") < 1e4 for M in _all_mats)
         if not _valid:
             logger.warning(
                 "estimated params contain inf/huge values: model=%s N=%d "
                 "seed=%d proj=%s — skipping filter",
-                model_name, N, seed, proj_label,
+                model_name,
+                N,
+                seed,
+                proj_label,
             )
             rmse_e = float("nan")
         else:
             try:
-                est_p  = _build_params(est)
+                est_p = _build_params(est)
                 rmse_e = _filter_rmse(est_p, ys, xs)
                 # Physical sanity: RMSE > 1e6 → diverged filter
                 if rmse_e > 1e6:
                     rmse_e = float("nan")
             except Exception as exc:
                 logger.warning(
-                    "filter with estimated params failed: model=%s N=%d "
-                    "seed=%d proj=%s — %s",
-                    model_name, N, seed, proj_label, exc,
+                    "filter with estimated params failed: model=%s N=%d seed=%d proj=%s — %s",
+                    model_name,
+                    N,
+                    seed,
+                    proj_label,
+                    exc,
                 )
                 rmse_e = float("nan")
 
-        rows.append({
-            "model":          model_name,
-            "N":              N,
-            "seed":           seed,
-            "projection":     proj_label,
-            "rel_err_F":      rel_err_F,
-            "rel_err_b":      rel_err_b,
-            "h5_residual":    h5_res,
-            "rmse_estimated": rmse_e,
-            "rmse_oracle":    oracle_rmse,
-        })
+        rows.append(
+            {
+                "model": model_name,
+                "N": N,
+                "seed": seed,
+                "projection": proj_label,
+                "rel_err_F": rel_err_F,
+                "rel_err_b": rel_err_b,
+                "h5_residual": h5_res,
+                "rmse_estimated": rmse_e,
+                "rmse_oracle": oracle_rmse,
+            }
+        )
 
     return rows
 
@@ -329,13 +360,14 @@ def run_supervised_trial(
 # Full Monte-Carlo runner
 # ---------------------------------------------------------------------------
 
+
 def run_supervised_all(
-    models:     Sequence[str]      = (DEFAULT_MODEL,),
-    N_list:     Sequence[int]      = DEFAULT_N_LIST,
+    models: Sequence[str] = (DEFAULT_MODEL,),
+    N_list: Sequence[int] = DEFAULT_N_LIST,
     projections: Sequence[str | None] = DEFAULT_PROJS,
-    n_runs:     int                = DEFAULT_N_RUNS,
+    n_runs: int = DEFAULT_N_RUNS,
     output_dir: str | pathlib.Path = DEFAULT_OUT_DIR,
-    verbose:    bool               = True,
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """
     Run the full supervised estimation Monte-Carlo study and save results.
@@ -364,7 +396,7 @@ def run_supervised_all(
     out_path = output_dir / "supervised_results.csv"
 
     total_trials = len(models) * len(N_list) * n_runs
-    total_rows   = total_trials * len(projections)
+    total_rows = total_trials * len(projections)
     if verbose:
         print(
             f"Supervised MC: {len(models)} model(s) × "
@@ -374,7 +406,7 @@ def run_supervised_all(
 
     all_rows: list[dict] = []
     done = 0
-    t0   = time.perf_counter()
+    t0 = time.perf_counter()
 
     for model_name in models:
         for N in N_list:
@@ -390,22 +422,28 @@ def run_supervised_all(
                 except Exception as exc:
                     logger.error(
                         "Trial failed: model=%s N=%d seed=%d — %s",
-                        model_name, N, seed, exc,
+                        model_name,
+                        N,
+                        seed,
+                        exc,
                     )
                     for proj in projections:
-                        all_rows.append({
-                            "model": model_name, "N": N, "seed": seed,
-                            "projection": proj if proj else "none",
-                            "rel_err_F": float("nan"),
-                            "rel_err_b": float("nan"),
-                            "h5_residual": float("nan"),
-                            "rmse_estimated": float("nan"),
-                            "rmse_oracle": float("nan"),
-                        })
+                        all_rows.append(
+                            {
+                                "model": model_name,
+                                "N": N,
+                                "seed": seed,
+                                "projection": proj if proj else "none",
+                                "rel_err_F": float("nan"),
+                                "rel_err_b": float("nan"),
+                                "h5_residual": float("nan"),
+                                "rmse_estimated": float("nan"),
+                                "rmse_oracle": float("nan"),
+                            }
+                        )
 
                 done += 1
-                if verbose and (done % max(1, total_trials // 40) == 0
-                                or done == total_trials):
+                if verbose and (done % max(1, total_trials // 40) == 0 or done == total_trials):
                     elapsed = time.perf_counter() - t0
                     eta = elapsed / done * (total_trials - done)
                     print(
@@ -430,14 +468,17 @@ def run_supervised_all(
 # Summary
 # ---------------------------------------------------------------------------
 
+
 def _print_supervised_summary(df: pd.DataFrame) -> None:
     """Print mean metrics per (model, N, projection)."""
     print("\n" + "=" * 72)
     print("Supervised estimation summary (mean over runs)")
     print("=" * 72)
-    print(f"{'Model':>5}  {'N':>5}  {'Proj':>4}  "
-          f"{'rel F err':>10}  {'rel b err':>10}  "
-          f"{'H5 resid':>10}  {'RMSE est':>9}  {'RMSE ora':>9}")
+    print(
+        f"{'Model':>5}  {'N':>5}  {'Proj':>4}  "
+        f"{'rel F err':>10}  {'rel b err':>10}  "
+        f"{'H5 resid':>10}  {'RMSE est':>9}  {'RMSE ora':>9}"
+    )
     print("-" * 72)
     for (model, N, proj), g in df.groupby(["model", "N", "projection"]):
         print(
@@ -455,21 +496,28 @@ def _print_supervised_summary(df: pd.DataFrame) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Run supervised estimation MC study (paper §6.3).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--models", nargs="+", default=[DEFAULT_MODEL],
+        "--models",
+        nargs="+",
+        default=[DEFAULT_MODEL],
         choices=["M1", "M2", "M3"],
     )
     parser.add_argument(
-        "--N-list", nargs="+", type=int,
-        default=list(DEFAULT_N_LIST), dest="N_list",
+        "--N-list",
+        nargs="+",
+        type=int,
+        default=list(DEFAULT_N_LIST),
+        dest="N_list",
     )
     parser.add_argument(
-        "--projections", nargs="+",
+        "--projections",
+        nargs="+",
         default=["none", "b", "a", "su"],
         choices=["none", "b", "a", "su"],
         help="H5 projection choices (none = free OLS).",

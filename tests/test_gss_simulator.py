@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 tests/test_gss_simulator.py
 ============================
@@ -7,8 +6,6 @@ Unit tests for GSSSimulator.
 """
 
 import csv
-import pathlib
-import tempfile
 
 import numpy as np
 import pytest
@@ -17,7 +14,6 @@ from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
 from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
 from prg.utils.exceptions import ParamError
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -85,7 +81,7 @@ class TestGSSSimulatorIterator:
 
     def test_stop_iteration(self, params_K2_q1_s1):
         sim = GSSSimulator(params_K2_q1_s1, N=5, seed=3)
-        list(sim)    # exhaust
+        list(sim)  # exhaust
         with pytest.raises(StopIteration):
             next(sim)
 
@@ -136,16 +132,15 @@ class TestGSSSimulatorReproducibility:
         sim_a = GSSSimulator(params_K2_q1_s1, N=N, seed=11)
         sim_b = GSSSimulator(params_K2_q1_s1, N=N, seed=22)
         diffs = sum(
-            not np.array_equal(xa, xb)
-            for (_, _, xa, _), (_, _, xb, _) in zip(sim_a, sim_b)
+            not np.array_equal(xa, xb) for (_, _, xa, _), (_, _, xb, _) in zip(sim_a, sim_b)
         )
-        assert diffs > 0   # with overwhelming probability
+        assert diffs > 0  # with overwhelming probability
 
     def test_reset_restores_sequence(self, params_K2_q1_s1):
         N = 30
         sim = GSSSimulator(params_K2_q1_s1, N=N, seed=55)
         first_run = list(sim)
-        sim.reset()            # same seed
+        sim.reset()  # same seed
         second_run = list(sim)
         for (na, ra, xa, ya), (nb, rb, xb, yb) in zip(first_run, second_run):
             assert na == nb and ra == rb
@@ -190,8 +185,8 @@ class TestGSSSimulatorRunAndSave:
             header = next(csv.reader(fh))
         assert header[0] == "n"
         assert header[1] == "r"
-        assert header[2] == "x_0"   # q=1 → only x_0
-        assert header[3] == "y_0"   # s=1 → only y_0
+        assert header[2] == "x_0"  # q=1 → only x_0
+        assert header[3] == "y_0"  # s=1 → only y_0
 
     def test_csv_n_column_sequential(self, params_K2_q1_s1, tmp_path):
         N = 15
@@ -199,7 +194,7 @@ class TestGSSSimulatorRunAndSave:
         filepath = sim.run(output_dir=tmp_path, model_name="test_model")
         with filepath.open() as fh:
             reader = csv.reader(fh)
-            next(reader)           # skip header
+            next(reader)  # skip header
             ns = [int(row[0]) for row in reader]
         assert ns == list(range(N))
 

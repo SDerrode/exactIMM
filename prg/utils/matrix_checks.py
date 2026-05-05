@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/utils/matrix_checks.py
 ==========================
@@ -34,7 +33,7 @@ __all__ = [
 # Tolerances
 # ---------------------------------------------------------------------------
 
-_EPS_SYM = 1e-10    # max |M - M^T| to consider M symmetric
+_EPS_SYM = 1e-10  # max |M - M^T| to consider M symmetric
 _EPS_STOCH = 1e-10  # max |row_sum - 1| to consider P row-stochastic
 
 
@@ -72,10 +71,7 @@ class CheckResult:
     def __str__(self) -> str:
         thr = f"  (threshold: {self.threshold})" if self.threshold is not None else ""
         val = f"  [value: {self.value:.6g}]" if self.value is not None else ""
-        return (
-            f"  [{str(self.status):<7}]  {self.name}{val}{thr}\n"
-            f"             -> {self.message}"
-        )
+        return f"  [{str(self.status):<7}]  {self.name}{val}{thr}\n             -> {self.message}"
 
 
 # ---------------------------------------------------------------------------
@@ -165,47 +161,70 @@ class CovarianceMatrix:
 
         # 1. Square
         if M.ndim != 2 or M.shape[0] != M.shape[1]:
-            report.checks.append(CheckResult(
-                "Square", Status.FAIL, None, None,
-                f"Expected a square 2D array; got shape {M.shape}.",
-            ))
+            report.checks.append(
+                CheckResult(
+                    "Square",
+                    Status.FAIL,
+                    None,
+                    None,
+                    f"Expected a square 2D array; got shape {M.shape}.",
+                )
+            )
             return report
         report.checks.append(CheckResult("Square", Status.OK, None, None, "OK."))
 
         # 2. Finite
         if not np.all(np.isfinite(M)):
-            report.checks.append(CheckResult(
-                "Finite", Status.FAIL, None, None,
-                "Matrix contains NaN or Inf.",
-            ))
+            report.checks.append(
+                CheckResult(
+                    "Finite",
+                    Status.FAIL,
+                    None,
+                    None,
+                    "Matrix contains NaN or Inf.",
+                )
+            )
             return report
         report.checks.append(CheckResult("Finite", Status.OK, None, None, "OK."))
 
         # 3. Symmetric
         sym_err = float(np.max(np.abs(M - M.T)))
         sym_ok = sym_err < _EPS_SYM
-        report.checks.append(CheckResult(
-            "Symmetric",
-            Status.OK if sym_ok else Status.FAIL,
-            sym_err, _EPS_SYM,
-            "OK." if sym_ok else f"Max asymmetry = {sym_err:.3e}.",
-        ))
+        report.checks.append(
+            CheckResult(
+                "Symmetric",
+                Status.OK if sym_ok else Status.FAIL,
+                sym_err,
+                _EPS_SYM,
+                "OK." if sym_ok else f"Max asymmetry = {sym_err:.3e}.",
+            )
+        )
         if not sym_ok:
             return report
 
         # 4. Positive definite (Cholesky)
         try:
             np.linalg.cholesky(M)
-            report.checks.append(CheckResult(
-                "PositiveDefinite", Status.OK, None, None,
-                "Cholesky factorisation succeeded.",
-            ))
+            report.checks.append(
+                CheckResult(
+                    "PositiveDefinite",
+                    Status.OK,
+                    None,
+                    None,
+                    "Cholesky factorisation succeeded.",
+                )
+            )
         except np.linalg.LinAlgError:
             min_eig = float(np.linalg.eigvalsh(M).min())
-            report.checks.append(CheckResult(
-                "PositiveDefinite", Status.FAIL, min_eig, 0.0,
-                f"Cholesky failed.  Min eigenvalue = {min_eig:.3e}.",
-            ))
+            report.checks.append(
+                CheckResult(
+                    "PositiveDefinite",
+                    Status.FAIL,
+                    min_eig,
+                    0.0,
+                    f"Cholesky failed.  Min eigenvalue = {min_eig:.3e}.",
+                )
+            )
 
         return report
 
@@ -259,31 +278,44 @@ class StochasticMatrix:
 
         # 1. Square
         if P.ndim != 2 or P.shape[0] != P.shape[1]:
-            report.checks.append(CheckResult(
-                "Square", Status.FAIL, None, None,
-                f"Expected a square 2D array; got shape {P.shape}.",
-            ))
+            report.checks.append(
+                CheckResult(
+                    "Square",
+                    Status.FAIL,
+                    None,
+                    None,
+                    f"Expected a square 2D array; got shape {P.shape}.",
+                )
+            )
             return report
         report.checks.append(CheckResult("Square", Status.OK, None, None, "OK."))
 
         # 2. Finite
         if not np.all(np.isfinite(P)):
-            report.checks.append(CheckResult(
-                "Finite", Status.FAIL, None, None,
-                "Matrix contains NaN or Inf.",
-            ))
+            report.checks.append(
+                CheckResult(
+                    "Finite",
+                    Status.FAIL,
+                    None,
+                    None,
+                    "Matrix contains NaN or Inf.",
+                )
+            )
             return report
         report.checks.append(CheckResult("Finite", Status.OK, None, None, "OK."))
 
         # 3. Non-negative
         min_val = float(P.min())
         nn_ok = min_val >= 0.0
-        report.checks.append(CheckResult(
-            "NonNegative",
-            Status.OK if nn_ok else Status.FAIL,
-            min_val, 0.0,
-            "OK." if nn_ok else f"Min entry = {min_val:.3e} < 0.",
-        ))
+        report.checks.append(
+            CheckResult(
+                "NonNegative",
+                Status.OK if nn_ok else Status.FAIL,
+                min_val,
+                0.0,
+                "OK." if nn_ok else f"Min entry = {min_val:.3e} < 0.",
+            )
+        )
         if not nn_ok:
             return report
 
@@ -291,12 +323,15 @@ class StochasticMatrix:
         row_sums = P.sum(axis=1)
         max_err = float(np.max(np.abs(row_sums - 1.0)))
         rs_ok = max_err < _EPS_STOCH
-        report.checks.append(CheckResult(
-            "RowSumsToOne",
-            Status.OK if rs_ok else Status.FAIL,
-            max_err, _EPS_STOCH,
-            "OK." if rs_ok else f"Max |row_sum - 1| = {max_err:.3e}.",
-        ))
+        report.checks.append(
+            CheckResult(
+                "RowSumsToOne",
+                Status.OK if rs_ok else Status.FAIL,
+                max_err,
+                _EPS_STOCH,
+                "OK." if rs_ok else f"Max |row_sum - 1| = {max_err:.3e}.",
+            )
+        )
 
         return report
 

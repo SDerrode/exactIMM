@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/learning/supervised.py
 ==========================
@@ -183,16 +182,21 @@ def _nearest_spd(M: np.ndarray, eps: float = 1e-8) -> np.ndarray:
 
 
 def _fit_regime(
-    Z_curr: np.ndarray,   # (N_k, dim_z)  Z_n   for transitions arriving in k
-    Z_next: np.ndarray,   # (N_k, dim_z)  Z_{n+1}
+    Z_curr: np.ndarray,  # (N_k, dim_z)  Z_n   for transitions arriving in k
+    Z_next: np.ndarray,  # (N_k, dim_z)  Z_{n+1}
     q: int,
     s: int,
     constraint: str | None,
     delta_zero: bool,
 ) -> tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray,   # A, B, C, D
-    np.ndarray, np.ndarray, np.ndarray,               # Sigma_U, Delta, Sigma_V
-    np.ndarray,                                       # b  (dim_z, 1)
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,  # A, B, C, D
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,  # Sigma_U, Delta, Sigma_V
+    np.ndarray,  # b  (dim_z, 1)
 ]:
     """
     Estimate F(k), b(k), Σ_W(k) for one regime by OLS, then apply
@@ -215,29 +219,29 @@ def _fit_regime(
     N_k, dim_z = Z_curr.shape
 
     # Augment Z_curr with a constant column for bias estimation
-    Z_aug = np.hstack([Z_curr, np.ones((N_k, 1))])   # (N_k, dim_z+1)
+    Z_aug = np.hstack([Z_curr, np.ones((N_k, 1))])  # (N_k, dim_z+1)
 
     # OLS — minimum-norm solution handles underdetermined cases
     Theta, _, _, _ = np.linalg.lstsq(Z_aug, Z_next, rcond=None)
     # Theta : (dim_z+1, dim_z)
 
-    F_full = Theta[:dim_z, :].T           # (dim_z, dim_z)
+    F_full = Theta[:dim_z, :].T  # (dim_z, dim_z)
     b_full = Theta[dim_z, :].reshape(dim_z, 1)  # (dim_z, 1)
 
     # Residuals and noise covariance (MLE)
-    residuals = Z_next - Z_aug @ Theta    # (N_k, dim_z)
+    residuals = Z_next - Z_aug @ Theta  # (N_k, dim_z)
     SigW = (residuals.T @ residuals) / N_k
-    SigW = (SigW + SigW.T) / 2.0         # symmetrise
+    SigW = (SigW + SigW.T) / 2.0  # symmetrise
 
     # Extract blocks
-    A  = F_full[:q, :q]   # (q, q)
-    B  = F_full[:q, q:]   # (q, s)
-    C  = F_full[q:, :q]   # (s, q)
-    D  = F_full[q:, q:]   # (s, s)
+    A = F_full[:q, :q]  # (q, q)
+    B = F_full[:q, q:]  # (q, s)
+    C = F_full[q:, :q]  # (s, q)
+    D = F_full[q:, q:]  # (s, s)
 
-    SU = SigW[:q, :q]     # (q, q)  Σ_U
-    Dt = SigW[:q, q:]     # (q, s)  Δ
-    SV = SigW[q:, q:]     # (s, s)  Σ_V
+    SU = SigW[:q, :q]  # (q, q)  Σ_U
+    Dt = SigW[:q, q:]  # (q, s)  Δ
+    SV = SigW[q:, q:]  # (s, s)  Σ_V
 
     # --- Step 1: enforce Δ = 0 ---
     if delta_zero:
@@ -250,12 +254,15 @@ def _fit_regime(
     # --- Step 3: H5 projection ---
     if constraint == "b":
         from prg.utils.h5_constraint import compute_B_from_h5
+
         B = compute_B_from_h5(A, C, D, SU, Dt, SV)
     elif constraint == "a":
         from prg.utils.h5_constraint import compute_A_from_h5
+
         A = compute_A_from_h5(B, C, D, SU, Dt, SV)
     elif constraint == "su":
         from prg.utils.h5_constraint import compute_SU_from_h5
+
         SU = compute_SU_from_h5(A, B, C, D, Dt, SV)
         SU = _nearest_spd(SU)
 
@@ -348,8 +355,8 @@ def fit_supervised(
 
     for k in range(K):
         # Indices n such that r_{n+1} = k  (transitions arriving at k)
-        mask = rs[1:] == k          # length N-1
-        idx  = np.where(mask)[0]   # into 0 … N-2
+        mask = rs[1:] == k  # length N-1
+        idx = np.where(mask)[0]  # into 0 … N-2
 
         if idx.size == 0:
             raise ValueError(
@@ -357,8 +364,8 @@ def fit_supervised(
                 "cannot estimate F(k) by OLS."
             )
 
-        Z_curr = Z[idx]       # Z_n
-        Z_next = Z[idx + 1]   # Z_{n+1}
+        Z_curr = Z[idx]  # Z_n
+        Z_next = Z[idx + 1]  # Z_{n+1}
         N_k = idx.size
 
         _log.info("Regime k=%d: %d transitions (OLS)", k, N_k)
@@ -368,7 +375,9 @@ def fit_supervised(
             _log.warning(
                 "Regime k=%d: only %d samples for %d parameters — "
                 "OLS solution may be underdetermined.",
-                k, N_k, dim_z + 1,
+                k,
+                N_k,
+                dim_z + 1,
             )
 
         try:
@@ -399,23 +408,26 @@ def fit_supervised(
             _log.warning(
                 "Regime k=%d has only %d time-step(s) — "
                 "using zero mean and identity covariance for μ_z0, Σ_z0.",
-                k, n_in_k,
+                k,
+                n_in_k,
             )
             mu_z0_list.append(np.zeros((dim_z, 1)))
             Sigma_z0_list.append(np.eye(dim_z))
 
     return {
-        "K": K, "q": q, "s": s,
+        "K": K,
+        "q": q,
+        "s": s,
         "P": P,
         "A_list": A_list,
         "B_list": B_list,
         "C_list": C_list,
         "D_list": D_list,
         "Sigma_U_list": SU_list,
-        "Delta_list":   Dt_list,
+        "Delta_list": Dt_list,
         "Sigma_V_list": SV_list,
         "pi0": None,
-        "mu_z0_list":    mu_z0_list,
+        "mu_z0_list": mu_z0_list,
         "Sigma_z0_list": Sigma_z0_list,
         "b_list": b_list,
     }
@@ -435,8 +447,8 @@ def _fmt_arr(arr: np.ndarray) -> str:
     (up to 8 significant digits, no trailing zeros).
     """
     prefix = "np.array(["
-    align  = " " * len(prefix)
-    rows   = []
+    align = " " * len(prefix)
+    rows = []
     for r in range(arr.shape[0]):
         vals = ", ".join(f"{v:.10g}" for v in arr[r])
         rows.append(f"[{vals}]")
@@ -471,9 +483,7 @@ def _generate_model_code(
     K, q, s = params["K"], params["q"], params["s"]
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    constraint_line = (
-        f"Constraint : {constraint.upper()}" if constraint else "Constraint : none"
-    )
+    constraint_line = f"Constraint : {constraint.upper()}" if constraint else "Constraint : none"
     delta_line = "Delta=0    : yes" if delta_zero else "Delta=0    : no"
 
     lines: list[str] = [
@@ -580,11 +590,14 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "csv", metavar="CSV",
+        "csv",
+        metavar="CSV",
         help="Path to the simulation CSV (columns: n, r, x_0, …, y_0, …).",
     )
     parser.add_argument(
-        "--constraint", choices=["a", "b", "su"], default=None,
+        "--constraint",
+        choices=["a", "b", "su"],
+        default=None,
         metavar="TARGET",
         help=(
             "Enforce H5 constraint post-hoc: recompute A (a), B (b), "
@@ -593,18 +606,20 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--delta-zero", action="store_true",
+        "--delta-zero",
+        action="store_true",
         help="Force Δ(k) = 0 (zero cross-covariance block) before the H5 step.",
     )
     parser.add_argument(
-        "--output", default=None, metavar="PATH",
-        help=(
-            "Destination .py file.  "
-            "Default: prg/models/<auto>.py in the package tree."
-        ),
+        "--output",
+        default=None,
+        metavar="PATH",
+        help=("Destination .py file.  Default: prg/models/<auto>.py in the package tree."),
     )
     parser.add_argument(
-        "--model-name", default=None, metavar="NAME",
+        "--model-name",
+        default=None,
+        metavar="NAME",
         help=(
             "Base name (file stem) for the generated model "
             "(e.g. model_my_gss).  "
@@ -612,7 +627,9 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-v", "--verbose", action="store_true",
+        "-v",
+        "--verbose",
+        action="store_true",
         help="Print per-regime fit summaries.",
     )
     return parser
@@ -655,13 +672,15 @@ def main() -> None:
 
     # --- Fit ---
     if args.verbose:
-        print(
-            f"\nFitting (constraint={args.constraint!r}, "
-            f"delta_zero={args.delta_zero}) …"
-        )
+        print(f"\nFitting (constraint={args.constraint!r}, delta_zero={args.delta_zero}) …")
     try:
         params = fit_supervised(
-            rs, xs, ys, K, q, s,
+            rs,
+            xs,
+            ys,
+            K,
+            q,
+            s,
             constraint=args.constraint,
             delta_zero=args.delta_zero,
             verbose=args.verbose,

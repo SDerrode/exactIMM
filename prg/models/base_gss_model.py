@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/models/base_gss_model.py
 ============================
@@ -21,8 +20,6 @@ Convention (mirrors awesomepkf's BaseModelLinear pattern)
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-
-import numpy as np
 
 __all__ = ["BaseGSSModel"]
 

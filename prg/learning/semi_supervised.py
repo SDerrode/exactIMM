@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/learning/semi_supervised.py
 ================================
@@ -77,8 +76,6 @@ from scipy.special import logsumexp
 from prg.learning.supervised import (
     _class_name_from_stem,
     _fit_regime,
-    _fmt_arr,
-    _fmt_list,
     _generate_model_code,
     _nearest_spd,
     _read_csv,
@@ -88,7 +85,7 @@ __all__ = ["fit_semi_supervised"]
 
 _log = logging.getLogger("exactIMM.learning.semi_supervised")
 
-_LOG_FLOOR = 1e-300   # avoids log(0) in transition / initial probabilities
+_LOG_FLOOR = 1e-300  # avoids log(0) in transition / initial probabilities
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +109,7 @@ def _log_mvn_batch(X: np.ndarray, mu: np.ndarray, Sigma: np.ndarray) -> np.ndarr
     """
     N, d = X.shape
     mu = mu.reshape(-1)
-    diff = X - mu[None, :]                           # (N, d)
+    diff = X - mu[None, :]  # (N, d)
     try:
         L = np.linalg.cholesky(Sigma)
     except np.linalg.LinAlgError:
@@ -120,7 +117,7 @@ def _log_mvn_batch(X: np.ndarray, mu: np.ndarray, Sigma: np.ndarray) -> np.ndarr
         L = np.linalg.cholesky(Sigma + 1e-8 * np.eye(d))
     # Solve L y = diff^T  →  y has shape (d, N)
     y = solve_triangular(L, diff.T, lower=True, check_finite=False)
-    quad = (y * y).sum(axis=0)                       # (N,)
+    quad = (y * y).sum(axis=0)  # (N,)
     log_det = 2.0 * np.log(np.diag(L)).sum()
     return -0.5 * (d * np.log(2.0 * np.pi) + log_det + quad)
 
@@ -131,9 +128,9 @@ def _log_mvn_batch(X: np.ndarray, mu: np.ndarray, Sigma: np.ndarray) -> np.ndarr
 
 
 def _compute_log_emissions(
-    Z: np.ndarray,                # (N, dim_z)
-    F_list:    list[np.ndarray],
-    b_list:    list[np.ndarray],
+    Z: np.ndarray,  # (N, dim_z)
+    F_list: list[np.ndarray],
+    b_list: list[np.ndarray],
     SigW_list: list[np.ndarray],
 ) -> np.ndarray:
     """
@@ -149,16 +146,16 @@ def _compute_log_emissions(
     Z_curr = Z[1:]
     for k in range(K):
         # Predicted mean for each transition: F Z_{n-1} + b
-        means = Z_prev @ F_list[k].T + b_list[k].reshape(-1)[None, :]   # (N-1, d)
+        means = Z_prev @ F_list[k].T + b_list[k].reshape(-1)[None, :]  # (N-1, d)
         log_emis[:, k] = _log_mvn_batch(Z_curr - means, np.zeros(dim_z), SigW_list[k])
     return log_emis
 
 
 def _forward(
-    log_emis: np.ndarray,        # (N-1, K)
-    log_init: np.ndarray,        # (K,)   log p(Z_0 | R_0)
-    log_P:    np.ndarray,        # (K, K)
-    log_pi0:  np.ndarray,        # (K,)
+    log_emis: np.ndarray,  # (N-1, K)
+    log_init: np.ndarray,  # (K,)   log p(Z_0 | R_0)
+    log_P: np.ndarray,  # (K, K)
+    log_pi0: np.ndarray,  # (K,)
 ) -> tuple[np.ndarray, float]:
     """
     Forward recursion in log-domain.
@@ -173,34 +170,30 @@ def _forward(
     log_alpha = np.empty((N, K))
     log_alpha[0] = log_pi0 + log_init
     for n in range(1, N):
-        log_alpha[n] = log_emis[n - 1] + logsumexp(
-            log_alpha[n - 1][:, None] + log_P, axis=0
-        )
+        log_alpha[n] = log_emis[n - 1] + logsumexp(log_alpha[n - 1][:, None] + log_P, axis=0)
     log_lik = float(logsumexp(log_alpha[N - 1]))
     return log_alpha, log_lik
 
 
 def _backward(
-    log_emis: np.ndarray,   # (N-1, K)
-    log_P:    np.ndarray,   # (K, K)
+    log_emis: np.ndarray,  # (N-1, K)
+    log_P: np.ndarray,  # (K, K)
 ) -> np.ndarray:
     """Backward recursion. Returns log_beta (N, K)."""
     N = log_emis.shape[0] + 1
     K = log_P.shape[0]
     log_beta = np.zeros((N, K))
     for n in range(N - 2, -1, -1):
-        log_beta[n] = logsumexp(
-            log_P + (log_emis[n] + log_beta[n + 1])[None, :], axis=1
-        )
+        log_beta[n] = logsumexp(log_P + (log_emis[n] + log_beta[n + 1])[None, :], axis=1)
     return log_beta
 
 
 def _compute_xi(
-    log_alpha: np.ndarray,   # (N, K)
-    log_beta:  np.ndarray,   # (N, K)
-    log_emis:  np.ndarray,   # (N-1, K)
-    log_P:     np.ndarray,   # (K, K)
-    log_lik:   float,
+    log_alpha: np.ndarray,  # (N, K)
+    log_beta: np.ndarray,  # (N, K)
+    log_emis: np.ndarray,  # (N-1, K)
+    log_P: np.ndarray,  # (K, K)
+    log_lik: float,
 ) -> np.ndarray:
     """
     Compute ``log_xi[m, j, k] = log p(R_m=j, R_{m+1}=k | Z_{0:N})`` for
@@ -224,14 +217,19 @@ def _compute_xi(
 
 
 def _apply_constraints(
-    A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray,
-    SU: np.ndarray, Dt: np.ndarray, SV: np.ndarray,
-    q: int, s: int,
+    A: np.ndarray,
+    B: np.ndarray,
+    C: np.ndarray,
+    D: np.ndarray,
+    SU: np.ndarray,
+    Dt: np.ndarray,
+    SV: np.ndarray,
+    q: int,
+    s: int,
     constraint: str | None,
     delta_zero: bool,
     where: str = "M-step",
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-           np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Apply optional Δ=0 and H5 projection to one regime's blocks.
 
@@ -249,25 +247,25 @@ def _apply_constraints(
 
     if constraint == "b":
         from prg.utils.h5_constraint import compute_B_from_h5
+
         try:
             B = compute_B_from_h5(A, C, D, SU, Dt, SV)
         except ValueError as exc:
-            _log.warning("H5 (B) failed in %s: %s — keeping unconstrained B.",
-                         where, exc)
+            _log.warning("H5 (B) failed in %s: %s — keeping unconstrained B.", where, exc)
     elif constraint == "a":
         from prg.utils.h5_constraint import compute_A_from_h5
+
         try:
             A = compute_A_from_h5(B, C, D, SU, Dt, SV)
         except ValueError as exc:
-            _log.warning("H5 (A) failed in %s: %s — keeping unconstrained A.",
-                         where, exc)
+            _log.warning("H5 (A) failed in %s: %s — keeping unconstrained A.", where, exc)
     elif constraint == "su":
         from prg.utils.h5_constraint import compute_SU_from_h5
+
         try:
             SU = _nearest_spd(compute_SU_from_h5(A, B, C, D, Dt, SV))
         except ValueError as exc:
-            _log.warning("H5 (Σ_U) failed in %s: %s — keeping unconstrained Σ_U.",
-                         where, exc)
+            _log.warning("H5 (Σ_U) failed in %s: %s — keeping unconstrained Σ_U.", where, exc)
     return A, B, C, D, SU, Dt, SV
 
 
@@ -277,18 +275,23 @@ def _apply_constraints(
 
 
 def _weighted_fit(
-    Z_curr: np.ndarray,    # (N-1, dim_z)  Z_n
-    Z_next: np.ndarray,    # (N-1, dim_z)  Z_{n+1}
-    w:      np.ndarray,    # (N-1,)        γ_{n+1}(k)
+    Z_curr: np.ndarray,  # (N-1, dim_z)  Z_n
+    Z_next: np.ndarray,  # (N-1, dim_z)  Z_{n+1}
+    w: np.ndarray,  # (N-1,)        γ_{n+1}(k)
     q: int,
     s: int,
     constraint: str | None,
     delta_zero: bool,
     floor_w: float = 1e-12,
 ) -> tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray,   # A, B, C, D
-    np.ndarray, np.ndarray, np.ndarray,               # SigU, Delta, SigV
-    np.ndarray,                                       # b
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,  # A, B, C, D
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,  # SigU, Delta, SigV
+    np.ndarray,  # b
 ]:
     """
     Weighted least-squares fit for one regime, plus optional H5 projection.
@@ -308,8 +311,8 @@ def _weighted_fit(
         SigW = np.eye(dim_z)
     else:
         sqrt_w = np.sqrt(np.clip(w, 0.0, None))
-        Z_aug = np.hstack([Z_curr, np.ones((N_pairs, 1))])    # (N-1, dim_z+1)
-        Z_aug_w  = sqrt_w[:, None] * Z_aug
+        Z_aug = np.hstack([Z_curr, np.ones((N_pairs, 1))])  # (N-1, dim_z+1)
+        Z_aug_w = sqrt_w[:, None] * Z_aug
         Z_next_w = sqrt_w[:, None] * Z_next
 
         Theta, _, _, _ = np.linalg.lstsq(Z_aug_w, Z_next_w, rcond=None)
@@ -321,16 +324,27 @@ def _weighted_fit(
         SigW = (residuals.T @ (w[:, None] * residuals)) / Wsum
         SigW = (SigW + SigW.T) / 2.0
 
-    A  = F[:q, :q]
-    B  = F[:q, q:]
-    C  = F[q:, :q]
-    D  = F[q:, q:]
+    A = F[:q, :q]
+    B = F[:q, q:]
+    C = F[q:, :q]
+    D = F[q:, q:]
     SU = SigW[:q, :q]
     Dt = SigW[:q, q:]
     SV = SigW[q:, q:]
 
     A, B, C, D, SU, Dt, SV = _apply_constraints(
-        A, B, C, D, SU, Dt, SV, q, s, constraint, delta_zero, where="M-step",
+        A,
+        B,
+        C,
+        D,
+        SU,
+        Dt,
+        SV,
+        q,
+        s,
+        constraint,
+        delta_zero,
+        where="M-step",
     )
 
     return A, B, C, D, SU, Dt, SV, b
@@ -365,7 +379,7 @@ def _initialize_kmeans(
 
     R_init = np.empty(N, dtype=int)
     R_init[1:] = labels
-    R_init[0]  = int(labels[0])
+    R_init[0] = int(labels[0])
 
     # If a regime ends up empty, randomly reassign one sample
     rng = np.random.default_rng(seed)
@@ -383,9 +397,13 @@ def _initialize_params_from_R(
     q: int,
     s: int,
 ) -> tuple[
-    list[np.ndarray], list[np.ndarray], list[np.ndarray],   # F, b, SigW
-    np.ndarray, np.ndarray,                                 # P, pi0
-    list[np.ndarray], list[np.ndarray],                     # mu_z0, Sigma_z0
+    list[np.ndarray],
+    list[np.ndarray],
+    list[np.ndarray],  # F, b, SigW
+    np.ndarray,
+    np.ndarray,  # P, pi0
+    list[np.ndarray],
+    list[np.ndarray],  # mu_z0, Sigma_z0
 ]:
     """
     Run a quick supervised OLS on the hard assignment R to seed EM.
@@ -418,11 +436,11 @@ def _initialize_params_from_R(
     mu_z0_list, Sigma_z0_list = [], []
 
     Z_global_mean = Z.mean(axis=0).reshape(dim_z, 1)
-    Z_global_cov  = _nearest_spd(np.cov(Z, rowvar=False))
+    Z_global_cov = _nearest_spd(np.cov(Z, rowvar=False))
 
     for k in range(K):
         mask = R[1:] == k
-        idx  = np.where(mask)[0]
+        idx = np.where(mask)[0]
         if idx.size >= dim_z + 1:
             Z_curr = Z[idx]
             Z_next = Z[idx + 1]
@@ -493,28 +511,28 @@ def _em_run(
 
     # --- Init ---
     R_init = _initialize_kmeans(Z, K, seed=init_seed)
-    (F_list, b_list, SigW_list, P, pi0,
-     mu_z0_list, Sigma_z0_list) = _initialize_params_from_R(R_init, Z, K, q, s)
+    (F_list, b_list, SigW_list, P, pi0, mu_z0_list, Sigma_z0_list) = _initialize_params_from_R(
+        R_init, Z, K, q, s
+    )
 
     log_lik_history: list[float] = []
     converged = False
 
     for it in range(max_iter):
-        log_P    = np.log(np.clip(P,   _LOG_FLOOR, None))
-        log_pi0  = np.log(np.clip(pi0, _LOG_FLOOR, None))
+        log_P = np.log(np.clip(P, _LOG_FLOOR, None))
+        log_pi0 = np.log(np.clip(pi0, _LOG_FLOOR, None))
 
         # Initial-state emission term: log N(Z_0; μ_z0(k), Σ_z0(k))
-        log_init = np.array([
-            float(_log_mvn_batch(Z[0:1], mu_z0_list[k], Sigma_z0_list[k])[0])
-            for k in range(K)
-        ])
+        log_init = np.array(
+            [float(_log_mvn_batch(Z[0:1], mu_z0_list[k], Sigma_z0_list[k])[0]) for k in range(K)]
+        )
 
         # E-step
-        log_emis = _compute_log_emissions(Z, F_list, b_list, SigW_list)   # (N-1, K)
+        log_emis = _compute_log_emissions(Z, F_list, b_list, SigW_list)  # (N-1, K)
         log_alpha, log_lik = _forward(log_emis, log_init, log_P, log_pi0)
-        log_beta  = _backward(log_emis, log_P)
+        log_beta = _backward(log_emis, log_P)
         log_gamma = log_alpha + log_beta - log_lik
-        log_xi    = _compute_xi(log_alpha, log_beta, log_emis, log_P, log_lik)
+        log_xi = _compute_xi(log_alpha, log_beta, log_emis, log_P, log_lik)
 
         log_lik_history.append(log_lik)
         if verbose:
@@ -528,11 +546,11 @@ def _em_run(
                 break
 
         # M-step
-        gamma = np.exp(log_gamma)             # (N, K)
-        xi    = np.exp(log_xi)                # (N-1, K, K)
+        gamma = np.exp(log_gamma)  # (N, K)
+        xi = np.exp(log_xi)  # (N-1, K, K)
 
         # P: row-normalised transition counts
-        denom = gamma[:-1].sum(axis=0)         # (K,)
+        denom = gamma[:-1].sum(axis=0)  # (K,)
         denom_safe = np.where(denom > _LOG_FLOOR, denom, 1.0)
         P_new = xi.sum(axis=0) / denom_safe[:, None]
         # Sanitise
@@ -555,13 +573,13 @@ def _em_run(
         Z_curr = Z[:-1]
         Z_next = Z[1:]
         for k in range(K):
-            w_k = gamma[1:, k]   # γ_{n+1}(k) for n=0..N-2
+            w_k = gamma[1:, k]  # γ_{n+1}(k) for n=0..N-2
             A, B, C, D, SU, Dt, SV, b_k = _weighted_fit(
                 Z_curr, Z_next, w_k, q, s, ms_constraint, ms_delta_zero
             )
-            F_list[k]    = np.block([[A, B], [C, D]])
+            F_list[k] = np.block([[A, B], [C, D]])
             SigW_list[k] = np.block([[SU, Dt], [Dt.T, SV]])
-            b_list[k]    = b_k
+            b_list[k] = b_k
 
         # μ_z0(k), Σ_z0(k) — weighted by γ_n(k)
         for k in range(K):
@@ -571,17 +589,15 @@ def _em_run(
                 mu = (w[:, None] * Z).sum(axis=0) / denom_k
                 centered = Z - mu
                 cov = (centered.T @ (w[:, None] * centered)) / denom_k
-                mu_z0_list[k]    = mu.reshape(dim_z, 1)
+                mu_z0_list[k] = mu.reshape(dim_z, 1)
                 Sigma_z0_list[k] = _nearest_spd(cov)
 
     # ----- Decompose final F / Σ_W into A,B,C,D / Σ_U,Δ,Σ_V -----
     # When constraint_each_iter is False and (constraint or delta_zero) is
     # set, apply the projection here, ONCE, on the converged parameters.
-    apply_post_hoc = (not constraint_each_iter) and (
-        constraint is not None or delta_zero
-    )
+    apply_post_hoc = (not constraint_each_iter) and (constraint is not None or delta_zero)
     A_list, B_list, C_list, D_list = [], [], [], []
-    SU_list, Dt_list, SV_list      = [], [], []
+    SU_list, Dt_list, SV_list = [], [], []
     for k in range(K):
         F = F_list[k]
         S = SigW_list[k]
@@ -594,8 +610,18 @@ def _em_run(
         SV = S[q:, q:]
         if apply_post_hoc:
             A, B, C, D, SU, Dt, SV = _apply_constraints(
-                A, B, C, D, SU, Dt, SV, q, s,
-                constraint, delta_zero, where="post-hoc",
+                A,
+                B,
+                C,
+                D,
+                SU,
+                Dt,
+                SV,
+                q,
+                s,
+                constraint,
+                delta_zero,
+                where="post-hoc",
             )
         A_list.append(A)
         B_list.append(B)
@@ -606,15 +632,19 @@ def _em_run(
         SV_list.append(SV)
 
     params = {
-        "K": K, "q": q, "s": s,
+        "K": K,
+        "q": q,
+        "s": s,
         "P": P,
-        "A_list": A_list, "B_list": B_list,
-        "C_list": C_list, "D_list": D_list,
+        "A_list": A_list,
+        "B_list": B_list,
+        "C_list": C_list,
+        "D_list": D_list,
         "Sigma_U_list": SU_list,
-        "Delta_list":   Dt_list,
+        "Delta_list": Dt_list,
         "Sigma_V_list": SV_list,
         "pi0": pi0,
-        "mu_z0_list":    mu_z0_list,
+        "mu_z0_list": mu_z0_list,
         "Sigma_z0_list": Sigma_z0_list,
         "b_list": b_list,
     }
@@ -637,9 +667,16 @@ def _reorder_regimes(params: dict) -> dict:
     """Reorder regimes by A[0,0] (descending) for canonical labelling."""
     K = params["K"]
     keys_per_regime = [
-        "A_list", "B_list", "C_list", "D_list",
-        "Sigma_U_list", "Delta_list", "Sigma_V_list",
-        "mu_z0_list", "Sigma_z0_list", "b_list",
+        "A_list",
+        "B_list",
+        "C_list",
+        "D_list",
+        "Sigma_U_list",
+        "Delta_list",
+        "Sigma_V_list",
+        "mu_z0_list",
+        "Sigma_z0_list",
+        "b_list",
     ]
     order = sorted(range(K), key=lambda k: -params["A_list"][k][0, 0])
     perm = np.array(order)
@@ -718,18 +755,26 @@ def fit_semi_supervised(
     init_seeds = rng.integers(low=0, high=2**31 - 1, size=n_inits).tolist()
 
     best_params: dict | None = None
-    best_info:   dict | None = None
-    all_logL  = []
+    best_info: dict | None = None
+    all_logL = []
     all_iters = []
-    all_conv  = []
+    all_conv = []
 
     for run, s_init in enumerate(init_seeds):
         if verbose:
             print(f"\n=== EM run {run + 1}/{n_inits}  (init_seed={s_init}) ===")
         try:
             params, info = _em_run(
-                Z, K, q, s, s_init,
-                constraint, delta_zero, max_iter, tol, verbose,
+                Z,
+                K,
+                q,
+                s,
+                s_init,
+                constraint,
+                delta_zero,
+                max_iter,
+                tol,
+                verbose,
                 constraint_each_iter=constraint_each_iter,
             )
         except (np.linalg.LinAlgError, ValueError) as exc:
@@ -742,24 +787,22 @@ def fit_semi_supervised(
 
         if best_info is None or info["log_lik"] > best_info["log_lik"]:
             best_params = params
-            best_info   = info
+            best_info = info
 
     if best_params is None:
-        raise RuntimeError(
-            "All EM runs failed.  Try lowering K, increasing N, or changing seed."
-        )
+        raise RuntimeError("All EM runs failed.  Try lowering K, increasing N, or changing seed.")
 
     # Canonical regime ordering
     best_params = _reorder_regimes(best_params)
 
     return best_params, {
-        "best_log_lik":    best_info["log_lik"],
-        "best_init_seed":  best_info["init_seed"],
-        "best_n_iter":     best_info["n_iter"],
-        "best_converged":  best_info["converged"],
-        "all_log_liks":    all_logL,
-        "all_n_iters":     all_iters,
-        "all_converged":   all_conv,
+        "best_log_lik": best_info["log_lik"],
+        "best_init_seed": best_info["init_seed"],
+        "best_n_iter": best_info["n_iter"],
+        "best_converged": best_info["converged"],
+        "all_log_liks": all_logL,
+        "all_n_iters": all_iters,
+        "all_converged": all_conv,
         "log_lik_history": best_info["log_lik_history"],
     }
 
@@ -779,36 +822,56 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("csv", metavar="CSV",
-                   help="Path to the CSV (the 'r' column is ignored if present).")
-    p.add_argument("-K", "--K", type=int, required=True, metavar="K",
-                   help="Number of regimes.")
-    p.add_argument("--constraint", choices=["a", "b", "su"], default=None,
-                   metavar="TARGET",
-                   help="H5 projection target.  By default applied once at "
-                        "the end of EM; with --constraint-each-iter applied "
-                        "at every M-step (GEM, log-lik may not be monotone).")
-    p.add_argument("--delta-zero", action="store_true",
-                   help="Force Δ(k)=0 before the H5 step.")
-    p.add_argument("--constraint-each-iter", action="store_true",
-                   dest="constraint_each_iter",
-                   help="Apply --constraint / --delta-zero at every M-step "
-                        "(Generalized-EM).  Default: apply once at the end.")
-    p.add_argument("--n-inits", type=int, default=10, metavar="N",
-                   help="Number of EM restarts.")
-    p.add_argument("--max-iter", type=int, default=100, metavar="N",
-                   help="Maximum EM iterations per run.")
-    p.add_argument("--tol", type=float, default=1e-5, metavar="EPS",
-                   help="Convergence threshold on |Δ log L|.")
-    p.add_argument("--seed", type=int, default=None, metavar="SEED",
-                   help="Base random seed for k-means restarts.")
-    p.add_argument("--output", default=None, metavar="PATH",
-                   help="Output .py file (default: prg/models/<auto>.py).")
-    p.add_argument("--model-name", default=None, metavar="NAME",
-                   help="File / class base name "
-                        "(default: model_em_K<K>_q<q>_s<s>).")
-    p.add_argument("-v", "--verbose", action="store_true",
-                   help="Print per-iteration log-likelihood.")
+    p.add_argument(
+        "csv", metavar="CSV", help="Path to the CSV (the 'r' column is ignored if present)."
+    )
+    p.add_argument("-K", "--K", type=int, required=True, metavar="K", help="Number of regimes.")
+    p.add_argument(
+        "--constraint",
+        choices=["a", "b", "su"],
+        default=None,
+        metavar="TARGET",
+        help="H5 projection target.  By default applied once at "
+        "the end of EM; with --constraint-each-iter applied "
+        "at every M-step (GEM, log-lik may not be monotone).",
+    )
+    p.add_argument("--delta-zero", action="store_true", help="Force Δ(k)=0 before the H5 step.")
+    p.add_argument(
+        "--constraint-each-iter",
+        action="store_true",
+        dest="constraint_each_iter",
+        help="Apply --constraint / --delta-zero at every M-step "
+        "(Generalized-EM).  Default: apply once at the end.",
+    )
+    p.add_argument("--n-inits", type=int, default=10, metavar="N", help="Number of EM restarts.")
+    p.add_argument(
+        "--max-iter", type=int, default=100, metavar="N", help="Maximum EM iterations per run."
+    )
+    p.add_argument(
+        "--tol", type=float, default=1e-5, metavar="EPS", help="Convergence threshold on |Δ log L|."
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        metavar="SEED",
+        help="Base random seed for k-means restarts.",
+    )
+    p.add_argument(
+        "--output",
+        default=None,
+        metavar="PATH",
+        help="Output .py file (default: prg/models/<auto>.py).",
+    )
+    p.add_argument(
+        "--model-name",
+        default=None,
+        metavar="NAME",
+        help="File / class base name (default: model_em_K<K>_q<q>_s<s>).",
+    )
+    p.add_argument(
+        "-v", "--verbose", action="store_true", help="Print per-iteration log-likelihood."
+    )
     return p
 
 
@@ -840,7 +903,9 @@ def main() -> None:
 
     try:
         params, info = fit_semi_supervised(
-            xs, ys, K,
+            xs,
+            ys,
+            K,
             constraint=args.constraint,
             delta_zero=args.delta_zero,
             constraint_each_iter=args.constraint_each_iter,
@@ -856,8 +921,10 @@ def main() -> None:
 
     print(f"\nBest log L     : {info['best_log_lik']:.4f}")
     print(f"Best init seed : {info['best_init_seed']}")
-    print(f"Iterations     : {info['best_n_iter']} "
-          f"({'converged' if info['best_converged'] else 'max-iter reached'})")
+    print(
+        f"Iterations     : {info['best_n_iter']} "
+        f"({'converged' if info['best_converged'] else 'max-iter reached'})"
+    )
     print(f"All log Ls     : {[f'{x:.2f}' for x in info['all_log_liks']]}")
 
     # --- Resolve output path / class name ---

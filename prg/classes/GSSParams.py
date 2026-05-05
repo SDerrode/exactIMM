@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/classes/GSSParams.py
 ========================
@@ -132,7 +131,7 @@ class GSSParams:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_model(cls, model) -> "GSSParams":
+    def from_model(cls, model) -> GSSParams:
         """
         Build a GSSParams from a BaseGSSModel instance.
 
@@ -147,18 +146,26 @@ class GSSParams:
         """
         p = model.get_params()
         f_matrix = FMatrix(
-            K=p["K"], q=p["q"], s=p["s"],
-            A_list=p["A_list"], B_list=p["B_list"],
-            C_list=p["C_list"], D_list=p["D_list"],
+            K=p["K"],
+            q=p["q"],
+            s=p["s"],
+            A_list=p["A_list"],
+            B_list=p["B_list"],
+            C_list=p["C_list"],
+            D_list=p["D_list"],
         )
         noise_cov = GSSNoiseCovariance(
-            K=p["K"], q=p["q"], s=p["s"],
+            K=p["K"],
+            q=p["q"],
+            s=p["s"],
             Sigma_U_list=p["Sigma_U_list"],
             Delta_list=p["Delta_list"],
             Sigma_V_list=p["Sigma_V_list"],
         )
         return cls(
-            K=p["K"], q=p["q"], s=p["s"],
+            K=p["K"],
+            q=p["q"],
+            s=p["s"],
             P=p["P"],
             f_matrix=f_matrix,
             noise_cov=noise_cov,
@@ -185,14 +192,10 @@ class GSSParams:
     def _validate_P(P: np.ndarray, K: int) -> None:
         P = np.asarray(P)
         if P.shape != (K, K):
-            raise ParamError(
-                f"P must have shape ({K}, {K}), got {P.shape}."
-            )
+            raise ParamError(f"P must have shape ({K}, {K}), got {P.shape}.")
         report = StochasticMatrix(P).check()
         if not report.is_valid:
-            raise ParamError(
-                f"Transition matrix P is not row-stochastic.\n{report}"
-            )
+            raise ParamError(f"Transition matrix P is not row-stochastic.\n{report}")
 
     @staticmethod
     def _validate_fmatrix(f_matrix: FMatrix, K: int, q: int, s: int) -> None:
@@ -220,16 +223,12 @@ class GSSParams:
             return
         pi0 = np.asarray(pi0, dtype=float)
         if pi0.shape != (K,):
-            raise ParamError(
-                f"pi0 must have shape ({K},), got {pi0.shape}."
-            )
+            raise ParamError(f"pi0 must have shape ({K},), got {pi0.shape}.")
         if np.any(pi0 < 0.0):
             raise ParamError("pi0 must have non-negative entries.")
         total = float(pi0.sum())
         if abs(total - 1.0) > 1e-10:
-            raise ParamError(
-                f"pi0 must sum to 1, got sum = {total:.6f}."
-            )
+            raise ParamError(f"pi0 must sum to 1, got sum = {total:.6f}.")
 
     @staticmethod
     def _validate_initial_conditions(
@@ -240,15 +239,11 @@ class GSSParams:
             ("Sigma_z0_list", Sigma_z0_list, (dim_z, dim_z)),
         ]:
             if not isinstance(lst, (list, tuple)) or len(lst) != K:
-                raise ParamError(
-                    f"{name} must be a list of {K} arrays, got length {len(lst)}."
-                )
+                raise ParamError(f"{name} must be a list of {K} arrays, got length {len(lst)}.")
             for k, arr in enumerate(lst):
                 arr = np.asarray(arr)
                 if arr.shape != shape:
-                    raise ParamError(
-                        f"{name}[{k}] must have shape {shape}, got {arr.shape}."
-                    )
+                    raise ParamError(f"{name}[{k}] must have shape {shape}, got {arr.shape}.")
 
     # ------------------------------------------------------------------
     # Stationary distribution
@@ -270,8 +265,8 @@ class GSSParams:
         # Find the eigenvector for eigenvalue closest to 1
         idx = int(np.argmin(np.abs(eigenvalues - 1.0)))
         pi = eigenvectors[:, idx].real
-        pi = np.abs(pi)          # ensure non-negative (eigenvector sign is arbitrary)
-        pi /= pi.sum()           # normalise
+        pi = np.abs(pi)  # ensure non-negative (eigenvector sign is arbitrary)
+        pi /= pi.sum()  # normalise
         return pi
 
     def stationary_distribution(self) -> np.ndarray:
@@ -360,8 +355,7 @@ class GSSParams:
         self._noise_cov.summary()
         print("\nInitial conditions:")
         for k in range(self._K):
-            print(f"  k={k}  mu_z0: {self._mu_z0[k].ravel()}"
-                  f"   Sigma_z0:\n{fmt(self._Sigma_z0[k])}")
+            print(f"  k={k}  mu_z0: {self._mu_z0[k].ravel()}   Sigma_z0:\n{fmt(self._Sigma_z0[k])}")
         print("\nDrift bias b(k):")
         for k in range(self._K):
             print(f"  k={k}  b: {self._b[k].ravel()}")

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/experiments/metrics.py
 ==========================
@@ -36,6 +35,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Free-parameter count for BIC
 # ---------------------------------------------------------------------------
+
 
 def dof_h5(K: int, q: int, s: int) -> int:
     """
@@ -75,13 +75,14 @@ def dof_h5(K: int, q: int, s: int) -> int:
     30
     """
     dim_z = q + s
-    per_regime = q ** 2 + q * s + dim_z * (dim_z + 1) // 2 + dim_z
-    return K * per_regime + K ** 2 - 1
+    per_regime = q**2 + q * s + dim_z * (dim_z + 1) // 2 + dim_z
+    return K * per_regime + K**2 - 1
 
 
 # ---------------------------------------------------------------------------
 # RMSE
 # ---------------------------------------------------------------------------
+
 
 def compute_rmse(x_true: np.ndarray, x_est: np.ndarray) -> float:
     """
@@ -103,8 +104,8 @@ def compute_rmse(x_true: np.ndarray, x_est: np.ndarray) -> float:
     float
     """
     x_true = np.asarray(x_true, dtype=float)
-    x_est  = np.asarray(x_est,  dtype=float)
-    N, q   = x_true.shape
+    x_est = np.asarray(x_est, dtype=float)
+    N, q = x_true.shape
     if N == 0:
         return float("nan")
     return float(np.sqrt(np.sum((x_true - x_est) ** 2) / (N * q)))
@@ -114,8 +115,9 @@ def compute_rmse(x_true: np.ndarray, x_est: np.ndarray) -> float:
 # NEES
 # ---------------------------------------------------------------------------
 
+
 def compute_nees(
-    errors:    np.ndarray,
+    errors: np.ndarray,
     var_x_arr: np.ndarray,
 ) -> float:
     """
@@ -138,7 +140,7 @@ def compute_nees(
     float
         ANEES; expected value ≈ 1 for a calibrated filter.
     """
-    errors    = np.asarray(errors,    dtype=float)
+    errors = np.asarray(errors, dtype=float)
     var_x_arr = np.asarray(var_x_arr, dtype=float)
     N, q = errors.shape
     if N == 0 or q == 0:
@@ -146,8 +148,8 @@ def compute_nees(
 
     nees_vals = np.empty(N)
     for n in range(N):
-        e = errors[n]       # (q,)
-        P = var_x_arr[n]    # (q, q)
+        e = errors[n]  # (q,)
+        P = var_x_arr[n]  # (q, q)
         try:
             # P e  via solve (numerically more stable than P^{-1} e)
             Pe = np.linalg.solve(P, e)
@@ -163,6 +165,7 @@ def compute_nees(
 # ---------------------------------------------------------------------------
 # Ljung–Box (innovation whiteness)
 # ---------------------------------------------------------------------------
+
 
 def compute_ljung_box(innovations: np.ndarray, lags: int = 20) -> float:
     """
@@ -223,6 +226,7 @@ def compute_ljung_box(innovations: np.ndarray, lags: int = 20) -> float:
 # Jarque–Bera (innovation normality)
 # ---------------------------------------------------------------------------
 
+
 def compute_jarque_bera(innovations: np.ndarray) -> float:
     """
     Jarque–Bera normality test p-value applied to filter innovations.
@@ -249,7 +253,7 @@ def compute_jarque_bera(innovations: np.ndarray) -> float:
     for i in range(s):
         col = innovations[:, i]
         col = col[np.isfinite(col)]
-        if len(col) < 8:        # JB requires N ≥ 8
+        if len(col) < 8:  # JB requires N ≥ 8
             continue
         try:
             _, pval = sp_stats.jarque_bera(col)
@@ -266,12 +270,13 @@ def compute_jarque_bera(innovations: np.ndarray) -> float:
 # BIC
 # ---------------------------------------------------------------------------
 
+
 def compute_bic(
     log_lik: float,
-    N:       int,
-    K:       int,
-    q:       int,
-    s:       int,
+    N: int,
+    K: int,
+    q: int,
+    s: int,
 ) -> float:
     """
     Bayesian Information Criterion for an H5-constrained GSS(K, q, s) model.

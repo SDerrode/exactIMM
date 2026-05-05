@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 tests/test_gss_params.py
 ========================
@@ -15,7 +14,6 @@ from prg.classes.NoiseCovariance import GSSNoiseCovariance
 from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
 from prg.utils.exceptions import CovarianceError, ParamError
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -29,14 +27,18 @@ def _make_valid_params(K=2, q=1, s=1) -> GSSParams:
     P = np.full((K, K), 1.0 / K)
 
     f_matrix = FMatrix(
-        K=K, q=q, s=s,
+        K=K,
+        q=q,
+        s=s,
         A_list=[np.eye(q) * 0.5 for _ in range(K)],
         B_list=[np.zeros((q, s)) for _ in range(K)],
         C_list=[np.zeros((s, q)) for _ in range(K)],
         D_list=[np.eye(s) * 0.5 for _ in range(K)],
     )
     noise_cov = GSSNoiseCovariance(
-        K=K, q=q, s=s,
+        K=K,
+        q=q,
+        s=s,
         Sigma_U_list=[np.eye(q) * 0.1 for _ in range(K)],
         Delta_list=[np.zeros((q, s)) for _ in range(K)],
         Sigma_V_list=[np.eye(s) * 0.1 for _ in range(K)],
@@ -46,9 +48,15 @@ def _make_valid_params(K=2, q=1, s=1) -> GSSParams:
     Sigma_z0_list = [np.eye(dim_z) for _ in range(K)]
 
     return GSSParams(
-        K=K, q=q, s=s, P=P,
-        f_matrix=f_matrix, noise_cov=noise_cov,
-        pi0=pi0, mu_z0_list=mu_z0_list, Sigma_z0_list=Sigma_z0_list,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=f_matrix,
+        noise_cov=noise_cov,
+        pi0=pi0,
+        mu_z0_list=mu_z0_list,
+        Sigma_z0_list=Sigma_z0_list,
     )
 
 
@@ -79,21 +87,29 @@ class TestGSSParamsConstruction:
         dim_z = 2
         P = np.array([[0.9, 0.1], [0.2, 0.8]])
         f_matrix = FMatrix(
-            K=K, q=1, s=1,
+            K=K,
+            q=1,
+            s=1,
             A_list=[np.eye(1) * 0.5, np.eye(1) * 0.5],
             B_list=[np.zeros((1, 1)), np.zeros((1, 1))],
             C_list=[np.zeros((1, 1)), np.zeros((1, 1))],
             D_list=[np.eye(1) * 0.5, np.eye(1) * 0.5],
         )
         noise_cov = GSSNoiseCovariance(
-            K=K, q=1, s=1,
+            K=K,
+            q=1,
+            s=1,
             Sigma_U_list=[np.eye(1) * 0.1, np.eye(1) * 0.1],
             Delta_list=[np.zeros((1, 1)), np.zeros((1, 1))],
             Sigma_V_list=[np.eye(1) * 0.1, np.eye(1) * 0.1],
         )
         params = GSSParams(
-            K=K, q=1, s=1, P=P,
-            f_matrix=f_matrix, noise_cov=noise_cov,
+            K=K,
+            q=1,
+            s=1,
+            P=P,
+            f_matrix=f_matrix,
+            noise_cov=noise_cov,
             pi0=None,
             mu_z0_list=[np.zeros((dim_z, 1))] * K,
             Sigma_z0_list=[np.eye(dim_z)] * K,
@@ -118,9 +134,7 @@ class TestGSSParamsConstruction:
 class TestStationaryDistribution:
     def test_stationary_left_eigenvector(self):
         """pi @ P must equal pi (up to numerical tolerance)."""
-        P = np.array([[0.7, 0.2, 0.1],
-                      [0.1, 0.8, 0.1],
-                      [0.3, 0.3, 0.4]])
+        P = np.array([[0.7, 0.2, 0.1], [0.1, 0.8, 0.1], [0.3, 0.3, 0.4]])
         pi = GSSParams._compute_stationary(P)
         np.testing.assert_allclose(pi @ P, pi, atol=1e-10)
 
@@ -147,15 +161,27 @@ class TestGSSParamsValidation:
 
     def test_P_not_square(self):
         params_kw = dict(
-            K=2, q=1, s=1,
+            K=2,
+            q=1,
+            s=1,
             P=np.ones((2, 3)) / 3,  # not square
-            f_matrix=FMatrix(K=2, q=1, s=1,
-                             A_list=[np.eye(1)] * 2, B_list=[np.zeros((1, 1))] * 2,
-                             C_list=[np.zeros((1, 1))] * 2, D_list=[np.eye(1)] * 2),
-            noise_cov=GSSNoiseCovariance(K=2, q=1, s=1,
-                                         Sigma_U_list=[np.eye(1) * 0.1] * 2,
-                                         Delta_list=[np.zeros((1, 1))] * 2,
-                                         Sigma_V_list=[np.eye(1) * 0.1] * 2),
+            f_matrix=FMatrix(
+                K=2,
+                q=1,
+                s=1,
+                A_list=[np.eye(1)] * 2,
+                B_list=[np.zeros((1, 1))] * 2,
+                C_list=[np.zeros((1, 1))] * 2,
+                D_list=[np.eye(1)] * 2,
+            ),
+            noise_cov=GSSNoiseCovariance(
+                K=2,
+                q=1,
+                s=1,
+                Sigma_U_list=[np.eye(1) * 0.1] * 2,
+                Delta_list=[np.zeros((1, 1))] * 2,
+                Sigma_V_list=[np.eye(1) * 0.1] * 2,
+            ),
             pi0=np.array([0.5, 0.5]),
             mu_z0_list=[np.zeros((2, 1))] * 2,
             Sigma_z0_list=[np.eye(2)] * 2,
@@ -167,15 +193,27 @@ class TestGSSParamsValidation:
         with pytest.raises(ParamError, match="row-stochastic"):
             K, q, s = 2, 1, 1
             GSSParams(
-                K=K, q=q, s=s,
+                K=K,
+                q=q,
+                s=s,
                 P=np.array([[0.9, 0.2], [0.2, 0.8]]),  # rows sum to 1.1, 1.0
-                f_matrix=FMatrix(K=K, q=q, s=s,
-                                 A_list=[np.eye(1)] * 2, B_list=[np.zeros((1, 1))] * 2,
-                                 C_list=[np.zeros((1, 1))] * 2, D_list=[np.eye(1)] * 2),
-                noise_cov=GSSNoiseCovariance(K=K, q=q, s=s,
-                                             Sigma_U_list=[np.eye(1) * 0.1] * 2,
-                                             Delta_list=[np.zeros((1, 1))] * 2,
-                                             Sigma_V_list=[np.eye(1) * 0.1] * 2),
+                f_matrix=FMatrix(
+                    K=K,
+                    q=q,
+                    s=s,
+                    A_list=[np.eye(1)] * 2,
+                    B_list=[np.zeros((1, 1))] * 2,
+                    C_list=[np.zeros((1, 1))] * 2,
+                    D_list=[np.eye(1)] * 2,
+                ),
+                noise_cov=GSSNoiseCovariance(
+                    K=K,
+                    q=q,
+                    s=s,
+                    Sigma_U_list=[np.eye(1) * 0.1] * 2,
+                    Delta_list=[np.zeros((1, 1))] * 2,
+                    Sigma_V_list=[np.eye(1) * 0.1] * 2,
+                ),
                 pi0=np.array([0.5, 0.5]),
                 mu_z0_list=[np.zeros((2, 1))] * 2,
                 Sigma_z0_list=[np.eye(2)] * 2,
@@ -185,16 +223,28 @@ class TestGSSParamsValidation:
         with pytest.raises(ParamError, match="pi0"):
             K, q, s = 2, 1, 1
             GSSParams(
-                K=K, q=q, s=s,
+                K=K,
+                q=q,
+                s=s,
                 P=np.eye(K) / K * K,
-                f_matrix=FMatrix(K=K, q=q, s=s,
-                                 A_list=[np.eye(1)] * 2, B_list=[np.zeros((1, 1))] * 2,
-                                 C_list=[np.zeros((1, 1))] * 2, D_list=[np.eye(1)] * 2),
-                noise_cov=GSSNoiseCovariance(K=K, q=q, s=s,
-                                             Sigma_U_list=[np.eye(1) * 0.1] * 2,
-                                             Delta_list=[np.zeros((1, 1))] * 2,
-                                             Sigma_V_list=[np.eye(1) * 0.1] * 2),
-                pi0=np.array([0.5, 0.3, 0.2]),   # wrong length (3 instead of 2)
+                f_matrix=FMatrix(
+                    K=K,
+                    q=q,
+                    s=s,
+                    A_list=[np.eye(1)] * 2,
+                    B_list=[np.zeros((1, 1))] * 2,
+                    C_list=[np.zeros((1, 1))] * 2,
+                    D_list=[np.eye(1)] * 2,
+                ),
+                noise_cov=GSSNoiseCovariance(
+                    K=K,
+                    q=q,
+                    s=s,
+                    Sigma_U_list=[np.eye(1) * 0.1] * 2,
+                    Delta_list=[np.zeros((1, 1))] * 2,
+                    Sigma_V_list=[np.eye(1) * 0.1] * 2,
+                ),
+                pi0=np.array([0.5, 0.3, 0.2]),  # wrong length (3 instead of 2)
                 mu_z0_list=[np.zeros((2, 1))] * 2,
                 Sigma_z0_list=[np.eye(2)] * 2,
             )
@@ -203,16 +253,28 @@ class TestGSSParamsValidation:
         with pytest.raises(ParamError, match="sum to 1"):
             K, q, s = 2, 1, 1
             GSSParams(
-                K=K, q=q, s=s,
+                K=K,
+                q=q,
+                s=s,
                 P=np.full((K, K), 1.0 / K),
-                f_matrix=FMatrix(K=K, q=q, s=s,
-                                 A_list=[np.eye(1)] * 2, B_list=[np.zeros((1, 1))] * 2,
-                                 C_list=[np.zeros((1, 1))] * 2, D_list=[np.eye(1)] * 2),
-                noise_cov=GSSNoiseCovariance(K=K, q=q, s=s,
-                                             Sigma_U_list=[np.eye(1) * 0.1] * 2,
-                                             Delta_list=[np.zeros((1, 1))] * 2,
-                                             Sigma_V_list=[np.eye(1) * 0.1] * 2),
-                pi0=np.array([0.3, 0.3]),   # sums to 0.6
+                f_matrix=FMatrix(
+                    K=K,
+                    q=q,
+                    s=s,
+                    A_list=[np.eye(1)] * 2,
+                    B_list=[np.zeros((1, 1))] * 2,
+                    C_list=[np.zeros((1, 1))] * 2,
+                    D_list=[np.eye(1)] * 2,
+                ),
+                noise_cov=GSSNoiseCovariance(
+                    K=K,
+                    q=q,
+                    s=s,
+                    Sigma_U_list=[np.eye(1) * 0.1] * 2,
+                    Delta_list=[np.zeros((1, 1))] * 2,
+                    Sigma_V_list=[np.eye(1) * 0.1] * 2,
+                ),
+                pi0=np.array([0.3, 0.3]),  # sums to 0.6
                 mu_z0_list=[np.zeros((2, 1))] * 2,
                 Sigma_z0_list=[np.eye(2)] * 2,
             )
@@ -221,15 +283,27 @@ class TestGSSParamsValidation:
         with pytest.raises(CovarianceError, match="Sigma_z0"):
             K, q, s = 2, 1, 1
             GSSParams(
-                K=K, q=q, s=s,
+                K=K,
+                q=q,
+                s=s,
                 P=np.full((K, K), 0.5),
-                f_matrix=FMatrix(K=K, q=q, s=s,
-                                 A_list=[np.eye(1)] * 2, B_list=[np.zeros((1, 1))] * 2,
-                                 C_list=[np.zeros((1, 1))] * 2, D_list=[np.eye(1)] * 2),
-                noise_cov=GSSNoiseCovariance(K=K, q=q, s=s,
-                                             Sigma_U_list=[np.eye(1) * 0.1] * 2,
-                                             Delta_list=[np.zeros((1, 1))] * 2,
-                                             Sigma_V_list=[np.eye(1) * 0.1] * 2),
+                f_matrix=FMatrix(
+                    K=K,
+                    q=q,
+                    s=s,
+                    A_list=[np.eye(1)] * 2,
+                    B_list=[np.zeros((1, 1))] * 2,
+                    C_list=[np.zeros((1, 1))] * 2,
+                    D_list=[np.eye(1)] * 2,
+                ),
+                noise_cov=GSSNoiseCovariance(
+                    K=K,
+                    q=q,
+                    s=s,
+                    Sigma_U_list=[np.eye(1) * 0.1] * 2,
+                    Delta_list=[np.zeros((1, 1))] * 2,
+                    Sigma_V_list=[np.eye(1) * 0.1] * 2,
+                ),
                 pi0=np.array([0.5, 0.5]),
                 mu_z0_list=[np.zeros((2, 1))] * 2,
                 Sigma_z0_list=[-np.eye(2), np.eye(2)],  # k=0 not PD
@@ -239,15 +313,27 @@ class TestGSSParamsValidation:
         with pytest.raises(ParamError, match="mu_z0_list"):
             K, q, s = 2, 1, 1
             GSSParams(
-                K=K, q=q, s=s,
+                K=K,
+                q=q,
+                s=s,
                 P=np.full((K, K), 0.5),
-                f_matrix=FMatrix(K=K, q=q, s=s,
-                                 A_list=[np.eye(1)] * 2, B_list=[np.zeros((1, 1))] * 2,
-                                 C_list=[np.zeros((1, 1))] * 2, D_list=[np.eye(1)] * 2),
-                noise_cov=GSSNoiseCovariance(K=K, q=q, s=s,
-                                             Sigma_U_list=[np.eye(1) * 0.1] * 2,
-                                             Delta_list=[np.zeros((1, 1))] * 2,
-                                             Sigma_V_list=[np.eye(1) * 0.1] * 2),
+                f_matrix=FMatrix(
+                    K=K,
+                    q=q,
+                    s=s,
+                    A_list=[np.eye(1)] * 2,
+                    B_list=[np.zeros((1, 1))] * 2,
+                    C_list=[np.zeros((1, 1))] * 2,
+                    D_list=[np.eye(1)] * 2,
+                ),
+                noise_cov=GSSNoiseCovariance(
+                    K=K,
+                    q=q,
+                    s=s,
+                    Sigma_U_list=[np.eye(1) * 0.1] * 2,
+                    Delta_list=[np.zeros((1, 1))] * 2,
+                    Sigma_V_list=[np.eye(1) * 0.1] * 2,
+                ),
                 pi0=np.array([0.5, 0.5]),
                 mu_z0_list=[np.zeros((3, 1))] * 2,  # wrong dim (3 instead of 2)
                 Sigma_z0_list=[np.eye(2)] * 2,

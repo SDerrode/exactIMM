@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 tests/test_h5_constraint.py
 ===========================
@@ -24,9 +23,10 @@ import pytest
 from prg.classes.GSSParams import GSSParams
 from prg.models.base_gss_model import BaseGSSModel
 from prg.utils.h5_constraint import (
-    apply_h5_constraint, compute_B_from_h5, compute_C_from_h5,
+    apply_h5_constraint,
+    compute_B_from_h5,
+    compute_C_from_h5,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,14 +42,14 @@ def _check_constraint(A, C, D, SU, Dt, SV, B, atol=1e-10):
 
     Returns True when the equation holds up to *atol*.
     """
-    P = Dt.T @ C.T + SV @ D.T          # s × s
-    Q = C @ SU + D @ Dt.T              # s × q
-    R = C @ Dt + D @ SV                # s × s
-    M = Q @ C.T + R @ D.T + SV        # s × s
+    P = Dt.T @ C.T + SV @ D.T  # s × s
+    Q = C @ SU + D @ Dt.T  # s × q
+    R = C @ Dt + D @ SV  # s × s
+    M = Q @ C.T + R @ D.T + SV  # s × s
 
     M_inv = np.linalg.inv(M)
-    lhs = Dt.T @ A + SV @ B.T                        # s × q
-    rhs = P @ M_inv @ (Q @ A.T + R @ B.T + Dt.T)    # s × q
+    lhs = Dt.T @ A + SV @ B.T  # s × q
+    rhs = P @ M_inv @ (Q @ A.T + R @ B.T + Dt.T)  # s × q
 
     return np.allclose(lhs, rhs, atol=atol)
 
@@ -63,9 +63,9 @@ def _make_pd(size, rng, scale=0.5):
 def _random_inputs(q, s, rng):
     """Build (A, C, D, SU, Dt, SV) with compatible shapes and positive-definite
     covariance matrices."""
-    A  = rng.standard_normal((q, q)) * 0.5
-    C  = rng.standard_normal((s, q)) * 0.3
-    D  = rng.standard_normal((s, s)) * 0.3
+    A = rng.standard_normal((q, q)) * 0.5
+    C = rng.standard_normal((s, q)) * 0.3
+    D = rng.standard_normal((s, s)) * 0.3
     SU = _make_pd(q, rng)
     Dt = rng.standard_normal((q, s)) * 0.1
     SV = _make_pd(s, rng)
@@ -121,9 +121,9 @@ def test_compute_B_satisfies_constraint(rng):
 def test_compute_B_zero_delta_zero_C(rng):
     """Simplified case Δ=0, C=0: constraint must still be satisfied."""
     q, s = 2, 2
-    A  = rng.standard_normal((q, q)) * 0.5
-    C  = np.zeros((s, q))
-    D  = rng.standard_normal((s, s)) * 0.4
+    A = rng.standard_normal((q, q)) * 0.5
+    C = np.zeros((s, q))
+    D = rng.standard_normal((s, s)) * 0.4
     SU = _make_pd(q, rng)
     Dt = np.zeros((q, s))
     SV = _make_pd(s, rng)
@@ -139,12 +139,12 @@ def test_compute_B_zero_delta_zero_C(rng):
 def test_compute_B_singular_M_raises():
     """compute_B_from_h5 must raise ValueError when M is singular (C=D=Σ_V=0)."""
     q, s = 2, 2
-    A  = np.eye(q) * 0.5
-    C  = np.zeros((s, q))
-    D  = np.zeros((s, s))
+    A = np.eye(q) * 0.5
+    C = np.zeros((s, q))
+    D = np.zeros((s, s))
     SU = np.eye(q) * 0.1
     Dt = np.zeros((q, s))
-    SV = np.zeros((s, s))   # makes M = 0 → singular
+    SV = np.zeros((s, s))  # makes M = 0 → singular
 
     with pytest.raises(ValueError):
         compute_B_from_h5(A, C, D, SU, Dt, SV)
@@ -175,9 +175,7 @@ def test_compute_B_idempotent(rng):
 def test_apply_h5_constraint_output_type(params_K2_q1_s1):
     """apply_h5_constraint must return a GSSParams instance."""
     result = apply_h5_constraint(params_K2_q1_s1)
-    assert isinstance(result, GSSParams), (
-        f"expected GSSParams, got {type(result)}"
-    )
+    assert isinstance(result, GSSParams), f"expected GSSParams, got {type(result)}"
 
 
 def test_apply_h5_constraint_satisfies_for_all_regimes(params_K2_q1_s1):
@@ -186,10 +184,10 @@ def test_apply_h5_constraint_satisfies_for_all_regimes(params_K2_q1_s1):
     K = constrained.K
 
     for k in range(K):
-        A  = constrained.f_matrix.A(k)
-        B  = constrained.f_matrix.B(k)
-        C  = constrained.f_matrix.C(k)
-        D  = constrained.f_matrix.D(k)
+        A = constrained.f_matrix.A(k)
+        B = constrained.f_matrix.B(k)
+        C = constrained.f_matrix.C(k)
+        D = constrained.f_matrix.D(k)
         SU = constrained.noise_cov.Sigma_U(k)
         Dt = constrained.noise_cov.Delta(k)
         SV = constrained.noise_cov.Sigma_V(k)
@@ -271,7 +269,7 @@ def _residual_h5(A, C, D, SU, Dt, SV, B):
     M = Q @ C.T + R @ D.T + SV
     Z = Dt.T @ A + SV @ B.T
     W = Q @ A.T + R @ B.T + Dt.T
-    X = np.linalg.solve(M, W)   # M⁻¹ W
+    X = np.linalg.solve(M, W)  # M⁻¹ W
     return Z - P @ X
 
 
@@ -307,12 +305,12 @@ def test_compute_C_zero_init_is_fixed_point_when_C0_zero(rng):
     """When B is computed from H5 with C=0, compute_C_from_h5 initialized at 0
     must return C ≈ 0 (C=0 is a fixed point of the iteration)."""
     q, s = 2, 2
-    A  = rng.standard_normal((q, q)) * 0.4
-    D  = rng.standard_normal((s, s)) * 0.3
+    A = rng.standard_normal((q, q)) * 0.4
+    D = rng.standard_normal((s, s)) * 0.3
     SU = _make_pd(q, rng)
     Dt = rng.standard_normal((q, s)) * 0.1
     SV = _make_pd(s, rng)
-    B  = compute_B_from_h5(A, np.zeros((s, q)), D, SU, Dt, SV)  # B consistent with C=0
+    B = compute_B_from_h5(A, np.zeros((s, q)), D, SU, Dt, SV)  # B consistent with C=0
 
     C = compute_C_from_h5(A, B, D, SU, Dt, SV, C_init=np.zeros((s, q)))
     assert np.linalg.norm(C, "fro") < 1e-6, (
@@ -329,12 +327,12 @@ def test_compute_C_singular_raises():
     """
     q, s = 2, 2
     rng2 = np.random.default_rng(7)
-    A   = rng2.standard_normal((q, q)) * 0.5
-    B   = rng2.standard_normal((q, s)) * 0.5   # B ≠ 0 ensures Z = SV B^T ≠ 0
-    D   = np.zeros((s, s))                      # forces P = 0
-    SU  = _make_pd(q, rng2)
-    Dt  = np.zeros((q, s))                      # forces P = 0
-    SV  = _make_pd(s, rng2)                     # M = SV > 0, non-singular
+    A = rng2.standard_normal((q, q)) * 0.5
+    B = rng2.standard_normal((q, s)) * 0.5  # B ≠ 0 ensures Z = SV B^T ≠ 0
+    D = np.zeros((s, s))  # forces P = 0
+    SU = _make_pd(q, rng2)
+    Dt = np.zeros((q, s))  # forces P = 0
+    SV = _make_pd(s, rng2)  # M = SV > 0, non-singular
 
     with pytest.raises(ValueError):
         compute_C_from_h5(A, B, D, SU, Dt, SV)
@@ -346,20 +344,16 @@ def test_compute_C_warm_start_is_fixed_point(rng):
     A, B, C_true, D, SU, Dt, SV = _make_consistent_inputs_with_C(q, s, rng)
     C = compute_C_from_h5(A, B, D, SU, Dt, SV, C_init=C_true, max_iter=5)
     diff = np.linalg.norm(C - C_true, "fro")
-    assert diff < 1e-8, (
-        f"C_true is not a fixed point: ‖C - C_true‖_F = {diff:.3e}"
-    )
+    assert diff < 1e-8, f"C_true is not a fixed point: ‖C - C_true‖_F = {diff:.3e}"
 
 
 def test_apply_h5_constraint_idempotent(params_K2_q1_s1):
     """Applying apply_h5_constraint twice must give the same B matrices
     (Frobenius-norm difference < 1e-10 for every regime)."""
-    once  = apply_h5_constraint(params_K2_q1_s1)
+    once = apply_h5_constraint(params_K2_q1_s1)
     twice = apply_h5_constraint(once)
     K = params_K2_q1_s1.K
 
     for k in range(K):
         delta = np.linalg.norm(twice.f_matrix.B(k) - once.f_matrix.B(k), "fro")
-        assert delta < 1e-10, (
-            f"apply_h5_constraint is not idempotent: ‖ΔB(k={k})‖_F = {delta:.3e}"
-        )
+        assert delta < 1e-10, f"apply_h5_constraint is not idempotent: ‖ΔB(k={k})‖_F = {delta:.3e}"

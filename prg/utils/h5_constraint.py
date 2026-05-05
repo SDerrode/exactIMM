@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/utils/h5_constraint.py
 ==========================
@@ -48,14 +47,15 @@ __all__ = [
 # Residual of the (H5) algebraic constraint
 # ---------------------------------------------------------------------------
 
+
 def compute_h5_residual(
-    A:  np.ndarray,   # (q, q)
-    B:  np.ndarray,   # (q, s)
-    C:  np.ndarray,   # (s, q)
-    D:  np.ndarray,   # (s, s)
-    SU: np.ndarray,   # (q, q)  Σ_U
-    Dt: np.ndarray,   # (q, s)  Δ
-    SV: np.ndarray,   # (s, s)  Σ_V
+    A: np.ndarray,  # (q, q)
+    B: np.ndarray,  # (q, s)
+    C: np.ndarray,  # (s, q)
+    D: np.ndarray,  # (s, s)
+    SU: np.ndarray,  # (q, q)  Σ_U
+    Dt: np.ndarray,  # (q, s)  Δ
+    SV: np.ndarray,  # (s, s)  Σ_V
 ) -> np.ndarray:
     """
     Evaluate the (H5) algebraic constraint residual (paper eq. 4.4).
@@ -84,12 +84,12 @@ def compute_h5_residual(
         If M is singular (cannot invert).
     """
     P = Dt.T @ C.T + SV @ D.T
-    Q = C  @ SU   + D  @ Dt.T
-    R = C  @ Dt   + D  @ SV
-    M = Q  @ C.T  + R  @ D.T  + SV
-    W = Q  @ A.T  + R  @ B.T  + Dt.T
-    Z = Dt.T @ A  + SV @ B.T
-    X = np.linalg.solve(M, W)        # X = M⁻¹ W
+    Q = C @ SU + D @ Dt.T
+    R = C @ Dt + D @ SV
+    M = Q @ C.T + R @ D.T + SV
+    W = Q @ A.T + R @ B.T + Dt.T
+    Z = Dt.T @ A + SV @ B.T
+    X = np.linalg.solve(M, W)  # X = M⁻¹ W
     return Z - P @ X
 
 
@@ -97,13 +97,14 @@ def compute_h5_residual(
 # Core formula
 # ---------------------------------------------------------------------------
 
+
 def compute_B_from_h5(
-    A:  np.ndarray,   # (q, q)
-    C:  np.ndarray,   # (s, q)
-    D:  np.ndarray,   # (s, s)
-    SU: np.ndarray,   # (q, q)  Σ_U
-    Dt: np.ndarray,   # (q, s)  Δ
-    SV: np.ndarray,   # (s, s)  Σ_V
+    A: np.ndarray,  # (q, q)
+    C: np.ndarray,  # (s, q)
+    D: np.ndarray,  # (s, s)
+    SU: np.ndarray,  # (q, q)  Σ_U
+    Dt: np.ndarray,  # (q, s)  Δ
+    SV: np.ndarray,  # (s, s)  Σ_V
 ) -> np.ndarray:
     """
     Compute B (q × s) from the H5 constraint (eq. 4.8).
@@ -120,13 +121,12 @@ def compute_B_from_h5(
     P = Dt.T @ C.T + SV @ D.T
     Q = C @ SU + D @ Dt.T
     R = C @ Dt + D @ SV
-    M = Q @ C.T + R @ D.T + SV   # s × s, symmetric
+    M = Q @ C.T + R @ D.T + SV  # s × s, symmetric
 
     cond_M = np.linalg.cond(M)
     if cond_M > 1e12:
         raise ValueError(
-            f"M is ill-conditioned (cond = {cond_M:.3e}); "
-            "cannot reliably solve for B."
+            f"M is ill-conditioned (cond = {cond_M:.3e}); cannot reliably solve for B."
         )
 
     # PM_inv = P M⁻¹  — solved as (Mᵀ \ Pᵀ)ᵀ to avoid forming explicit inverse
@@ -135,14 +135,13 @@ def compute_B_from_h5(
     except np.linalg.LinAlgError as exc:
         raise ValueError(f"M is singular: {exc}") from exc
 
-    L   = SV - PM_inv @ R                       # Schur complement, s × s
+    L = SV - PM_inv @ R  # Schur complement, s × s
     rhs = PM_inv @ (Q @ A.T + Dt.T) - Dt.T @ A  # s × q
 
     cond_L = np.linalg.cond(L)
     if cond_L > 1e12:
         raise ValueError(
-            f"L is ill-conditioned (cond = {cond_L:.3e}); "
-            "cannot reliably solve for B."
+            f"L is ill-conditioned (cond = {cond_L:.3e}); cannot reliably solve for B."
         )
 
     try:
@@ -153,16 +152,16 @@ def compute_B_from_h5(
     if not np.isfinite(B_T).all():
         raise ValueError("B_T contains non-finite values after solving.")
 
-    return B_T.T   # q × s
+    return B_T.T  # q × s
 
 
 def compute_A_from_h5(
-    B:  np.ndarray,   # (q, s)
-    C:  np.ndarray,   # (s, q)
-    D:  np.ndarray,   # (s, s)
-    SU: np.ndarray,   # (q, q)  Σ_U
-    Dt: np.ndarray,   # (q, s)  Δ
-    SV: np.ndarray,   # (s, s)  Σ_V
+    B: np.ndarray,  # (q, s)
+    C: np.ndarray,  # (s, q)
+    D: np.ndarray,  # (s, s)
+    SU: np.ndarray,  # (q, q)  Σ_U
+    Dt: np.ndarray,  # (q, s)  Δ
+    SV: np.ndarray,  # (s, s)  Σ_V
 ) -> np.ndarray:
     """
     Compute A (q × q) from the H5 constraint with B fixed (eq. 4.8).
@@ -189,8 +188,7 @@ def compute_A_from_h5(
     cond_M = np.linalg.cond(M)
     if cond_M > 1e12:
         raise ValueError(
-            f"M is ill-conditioned (cond = {cond_M:.3e}); "
-            "cannot reliably solve for A."
+            f"M is ill-conditioned (cond = {cond_M:.3e}); cannot reliably solve for A."
         )
 
     try:
@@ -203,34 +201,31 @@ def compute_A_from_h5(
     cond_L = np.linalg.cond(L)
     if cond_L > 1e12:
         raise ValueError(
-            f"L is ill-conditioned (cond = {cond_L:.3e}); "
-            "cannot reliably solve for A."
+            f"L is ill-conditioned (cond = {cond_L:.3e}); cannot reliably solve for A."
         )
 
-    G     = PM_inv @ Q - Dt.T          # s × q
-    rhs_A = L @ B.T - PM_inv @ Dt.T   # s × q
+    G = PM_inv @ Q - Dt.T  # s × q
+    rhs_A = L @ B.T - PM_inv @ Dt.T  # s × q
 
     # Solve G @ A^T = rhs_A (lstsq handles s ≠ q)
     A_T, _, rank, _ = np.linalg.lstsq(G, rhs_A, rcond=None)
 
     if rank < min(G.shape):
-        raise ValueError(
-            f"G is rank-deficient (rank={rank}); A is not uniquely determined."
-        )
+        raise ValueError(f"G is rank-deficient (rank={rank}); A is not uniquely determined.")
 
     if not np.isfinite(A_T).all():
         raise ValueError("A contains non-finite values after solving.")
 
-    return A_T.T   # q × q
+    return A_T.T  # q × q
 
 
 def compute_SU_from_h5(
-    A:  np.ndarray,   # (q, q)
-    B:  np.ndarray,   # (q, s)
-    C:  np.ndarray,   # (s, q)
-    D:  np.ndarray,   # (s, s)
-    Dt: np.ndarray,   # (q, s)  Δ
-    SV: np.ndarray,   # (s, s)  Σ_V
+    A: np.ndarray,  # (q, q)
+    B: np.ndarray,  # (q, s)
+    C: np.ndarray,  # (s, q)
+    D: np.ndarray,  # (s, s)
+    Dt: np.ndarray,  # (q, s)  Δ
+    SV: np.ndarray,  # (s, s)  Σ_V
 ) -> np.ndarray:
     """
     Compute Σ_U (q × q) from the H5 constraint with A, B, C, D, Δ, Σ_V fixed.
@@ -252,31 +247,31 @@ def compute_SU_from_h5(
     ValueError
         If the system is rank-deficient or Σ_U is not positive definite.
     """
-    P  = Dt.T @ C.T + SV @ D.T        # s × s
-    Q0 = D @ Dt.T                      # s × q  (Q = C Σ_U + Q0)
-    R  = C @ Dt + D @ SV               # s × s
-    M0 = Q0 @ C.T + R @ D.T + SV      # s × s  (M = C Σ_U Cᵀ + M0)
+    P = Dt.T @ C.T + SV @ D.T  # s × s
+    Q0 = D @ Dt.T  # s × q  (Q = C Σ_U + Q0)
+    R = C @ Dt + D @ SV  # s × s
+    M0 = Q0 @ C.T + R @ D.T + SV  # s × s  (M = C Σ_U Cᵀ + M0)
 
-    Z   = SV @ B.T + Dt.T @ A         # s × q
-    W   = Q0 @ A.T + R @ B.T + Dt.T   # s × q
-    RHS = P @ W - M0 @ Z              # s × q
+    Z = SV @ B.T + Dt.T @ A  # s × q
+    W = Q0 @ A.T + R @ B.T + Dt.T  # s × q
+    RHS = P @ W - M0 @ Z  # s × q
 
-    E       = C.T @ Z                  # q × q
-    PC      = P @ C                    # s × q
-    KronMat = np.kron(E.T, C) - np.kron(A, PC)   # (qs × q²)
-    rhs_vec = RHS.ravel(order="F")                # (qs,)
+    E = C.T @ Z  # q × q
+    PC = P @ C  # s × q
+    KronMat = np.kron(E.T, C) - np.kron(A, PC)  # (qs × q²)
+    rhs_vec = RHS.ravel(order="F")  # (qs,)
 
     SU_vec, _, rank, _ = np.linalg.lstsq(KronMat, rhs_vec, rcond=None)
 
     q = A.shape[0]
     if rank < q * q:
         raise ValueError(
-            f"Kronecker system is rank-deficient (rank={rank} < {q*q}); "
+            f"Kronecker system is rank-deficient (rank={rank} < {q * q}); "
             "Σ_U is not uniquely determined."
         )
 
     SU = SU_vec.reshape(q, q, order="F")
-    SU = (SU + SU.T) / 2              # enforce symmetry
+    SU = (SU + SU.T) / 2  # enforce symmetry
 
     if not np.isfinite(SU).all():
         raise ValueError("Σ_U contains non-finite values after solving.")
@@ -290,12 +285,12 @@ def compute_SU_from_h5(
 
 
 def compute_C_from_h5(
-    A:  np.ndarray,   # (q, q)
-    B:  np.ndarray,   # (q, s)
-    D:  np.ndarray,   # (s, s)
-    SU: np.ndarray,   # (q, q)  Σ_U
-    Dt: np.ndarray,   # (q, s)  Δ
-    SV: np.ndarray,   # (s, s)  Σ_V
+    A: np.ndarray,  # (q, q)
+    B: np.ndarray,  # (q, s)
+    D: np.ndarray,  # (s, s)
+    SU: np.ndarray,  # (q, q)  Σ_U
+    Dt: np.ndarray,  # (q, s)  Δ
+    SV: np.ndarray,  # (s, s)  Σ_V
     *,
     C_init: np.ndarray | None = None,
     max_iter: int = 50,
@@ -351,9 +346,9 @@ def compute_C_from_h5(
     C = np.zeros((s, q)) if C_init is None else np.array(C_init, dtype=float)
 
     # Quantities constant in C
-    Z   = Dt.T @ A    + SV @ B.T                  # s × q  (= lhs of H5)
-    K   = SU  @ A.T  + Dt  @ B.T                  # q × q
-    W0  = D @ Dt.T @ A.T + D @ SV @ B.T + Dt.T   # s × q  (= W at C=0)
+    Z = Dt.T @ A + SV @ B.T  # s × q  (= lhs of H5)
+    K = SU @ A.T + Dt @ B.T  # q × q
+    W0 = D @ Dt.T @ A.T + D @ SV @ B.T + Dt.T  # s × q  (= W at C=0)
     Z_norm = max(float(np.linalg.norm(Z, "fro")), 1.0)
 
     def _residual(C_: np.ndarray) -> np.ndarray:
@@ -377,18 +372,18 @@ def compute_C_from_h5(
         Q_t = C @ SU + D @ Dt.T
         R_t = C @ Dt + D @ SV
         P_t = Dt.T @ C.T + SV @ D.T
-        M_t = Q_t @ C.T + R_t @ D.T + SV          # s × s
+        M_t = Q_t @ C.T + R_t @ D.T + SV  # s × s
 
         # G̃ = P̃ M̃⁻¹  (s × s), computed via lstsq for stability
         # G̃ X = P_t  ⟺  M_t^T G̃^T = P_t^T
         G_t = np.linalg.lstsq(M_t.T, P_t.T, rcond=1e-12)[0].T  # s × s
 
         # T̃ = Z − G̃ W₀  (constant part of the rhs for this frozen iterate)
-        T_t = Z - G_t @ W0   # s × q
+        T_t = Z - G_t @ W0  # s × q
 
         # Solve  G̃ C K = T̃  ⟺  (Kᵀ ⊗ G̃) vec(C) = vec(T̃)
-        KronMat = np.kron(K.T, G_t)               # (sq × sq)
-        rhs_vec = T_t.ravel(order="F")             # (sq,)
+        KronMat = np.kron(K.T, G_t)  # (sq × sq)
+        rhs_vec = T_t.ravel(order="F")  # (sq,)
         C_vec, _, rank, _ = np.linalg.lstsq(KronMat, rhs_vec, rcond=1e-12)
 
         if rank < s * q:
@@ -428,11 +423,12 @@ def compute_C_from_h5(
 # High-level function
 # ---------------------------------------------------------------------------
 
+
 def apply_h5_constraint(
-    params: "GSSParams",
+    params: GSSParams,
     *,
     logger: logging.Logger | None = None,
-) -> "GSSParams":
+) -> GSSParams:
     """
     Return a **new** GSSParams whose B(k) blocks satisfy the H5 constraint.
 
@@ -471,9 +467,9 @@ def apply_h5_constraint(
     D_list: list[np.ndarray] = []
 
     for k in range(K):
-        A  = params.f_matrix.A(k)
-        C  = params.f_matrix.C(k)
-        D  = params.f_matrix.D(k)
+        A = params.f_matrix.A(k)
+        C = params.f_matrix.C(k)
+        D = params.f_matrix.D(k)
         SU = params.noise_cov.Sigma_U(k)
         Dt = params.noise_cov.Delta(k)
         SV = params.noise_cov.Sigma_V(k)
@@ -481,16 +477,14 @@ def apply_h5_constraint(
         try:
             B_new = compute_B_from_h5(A, C, D, SU, Dt, SV)
         except ValueError as exc:
-            raise ValueError(
-                f"H5 constraint cannot be satisfied for regime k={k}: {exc}"
-            ) from exc
+            raise ValueError(f"H5 constraint cannot be satisfied for regime k={k}: {exc}") from exc
 
         B_old = params.f_matrix.B(k)
         delta = float(np.linalg.norm(B_new - B_old, "fro"))
         log.info(
-            "k=%d  B corrected  ‖ΔB‖_F = %.4g  "
-            "(old %s → new %s)",
-            k, delta,
+            "k=%d  B corrected  ‖ΔB‖_F = %.4g  (old %s → new %s)",
+            k,
+            delta,
             np.array2string(B_old.ravel(), precision=4, suppress_small=True),
             np.array2string(B_new.ravel(), precision=4, suppress_small=True),
         )
@@ -501,7 +495,9 @@ def apply_h5_constraint(
 
     # Build updated FMatrix
     new_f_matrix = FMatrix(
-        K=K, q=q, s=s,
+        K=K,
+        q=q,
+        s=s,
         A_list=A_list,
         B_list=B_list,
         C_list=C_list,
@@ -510,7 +506,9 @@ def apply_h5_constraint(
 
     # Rebuild GSSParams (all other fields unchanged)
     return GSSParams(
-        K=K, q=q, s=s,
+        K=K,
+        q=q,
+        s=s,
         P=params.P,
         f_matrix=new_f_matrix,
         noise_cov=params.noise_cov,

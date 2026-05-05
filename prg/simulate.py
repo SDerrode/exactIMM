@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/simulate.py
 ===============
@@ -117,7 +116,7 @@ def _setup_logging(
     )
 
     root_logger = logging.getLogger("exactIMM")
-    root_logger.setLevel(logging.DEBUG)   # capture everything; handlers filter
+    root_logger.setLevel(logging.DEBUG)  # capture everything; handlers filter
 
     # --- File handler (always DEBUG) ---
     fh = logging.FileHandler(log_path, encoding="utf-8")
@@ -155,18 +154,14 @@ def _load_model(model_name: str) -> BaseGSSModel:
     try:
         module = importlib.import_module(module_path)
     except ImportError as exc:
-        logging.getLogger("exactIMM").error(
-            "Cannot import model '%s': %s", module_path, exc
-        )
+        logging.getLogger("exactIMM").error("Cannot import model '%s': %s", module_path, exc)
         sys.exit(1)
 
     for _, obj in inspect.getmembers(module, inspect.isclass):
         if issubclass(obj, BaseGSSModel) and obj is not BaseGSSModel:
             return obj()
 
-    logging.getLogger("exactIMM").error(
-        "No BaseGSSModel subclass found in '%s'.", module_path
-    )
+    logging.getLogger("exactIMM").error("No BaseGSSModel subclass found in '%s'.", module_path)
     sys.exit(1)
 
 
@@ -182,39 +177,56 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--model", required=True, metavar="MODEL",
-        help="Name of the model module in prg/models/ "
-             "(e.g. model_gss_K2_q1_s1).",
+        "--model",
+        required=True,
+        metavar="MODEL",
+        help="Name of the model module in prg/models/ (e.g. model_gss_K2_q1_s1).",
     )
     parser.add_argument(
-        "-N", dest="N", required=True, type=int, metavar="N",
+        "-N",
+        dest="N",
+        required=True,
+        type=int,
+        metavar="N",
         help="Number of time steps to simulate (n = 0 … N-1).",
     )
     parser.add_argument(
-        "--seed", type=int, default=None, metavar="SEED",
-        help="Random seed for reproducibility. "
-             "Omit for a non-deterministic run.",
+        "--seed",
+        type=int,
+        default=None,
+        metavar="SEED",
+        help="Random seed for reproducibility. Omit for a non-deterministic run.",
     )
     parser.add_argument(
-        "--output", default=None, metavar="FILENAME",
+        "--output",
+        default=None,
+        metavar="FILENAME",
         help="Output CSV filename (auto-generated if omitted).",
     )
     parser.add_argument(
-        "--log-level", default=None, metavar="LEVEL",
+        "--log-level",
+        default=None,
+        metavar="LEVEL",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Override the log level from config.toml.",
     )
     parser.add_argument(
-        "--no-save", action="store_true",
+        "--no-save",
+        action="store_true",
         help="Do not write the CSV (dry run for testing).",
     )
     parser.add_argument(
-        "--constraint", action="store_true",
+        "--constraint",
+        action="store_true",
         help="Enforce the H5 constraint (eq. 4.8): recompute every B(k) "
-             "from A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k) before simulating.",
+        "from A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k) before simulating.",
     )
     parser.add_argument(
-        "-v", "--verbose", type=int, default=1, choices=[0, 1, 2],
+        "-v",
+        "--verbose",
+        type=int,
+        default=1,
+        choices=[0, 1, 2],
         metavar="LEVEL",
         help="Console verbosity: 0=silent, 1=normal, 2=full debug.",
     )
@@ -235,10 +247,7 @@ def main() -> None:
     cfg = _load_config(root)
 
     # --- Resolve log level (CLI > config > default) ---
-    log_level = (
-        args.log_level
-        or cfg.get("general", {}).get("log_level", _DEFAULT_LOG_LEVEL)
-    )
+    log_level = args.log_level or cfg.get("general", {}).get("log_level", _DEFAULT_LOG_LEVEL)
 
     # --- Resolve output paths from config ---
     paths_cfg = cfg.get("paths", {})
@@ -287,7 +296,10 @@ def main() -> None:
 
     log.info(
         "Parameters OK: K=%d  q=%d  s=%d  dim_z=%d",
-        params.K, params.q, params.s, params.dim_z,
+        params.K,
+        params.q,
+        params.s,
+        params.dim_z,
     )
 
     # --- Simulate ---

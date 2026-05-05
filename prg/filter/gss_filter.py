@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/filter/gss_filter.py
 ========================
@@ -106,7 +105,7 @@ FILTER_MODES = ("h5_exact", "imm_general")
 # 1e-6 is the practical floor for float64 matrix arithmetic (two solve() calls
 # in compute_B_from_h5 accumulate O(ε · κ(M) · κ(L)) rounding errors that
 # can legitimately reach ~1e-8 even when (H5) is exactly enforced).
-H5_TOL       = 1e-6
+H5_TOL = 1e-6
 
 logger = logging.getLogger("exactIMM.filter")
 
@@ -138,12 +137,12 @@ class FilterResult:
         Incremental log-likelihood log p(y_n | y_{1:n-1}) (or log p(y_1) for n=0).
     """
 
-    n:          int
-    E_x:        np.ndarray   # (q, 1)
-    E_xx:       np.ndarray   # (q, q)
-    pi:         np.ndarray   # (K,)
-    innovation: np.ndarray   # (s, 1)
-    log_lik:    float = 0.0
+    n: int
+    E_x: np.ndarray  # (q, 1)
+    E_xx: np.ndarray  # (q, q)
+    pi: np.ndarray  # (K,)
+    innovation: np.ndarray  # (s, 1)
+    log_lik: float = 0.0
 
     @property
     def Var_x(self) -> np.ndarray:
@@ -203,19 +202,17 @@ class GSSFilter:
         self,
         params: GSSParams,
         joseph: bool = False,
-        mode:   str  = "imm_general",
+        mode: str = "imm_general",
     ) -> None:
         if mode not in FILTER_MODES:
-            raise ValueError(
-                f"Unknown mode {mode!r}. Expected one of: {FILTER_MODES}."
-            )
-        self._p      = params
+            raise ValueError(f"Unknown mode {mode!r}. Expected one of: {FILTER_MODES}.")
+        self._p = params
         self._joseph = bool(joseph)
-        self._mode   = mode
+        self._mode = mode
 
         if mode == "h5_exact":
             self._check_h5()
-            self._precompute()          # calls _precompute_stationary() internally
+            self._precompute()  # calls _precompute_stationary() internally
         else:
             # imm_general: no (H5) pre-computation; joseph flag is ignored
             if self._joseph:
@@ -249,10 +246,10 @@ class GSSFilter:
         max_rel = 0.0
         worst_k = 0
         for k in range(p.K):
-            A  = p.f_matrix.A(k)
-            B  = p.f_matrix.B(k)
-            C  = p.f_matrix.C(k)
-            D  = p.f_matrix.D(k)
+            A = p.f_matrix.A(k)
+            B = p.f_matrix.B(k)
+            C = p.f_matrix.C(k)
+            D = p.f_matrix.D(k)
             SU = p.noise_cov.Sigma_U(k)
             Dt = p.noise_cov.Delta(k)
             SV = p.noise_cov.Sigma_V(k)
@@ -271,7 +268,7 @@ class GSSFilter:
                 continue
             Z = Dt.T @ A + SV @ B.T
             scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
-            rel   = float(np.linalg.norm(F, "fro")) / scale
+            rel = float(np.linalg.norm(F, "fro")) / scale
             if rel > max_rel:
                 max_rel = rel
                 worst_k = k
@@ -320,12 +317,12 @@ class GSSFilter:
         K, q = p.K, p.q
 
         # --- Stationary distribution and time-reversed transition ----------
-        self._pi_inf = p.stationary_distribution()           # (K,)
-        joint_inf    = self._pi_inf[:, None] * p.P            # p(r_n=j, r_{n+1}=k)
-        marg_rnp1    = joint_inf.sum(axis=0)                  # = π_∞ again
-        safe_marg    = np.where(marg_rnp1 > 0, marg_rnp1, 1.0)
+        self._pi_inf = p.stationary_distribution()  # (K,)
+        joint_inf = self._pi_inf[:, None] * p.P  # p(r_n=j, r_{n+1}=k)
+        marg_rnp1 = joint_inf.sum(axis=0)  # = π_∞ again
+        safe_marg = np.where(marg_rnp1 > 0, marg_rnp1, 1.0)
         # p_rev[j, k] = p(r_n=j | r_{n+1}=k)  under stationarity
-        self._p_rev  = joint_inf / safe_marg[None, :]         # (K, K)
+        self._p_rev = joint_inf / safe_marg[None, :]  # (K, K)
 
         # --- Fixed-point iteration for µ(k), P(k) --------------------------
         # µ(k) = F_k Σ_j p_rev[j,k] µ(j) + b_k
@@ -334,50 +331,48 @@ class GSSFilter:
         #      + b_k (Σ_j p_rev[j,k] µ(j))^T F_k^T
         #      + b_k b_k^T + Σ_W(k)
         mu_list = [p.mu_z0(k).copy() for k in range(K)]
-        P_list  = [p.Sigma_z0(k) + p.mu_z0(k) @ p.mu_z0(k).T for k in range(K)]
+        P_list = [p.Sigma_z0(k) + p.mu_z0(k) @ p.mu_z0(k).T for k in range(K)]
 
         MAX_ITER = 1000
-        TOL      = 1e-12
-        diff     = np.inf
+        TOL = 1e-12
+        diff = np.inf
         for it in range(MAX_ITER):
             mu_new: list[np.ndarray] = []
-            P_new:  list[np.ndarray] = []
+            P_new: list[np.ndarray] = []
             for k in range(K):
-                F    = p.f_matrix.F(k)
-                b    = p.b(k)
+                F = p.f_matrix.F(k)
+                b = p.b(k)
                 w_mu = sum(self._p_rev[j, k] * mu_list[j] for j in range(K))
-                w_P  = sum(self._p_rev[j, k] * P_list[j]  for j in range(K))
+                w_P = sum(self._p_rev[j, k] * P_list[j] for j in range(K))
                 Fw_mu = F @ w_mu
                 mu_new.append(Fw_mu + b)
-                P_new.append(_sym(
-                    F @ w_P @ F.T
-                    + Fw_mu @ b.T + b @ Fw_mu.T
-                    + b @ b.T
-                    + p.noise_cov.Sigma_W(k)
-                ))
+                P_new.append(
+                    _sym(
+                        F @ w_P @ F.T + Fw_mu @ b.T + b @ Fw_mu.T + b @ b.T + p.noise_cov.Sigma_W(k)
+                    )
+                )
             diff = max(np.abs(mu_new[k] - mu_list[k]).max() for k in range(K))
             diff = max(diff, max(np.abs(P_new[k] - P_list[k]).max() for k in range(K)))
             mu_list, P_list = mu_new, P_new
             if diff < TOL:
-                logger.debug("Stationary moments converged in %d iterations (Δ=%.2e)",
-                             it + 1, diff)
+                logger.debug("Stationary moments converged in %d iterations (Δ=%.2e)", it + 1, diff)
                 break
         else:
             logger.warning(
                 "Stationary moments did not fully converge after %d iterations "
                 "(Δ=%.2e). Filter outputs may be slightly biased.",
-                MAX_ITER, diff,
+                MAX_ITER,
+                diff,
             )
 
         # Cache stationary moments and their X/Y blocks
-        self._mu_z     = mu_list    # µ(k),                  (dim_z, 1)
-        self._P_z_stat = P_list     # uncentred 2nd moment,  (dim_z, dim_z)
-        self._Sigma    = [
-            _psd_floor(_sym(P_list[k] - mu_list[k] @ mu_list[k].T))
-            for k in range(K)
-        ]                           # centred Σ(k),          (dim_z, dim_z)
-        self._mu_X = [self._mu_z[k][:q]      for k in range(K)]
-        self._mu_Y = [self._mu_z[k][q:]      for k in range(K)]
+        self._mu_z = mu_list  # µ(k),                  (dim_z, 1)
+        self._P_z_stat = P_list  # uncentred 2nd moment,  (dim_z, dim_z)
+        self._Sigma = [
+            _psd_floor(_sym(P_list[k] - mu_list[k] @ mu_list[k].T)) for k in range(K)
+        ]  # centred Σ(k),          (dim_z, dim_z)
+        self._mu_X = [self._mu_z[k][:q] for k in range(K)]
+        self._mu_Y = [self._mu_z[k][q:] for k in range(K)]
         self._S_XX = [self._Sigma[k][:q, :q] for k in range(K)]
         self._S_XY = [self._Sigma[k][:q, q:] for k in range(K)]
         self._S_YY = [self._Sigma[k][q:, q:] for k in range(K)]
@@ -420,14 +415,10 @@ class GSSFilter:
                 H = _safe_solve(self._S_XX[k].T, self._S_XY[k]).T
                 R = _psd_floor(_sym(self._S_YY[k] - H @ self._S_XX[k] @ H.T))
                 IKH = np.eye(q) - Kg @ H
-                P_post_k = _psd_floor(_sym(
-                    IKH @ self._S_XX[k] @ IKH.T + Kg @ R @ Kg.T
-                ))
+                P_post_k = _psd_floor(_sym(IKH @ self._S_XX[k] @ IKH.T + Kg @ R @ Kg.T))
             else:
                 # Short form: P_post(k) = Σ_XX(k) - K_k Σ_YY(k) K_k^T
-                P_post_k = _psd_floor(_sym(
-                    self._S_XX[k] - Kg @ self._S_YY[k] @ Kg.T
-                ))
+                P_post_k = _psd_floor(_sym(self._S_XX[k] - Kg @ self._S_YY[k] @ Kg.T))
             self._P_post.append(P_post_k)
 
         # --- Pair-conditional regime-update constants ----------------------
@@ -449,23 +440,21 @@ class GSSFilter:
         # of F_k^Y [Σ_bar(k) − Σ(j)] F_k^{Y,T} that biases one regime to
         # always win when the regime covariances differ.
         self._mu_Y_jk: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
-        self._M_t:     list[list[np.ndarray]] = [[None] * K for _ in range(K)]
-        self._Gamma:   list[list[np.ndarray]] = [[None] * K for _ in range(K)]
+        self._M_t: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
+        self._Gamma: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         for k in range(K):
-            F    = p.f_matrix.F(k)
-            b_Y  = p.b(k)[q:]
-            C_k  = F[q:, :q]                       # C block of F_k  (s, q)
-            SV_k = p.noise_cov.Sigma_V(k)           # Σ_V(k)          (s, s)
+            F = p.f_matrix.F(k)
+            b_Y = p.b(k)[q:]
+            C_k = F[q:, :q]  # C block of F_k  (s, q)
+            SV_k = p.noise_cov.Sigma_V(k)  # Σ_V(k)          (s, s)
             for j in range(K):
                 mu_Y_jk = F[q:, :] @ self._mu_z[j] + b_Y
-                Cov     = (F @ self._Sigma[j])[q:, q:]          # (s, s) — used for mean
-                M_t     = _safe_solve(self._S_YY[j].T, Cov.T).T  # (s, s) — used for mean
-                Gamma   = _psd_floor(_sym(
-                    C_k @ self._P_post[j] @ C_k.T + SV_k
-                ))                                               # (s, s)
+                Cov = (F @ self._Sigma[j])[q:, q:]  # (s, s) — used for mean
+                M_t = _safe_solve(self._S_YY[j].T, Cov.T).T  # (s, s) — used for mean
+                Gamma = _psd_floor(_sym(C_k @ self._P_post[j] @ C_k.T + SV_k))  # (s, s)
                 self._mu_Y_jk[j][k] = mu_Y_jk
-                self._M_t[j][k]     = M_t
-                self._Gamma[j][k]   = Gamma
+                self._M_t[j][k] = M_t
+                self._Gamma[j][k] = Gamma
 
     # ------------------------------------------------------------------
     # State management
@@ -485,7 +474,7 @@ class GSSFilter:
         # Mode-specific per-step moments (only used in mode="imm_general").
         # Start at the stationary moments (from _precompute_stationary()).
         if self._mode == "imm_general":
-            self._mu:  list[np.ndarray] = [self._mu_z[k].copy()     for k in range(p.K)]
+            self._mu: list[np.ndarray] = [self._mu_z[k].copy() for k in range(p.K)]
             self._P_z: list[np.ndarray] = [self._P_z_stat[k].copy() for k in range(p.K)]
 
     def reset(self) -> None:
@@ -497,7 +486,7 @@ class GSSFilter:
     # Public step interface
     # ------------------------------------------------------------------
 
-    def __iter__(self) -> "GSSFilter":
+    def __iter__(self) -> GSSFilter:
         return self
 
     def step(self, y: np.ndarray) -> FilterResult:
@@ -513,7 +502,7 @@ class GSSFilter:
         -------
         FilterResult
         """
-        y = np.asarray(y, dtype=float).reshape(-1, 1)   # (s, 1)
+        y = np.asarray(y, dtype=float).reshape(-1, 1)  # (s, 1)
 
         if self._mode == "h5_exact":
             init_fn, step_fn = self._init_step_h5, self._update_step_h5
@@ -544,26 +533,25 @@ class GSSFilter:
         p = self._p
         K, q = p.K, p.q
 
-        log_w:   np.ndarray       = np.empty(K)
-        E_x_r:   list[np.ndarray] = []
+        log_w: np.ndarray = np.empty(K)
+        E_x_r: list[np.ndarray] = []
         Var_x_r: list[np.ndarray] = []
 
         for r in range(K):
             # All moments are pre-computed at stationarity
-            mu_Y_r = self._mu_Y[r]                              # (s, 1)
+            mu_Y_r = self._mu_Y[r]  # (s, 1)
 
             # log p(y_1 | r_1=r) = log π_∞(r) + log N(y_1; µ_Y(r), Σ_YY(r))
-            log_w[r] = (
-                np.log(self._pi_inf[r] + 1e-300)
-                + multivariate_normal.logpdf(
-                    y1.ravel(), mean=mu_Y_r.ravel(), cov=self._S_YY[r],
-                    allow_singular=True,
-                )
+            log_w[r] = np.log(self._pi_inf[r] + 1e-300) + multivariate_normal.logpdf(
+                y1.ravel(),
+                mean=mu_Y_r.ravel(),
+                cov=self._S_YY[r],
+                allow_singular=True,
             )
 
             # Kalman update using pre-computed gain and posterior covariance
-            e_x   = self._mu_X[r] + self._K_gain[r] @ (y1 - mu_Y_r)   # (q, 1)
-            var_x = self._P_post[r]                                      # constant
+            e_x = self._mu_X[r] + self._K_gain[r] @ (y1 - mu_Y_r)  # (q, 1)
+            var_x = self._P_post[r]  # constant
 
             E_x_r.append(e_x)
             Var_x_r.append(var_x)
@@ -591,11 +579,12 @@ class GSSFilter:
 
         # Innovation: ν_1 = y_1 − Σ_r π_∞(r) µ_Y(r)
         y_pred = sum(self._pi_inf[r] * self._mu_Y[r] for r in range(K))
-        innov  = y1 - y_pred
+        innov = y1 - y_pred
 
         self._pi = pi1
-        return FilterResult(n=self._n, E_x=E_x, E_xx=E_xx, pi=pi1,
-                            innovation=innov, log_lik=log_lik)
+        return FilterResult(
+            n=self._n, E_x=E_x, E_xx=E_xx, pi=pi1, innovation=innov, log_lik=log_lik
+        )
 
     # ------------------------------------------------------------------
     # Recursion  n → n+1   (paper §3 — IMM steps II, III, IV)
@@ -604,16 +593,16 @@ class GSSFilter:
     def _update_step_h5(self, y_new: np.ndarray) -> FilterResult:
         p = self._p
         K, q = p.K, p.q
-        y_prev = self._y_prev      # (s, 1) — previous observation
+        y_prev = self._y_prev  # (s, 1) — previous observation
 
         # ---- Step (II): mode-probability update ---------------------------
         # Joint p(r_n=j, r_{n+1}=k | y_{1:n}) = π_n(j) · P(j, k)
-        joint     = self._pi[:, None] * p.P                # (K, K)
-        marg_rnp1 = joint.sum(axis=0)                      # (K,)
+        joint = self._pi[:, None] * p.P  # (K, K)
+        marg_rnp1 = joint.sum(axis=0)  # (K,)
 
         # Pair-conditional likelihoods Λ(j, k) using *constant* moments
-        log_alpha  = np.full(K, -np.inf)
-        y_pred_acc = np.zeros_like(y_new)                  # for marginal innovation
+        log_alpha = np.full(K, -np.inf)
+        y_pred_acc = np.zeros_like(y_new)  # for marginal innovation
 
         for k in range(K):
             log_terms: list[float] = []
@@ -623,13 +612,15 @@ class GSSFilter:
                     continue
                 # Pair-conditional predictive mean (eq. y_pred_jk)
                 mean_jk = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_prev - self._mu_Y[j])
-                Gamma   = self._Gamma[j][k]
+                Gamma = self._Gamma[j][k]
 
                 # Accumulate marginal predicted observation
                 y_pred_acc += w * mean_jk
 
                 log_lik_c = multivariate_normal.logpdf(
-                    y_new.ravel(), mean=mean_jk.ravel(), cov=Gamma,
+                    y_new.ravel(),
+                    mean=mean_jk.ravel(),
+                    cov=Gamma,
                     allow_singular=True,
                 )
                 log_terms.append(np.log(w) + log_lik_c)
@@ -645,8 +636,8 @@ class GSSFilter:
         if not np.isfinite(log_max):
             pi_np1 = marg_rnp1.copy()
             logger.warning(
-                "Filter step %d: log_alpha all -inf; falling back to marginal "
-                "p(r_{n+1}|y_{1:n}).", self._n,
+                "Filter step %d: log_alpha all -inf; falling back to marginal p(r_{n+1}|y_{1:n}).",
+                self._n,
             )
         else:
             log_alpha -= log_max
@@ -655,8 +646,8 @@ class GSSFilter:
             if not np.isfinite(s_pi) or s_pi <= 0.0:
                 pi_np1 = marg_rnp1.copy()
                 logger.warning(
-                    "Filter step %d: invalid posterior sum; falling back to "
-                    "marg_rnp1.", self._n,
+                    "Filter step %d: invalid posterior sum; falling back to marg_rnp1.",
+                    self._n,
                 )
             else:
                 pi_np1 /= s_pi
@@ -664,13 +655,13 @@ class GSSFilter:
         # ---- Step (III): mode-conditional Kalman update --------------------
         # Uses ONLY single-regime stationary moments. Per-regime posterior
         # covariance is constant (pre-computed in self._P_post).
-        E_x_r:   list[np.ndarray] = []
+        E_x_r: list[np.ndarray] = []
         Var_x_r: list[np.ndarray] = []
         for k in range(K):
-            nu_k = y_new - self._mu_Y[k]                    # (s, 1)
-            e_x  = self._mu_X[k] + self._K_gain[k] @ nu_k   # (q, 1)
+            nu_k = y_new - self._mu_Y[k]  # (s, 1)
+            e_x = self._mu_X[k] + self._K_gain[k] @ nu_k  # (q, 1)
             E_x_r.append(e_x)
-            Var_x_r.append(self._P_post[k])                 # constant!
+            Var_x_r.append(self._P_post[k])  # constant!
 
         # ---- Step (IV): combination ---------------------------------------
         E_x, E_xx = _mix(pi_np1, E_x_r, Var_x_r, K)
@@ -679,8 +670,9 @@ class GSSFilter:
         # ---- Update dynamic state -----------------------------------------
         self._pi = pi_np1
 
-        return FilterResult(n=self._n, E_x=E_x, E_xx=E_xx, pi=pi_np1,
-                            innovation=innov, log_lik=log_lik)
+        return FilterResult(
+            n=self._n, E_x=E_x, E_xx=E_xx, pi=pi_np1, innovation=innov, log_lik=log_lik
+        )
 
     # ==================================================================
     # MODE = "imm_general" — IMM-style recursion, no (H5) required
@@ -699,30 +691,30 @@ class GSSFilter:
         p = self._p
         K, q = p.K, p.q
 
-        log_w:   np.ndarray       = np.empty(K)
-        E_x_r:   list[np.ndarray] = []
+        log_w: np.ndarray = np.empty(K)
+        E_x_r: list[np.ndarray] = []
         Var_x_r: list[np.ndarray] = []
 
         for r in range(K):
             # Use stationary moments (from _precompute_stationary())
-            Sig  = self._Sigma[r]   # (dim_z, dim_z) centred cov
-            mu   = self._mu_z[r]   # (dim_z, 1)
-            mu_X = mu[:q];  mu_Y = mu[q:]
+            Sig = self._Sigma[r]  # (dim_z, dim_z) centred cov
+            mu = self._mu_z[r]  # (dim_z, 1)
+            mu_X = mu[:q]
+            mu_Y = mu[q:]
             S_XX = Sig[:q, :q]
             S_XY = Sig[:q, q:]
             S_YY = Sig[q:, q:]
 
-            log_w[r] = (
-                np.log(self._pi_inf[r] + 1e-300)
-                + multivariate_normal.logpdf(
-                    y1.ravel(), mean=mu_Y.ravel(), cov=S_YY,
-                    allow_singular=True,
-                )
+            log_w[r] = np.log(self._pi_inf[r] + 1e-300) + multivariate_normal.logpdf(
+                y1.ravel(),
+                mean=mu_Y.ravel(),
+                cov=S_YY,
+                allow_singular=True,
             )
 
-            M_r   = _safe_solve(S_YY.T, S_XY.T).T             # (q, s)
-            e_x   = mu_X + M_r @ (y1 - mu_Y)                  # (q, 1)
-            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))     # (q, q)
+            M_r = _safe_solve(S_YY.T, S_XY.T).T  # (q, s)
+            e_x = mu_X + M_r @ (y1 - mu_Y)  # (q, 1)
+            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))  # (q, q)
 
             E_x_r.append(e_x)
             Var_x_r.append(var_x)
@@ -747,49 +739,49 @@ class GSSFilter:
 
         # Innovation: ν_1 = y_1 − Σ_r π_∞(r) µ_Y(r)
         y_pred = sum(self._pi_inf[r] * self._mu_Y[r] for r in range(K))
-        innov  = y1 - y_pred
+        innov = y1 - y_pred
 
         self._pi = pi1
-        return FilterResult(n=self._n, E_x=E_x, E_xx=E_xx, pi=pi1,
-                            innovation=innov, log_lik=log_lik)
+        return FilterResult(
+            n=self._n, E_x=E_x, E_xx=E_xx, pi=pi1, innovation=innov, log_lik=log_lik
+        )
 
     def _update_step_general(self, y_new: np.ndarray) -> FilterResult:
         p = self._p
         K, q = p.K, p.q
-        y_prev = self._y_prev          # (s, 1)
+        y_prev = self._y_prev  # (s, 1)
 
         # ---- (17bis)  joint[rn, rnp1] = π_n[rn] · P[rn, rnp1] -------------
-        joint      = self._pi[:, None] * p.P           # (K, K)
-        marg_rnp1  = joint.sum(axis=0)                 # (K,)
-        safe_marg  = np.where(marg_rnp1 > 0, marg_rnp1, 1.0)
-        p_rn_rnp1  = joint / safe_marg[None, :]        # (K, K): [rn, rnp1]
+        joint = self._pi[:, None] * p.P  # (K, K)
+        marg_rnp1 = joint.sum(axis=0)  # (K,)
+        safe_marg = np.where(marg_rnp1 > 0, marg_rnp1, 1.0)
+        p_rn_rnp1 = joint / safe_marg[None, :]  # (K, K): [rn, rnp1]
 
         # ---- (17ter) + (17)  Mean and second-moment propagation -----------
         mu_np1: list[np.ndarray] = []
-        P_np1:  list[np.ndarray] = []
+        P_np1: list[np.ndarray] = []
         for rnp1 in range(K):
-            F    = p.f_matrix.F(rnp1)
-            b    = p.b(rnp1)                                      # (q+s, 1)
-            w_mu = sum(p_rn_rnp1[rn, rnp1] * self._mu[rn]  for rn in range(K))
-            w_P  = sum(p_rn_rnp1[rn, rnp1] * self._P_z[rn] for rn in range(K))
+            F = p.f_matrix.F(rnp1)
+            b = p.b(rnp1)  # (q+s, 1)
+            w_mu = sum(p_rn_rnp1[rn, rnp1] * self._mu[rn] for rn in range(K))
+            w_P = sum(p_rn_rnp1[rn, rnp1] * self._P_z[rn] for rn in range(K))
 
             Fw_mu = F @ w_mu
-            mu_np1.append(Fw_mu + b)                              # (17ter)
-            P_np1.append(_sym(
-                F @ w_P @ F.T
-                + Fw_mu @ b.T + b @ Fw_mu.T
-                + b @ b.T
-                + p.noise_cov.Sigma_W(rnp1)
-            ))
+            mu_np1.append(Fw_mu + b)  # (17ter)
+            P_np1.append(
+                _sym(
+                    F @ w_P @ F.T + Fw_mu @ b.T + b @ Fw_mu.T + b @ b.T + p.noise_cov.Sigma_W(rnp1)
+                )
+            )
 
         # ---- (13'),(14),(15),(18)  Transition density → π_{n+1} -----------
-        log_alpha  = np.full(K, -np.inf)
-        y_pred_acc = np.zeros_like(y_new)              # (s, 1)
+        log_alpha = np.full(K, -np.inf)
+        y_pred_acc = np.zeros_like(y_new)  # (s, 1)
 
         for rnp1 in range(K):
-            Sig_np1  = _sym(P_np1[rnp1] - mu_np1[rnp1] @ mu_np1[rnp1].T)
+            Sig_np1 = _sym(P_np1[rnp1] - mu_np1[rnp1] @ mu_np1[rnp1].T)
             S_YY_np1 = Sig_np1[q:, q:]
-            F        = p.f_matrix.F(rnp1)
+            F = p.f_matrix.F(rnp1)
 
             log_terms: list[float] = []
             for rn in range(K):
@@ -797,21 +789,23 @@ class GSSFilter:
                 if w < 1e-300:
                     continue
 
-                Sig_n  = _sym(self._P_z[rn] - self._mu[rn] @ self._mu[rn].T)
+                Sig_n = _sym(self._P_z[rn] - self._mu[rn] @ self._mu[rn].T)
                 mu_Y_n = self._mu[rn][q:]
                 S_YY_n = Sig_n[q:, q:]
 
-                Cov_Ynp1_Yn = (F @ Sig_n)[q:, q:]                  # (16)
-                M_t     = _safe_solve(S_YY_n.T, Cov_Ynp1_Yn.T).T   # (14)
-                Gamma   = _psd_floor(_sym(S_YY_np1 - M_t @ Cov_Ynp1_Yn.T))
+                Cov_Ynp1_Yn = (F @ Sig_n)[q:, q:]  # (16)
+                M_t = _safe_solve(S_YY_n.T, Cov_Ynp1_Yn.T).T  # (14)
+                Gamma = _psd_floor(_sym(S_YY_np1 - M_t @ Cov_Ynp1_Yn.T))
 
                 mu_Ynp1 = F[q:, :] @ self._mu[rn] + p.b(rnp1)[q:]
-                mean_c  = mu_Ynp1 + M_t @ (y_prev - mu_Y_n)
+                mean_c = mu_Ynp1 + M_t @ (y_prev - mu_Y_n)
 
                 y_pred_acc += w * mean_c
 
                 log_lik_c = multivariate_normal.logpdf(
-                    y_new.ravel(), mean=mean_c.ravel(), cov=Gamma,
+                    y_new.ravel(),
+                    mean=mean_c.ravel(),
+                    cov=Gamma,
                     allow_singular=True,
                 )
                 log_terms.append(np.log(w) + log_lik_c)
@@ -842,16 +836,19 @@ class GSSFilter:
                 pi_np1 /= s_pi
 
         # ---- (21'),(22)  Kalman update ------------------------------------
-        E_x_r:   list[np.ndarray] = []
+        E_x_r: list[np.ndarray] = []
         Var_x_r: list[np.ndarray] = []
         for rnp1 in range(K):
-            Sig  = _sym(P_np1[rnp1] - mu_np1[rnp1] @ mu_np1[rnp1].T)
-            mu_X = mu_np1[rnp1][:q]; mu_Y = mu_np1[rnp1][q:]
-            S_XX = Sig[:q, :q]; S_XY = Sig[:q, q:]; S_YY = Sig[q:, q:]
+            Sig = _sym(P_np1[rnp1] - mu_np1[rnp1] @ mu_np1[rnp1].T)
+            mu_X = mu_np1[rnp1][:q]
+            mu_Y = mu_np1[rnp1][q:]
+            S_XX = Sig[:q, :q]
+            S_XY = Sig[:q, q:]
+            S_YY = Sig[q:, q:]
 
-            M_r   = _safe_solve(S_YY.T, S_XY.T).T             # (21')
-            e_x   = mu_X + M_r @ (y_new - mu_Y)
-            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))     # (22)
+            M_r = _safe_solve(S_YY.T, S_XY.T).T  # (21')
+            e_x = mu_X + M_r @ (y_new - mu_Y)
+            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))  # (22)
 
             E_x_r.append(e_x)
             Var_x_r.append(var_x)
@@ -861,12 +858,13 @@ class GSSFilter:
         innov = y_new - y_pred_acc
 
         # ---- State update --------------------------------------------------
-        self._pi  = pi_np1
+        self._pi = pi_np1
         self._P_z = P_np1
-        self._mu  = mu_np1
+        self._mu = mu_np1
 
-        return FilterResult(n=self._n, E_x=E_x, E_xx=E_xx, pi=pi_np1,
-                            innovation=innov, log_lik=log_lik)
+        return FilterResult(
+            n=self._n, E_x=E_x, E_xx=E_xx, pi=pi_np1, innovation=innov, log_lik=log_lik
+        )
 
     # ------------------------------------------------------------------
     # Batch run methods
@@ -890,9 +888,9 @@ class GSSFilter:
     def run(
         self,
         N: int,
-        seed:       int | None              = None,
+        seed: int | None = None,
         output_dir: str | pathlib.Path | None = None,
-        model_name: str                     = "gss",
+        model_name: str = "gss",
     ) -> tuple[pathlib.Path | None, pd.DataFrame]:
         """
         Simulate N steps and run the filter jointly.
@@ -910,21 +908,21 @@ class GSSFilter:
 
         sim = GSSSimulator(p, N=N, seed=seed)
 
-        sim_rows:    list[list] = []
+        sim_rows: list[list] = []
         filter_rows: list[dict] = []
         t0 = time.perf_counter()
 
         for n, r, x, y in sim:
             result = self.step(y)
-            e_x    = result.E_x.ravel()
-            var_x  = result.Var_x.diagonal()
+            e_x = result.E_x.ravel()
+            var_x = result.Var_x.diagonal()
 
             sim_rows.append([n, r] + x.ravel().tolist() + y.ravel().tolist())
 
             row: dict = {"n": n}
-            row.update({f"E_x_{i}": float(e_x[i])       for i in range(q)})
-            row.update({f"V_x_{i}": float(var_x[i])      for i in range(q)})
-            row.update({f"p_r_{k}": float(result.pi[k])  for k in range(p.K)})
+            row.update({f"E_x_{i}": float(e_x[i]) for i in range(q)})
+            row.update({f"V_x_{i}": float(var_x[i]) for i in range(q)})
+            row.update({f"p_r_{k}": float(result.pi[k]) for k in range(p.K)})
             row["sq_err"] = float(np.sum((x.ravel() - e_x) ** 2))
             filter_rows.append(row)
 
@@ -936,13 +934,9 @@ class GSSFilter:
             output_dir = pathlib.Path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
             seed_str = str(seed) if seed is not None else "random"
-            fname    = f"simulated_{model_name}_N{N}_seed{seed_str}.csv"
+            fname = f"simulated_{model_name}_N{N}_seed{seed_str}.csv"
             sim_path = output_dir / fname
-            header   = (
-                ["n", "r"]
-                + [f"x_{i}" for i in range(q)]
-                + [f"y_{i}" for i in range(s)]
-            )
+            header = ["n", "r"] + [f"x_{i}" for i in range(q)] + [f"y_{i}" for i in range(s)]
             with sim_path.open("w", newline="", encoding="utf-8") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(header)
@@ -959,23 +953,21 @@ class GSSFilter:
 
         y_cols = [f"y_{i}" for i in range(s)]
         x_cols = [f"x_{i}" for i in range(q)]
-        has_x  = all(c in df_in.columns for c in x_cols)
+        has_x = all(c in df_in.columns for c in x_cols)
 
         rows: list[dict] = []
         for _, row_in in df_in.iterrows():
-            y      = row_in[y_cols].to_numpy(dtype=float).reshape(-1, 1)
+            y = row_in[y_cols].to_numpy(dtype=float).reshape(-1, 1)
             result = self.step(y)
-            e_x    = result.E_x.ravel()
-            var_x  = result.Var_x.diagonal()
+            e_x = result.E_x.ravel()
+            var_x = result.Var_x.diagonal()
 
-            row: dict = {
-                "n": int(row_in["n"]) if "n" in row_in.index else result.n
-            }
-            row.update({f"E_x_{i}": float(e_x[i])       for i in range(q)})
-            row.update({f"V_x_{i}": float(var_x[i])      for i in range(q)})
-            row.update({f"p_r_{k}": float(result.pi[k])  for k in range(p.K)})
+            row: dict = {"n": int(row_in["n"]) if "n" in row_in.index else result.n}
+            row.update({f"E_x_{i}": float(e_x[i]) for i in range(q)})
+            row.update({f"V_x_{i}": float(var_x[i]) for i in range(q)})
+            row.update({f"p_r_{k}": float(result.pi[k]) for k in range(p.K)})
             if has_x:
-                x_true     = row_in[x_cols].to_numpy(dtype=float)
+                x_true = row_in[x_cols].to_numpy(dtype=float)
                 row["sq_err"] = float(np.sum((x_true - e_x) ** 2))
             rows.append(row)
 
@@ -1054,15 +1046,15 @@ def _psd_floor(M: np.ndarray, eps: float = 1e-9) -> np.ndarray:
         return np.maximum(M, eps)
     vals, vecs = np.linalg.eigh(_sym(M))
     if vals.min() >= eps:
-        return M                        # already PSD — nothing to do
+        return M  # already PSD — nothing to do
     return vecs @ np.diag(np.maximum(vals, eps)) @ vecs.T
 
 
 def _mix(
-    pi:      np.ndarray,
-    E_x_r:   list[np.ndarray],
+    pi: np.ndarray,
+    E_x_r: list[np.ndarray],
     Var_x_r: list[np.ndarray],
-    K:       int,
+    K: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Marginalise over regimes.
@@ -1070,8 +1062,6 @@ def _mix(
     E[X|y]     = Σ_r π(r) E[X|r,y]
     E[XX^T|y]  = Σ_r π(r) (Var[X|r,y] + E[X|r,y] E[X|r,y]^T)
     """
-    E_x  = sum(pi[r] * E_x_r[r] for r in range(K))
-    E_xx = sum(
-        pi[r] * (Var_x_r[r] + E_x_r[r] @ E_x_r[r].T) for r in range(K)
-    )
+    E_x = sum(pi[r] * E_x_r[r] for r in range(K))
+    E_xx = sum(pi[r] * (Var_x_r[r] + E_x_r[r] @ E_x_r[r].T) for r in range(K))
     return E_x, _sym(E_xx)

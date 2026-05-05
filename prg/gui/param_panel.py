@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/gui/param_panel.py
 ======================
@@ -43,15 +42,24 @@ validity_changed signal.
 """
 
 import numpy as np
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QScrollArea,
-    QCheckBox, QPushButton,
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
 from prg.utils.h5_constraint import (
-    compute_A_from_h5, compute_B_from_h5, compute_SU_from_h5, compute_C_from_h5,
+    compute_A_from_h5,
+    compute_B_from_h5,
+    compute_C_from_h5,
+    compute_SU_from_h5,
 )
 
 # Pill style for constraint error messages (explicit background → readable on any theme)
@@ -65,36 +73,47 @@ _CONSTRAINT_ERR_STYLE = (
 # _StateTab
 # ---------------------------------------------------------------------------
 
+
 class _StateTab(QWidget):
     """One tab: F(k), Σ_W(k), μ_z0(k), b_X(k), b_Y(k) side by side,
     plus four mutually exclusive constraint checkboxes and a stability badge."""
 
-    validity_changed  = pyqtSignal(bool)
-    value_changed     = pyqtSignal()    # emitted whenever any cell changes
-    constraint_toggled = pyqtSignal()   # emitted when any checkbox is checked
+    validity_changed = pyqtSignal(bool)
+    value_changed = pyqtSignal()  # emitted whenever any cell changes
+    constraint_toggled = pyqtSignal()  # emitted when any checkbox is checked
 
     # Checkbox colour palette  (text-color, checked-fill, border)
     _CHK_STYLES = {
-        "A":  ("QCheckBox { color: #155399; font-weight: bold; font-size: 11px; }"
-               "QCheckBox::indicator:checked   { border: 2px solid #155399;"
-               "                                 background-color: #2980b9; }"
-               "QCheckBox::indicator:unchecked { border: 2px solid #155399; }"),
-        "B":  ("QCheckBox { color: #1a7a3a; font-weight: bold; font-size: 11px; }"
-               "QCheckBox::indicator:checked   { border: 2px solid #1a7a3a;"
-               "                                 background-color: #27ae60; }"
-               "QCheckBox::indicator:unchecked { border: 2px solid #1a7a3a; }"),
-        "SU": ("QCheckBox { color: #6c3483; font-weight: bold; font-size: 11px; }"
-               "QCheckBox::indicator:checked   { border: 2px solid #6c3483;"
-               "                                 background-color: #8e44ad; }"
-               "QCheckBox::indicator:unchecked { border: 2px solid #6c3483; }"),
-        "C":  ("QCheckBox { color: #a04000; font-weight: bold; font-size: 11px; }"
-               "QCheckBox::indicator:checked   { border: 2px solid #a04000;"
-               "                                 background-color: #e67e22; }"
-               "QCheckBox::indicator:unchecked { border: 2px solid #a04000; }"),
-        "delta": ("QCheckBox { color: #0e6655; font-weight: bold; font-size: 11px; }"
-                  "QCheckBox::indicator:checked   { border: 2px solid #0e6655;"
-                  "                                 background-color: #1abc9c; }"
-                  "QCheckBox::indicator:unchecked { border: 2px solid #0e6655; }"),
+        "A": (
+            "QCheckBox { color: #155399; font-weight: bold; font-size: 11px; }"
+            "QCheckBox::indicator:checked   { border: 2px solid #155399;"
+            "                                 background-color: #2980b9; }"
+            "QCheckBox::indicator:unchecked { border: 2px solid #155399; }"
+        ),
+        "B": (
+            "QCheckBox { color: #1a7a3a; font-weight: bold; font-size: 11px; }"
+            "QCheckBox::indicator:checked   { border: 2px solid #1a7a3a;"
+            "                                 background-color: #27ae60; }"
+            "QCheckBox::indicator:unchecked { border: 2px solid #1a7a3a; }"
+        ),
+        "SU": (
+            "QCheckBox { color: #6c3483; font-weight: bold; font-size: 11px; }"
+            "QCheckBox::indicator:checked   { border: 2px solid #6c3483;"
+            "                                 background-color: #8e44ad; }"
+            "QCheckBox::indicator:unchecked { border: 2px solid #6c3483; }"
+        ),
+        "C": (
+            "QCheckBox { color: #a04000; font-weight: bold; font-size: 11px; }"
+            "QCheckBox::indicator:checked   { border: 2px solid #a04000;"
+            "                                 background-color: #e67e22; }"
+            "QCheckBox::indicator:unchecked { border: 2px solid #a04000; }"
+        ),
+        "delta": (
+            "QCheckBox { color: #0e6655; font-weight: bold; font-size: 11px; }"
+            "QCheckBox::indicator:checked   { border: 2px solid #0e6655;"
+            "                                 background-color: #1abc9c; }"
+            "QCheckBox::indicator:unchecked { border: 2px solid #0e6655; }"
+        ),
     }
 
     def __init__(self, k: int, q: int, s: int, parent=None):
@@ -102,12 +121,12 @@ class _StateTab(QWidget):
         self._k = k
         self._q = q
         self._s = s
-        self._updating = False              # re-entrancy guard
+        self._updating = False  # re-entrancy guard
 
-        self._saved_A:     np.ndarray | None = None  # for H5 constraint on A
-        self._saved_B:     np.ndarray | None = None  # for H5 constraint on B
-        self._saved_C:     np.ndarray | None = None  # for H5 constraint on C
-        self._saved_SU:    np.ndarray | None = None  # for H5 constraint on Σ_U
+        self._saved_A: np.ndarray | None = None  # for H5 constraint on A
+        self._saved_B: np.ndarray | None = None  # for H5 constraint on B
+        self._saved_C: np.ndarray | None = None  # for H5 constraint on C
+        self._saved_SU: np.ndarray | None = None  # for H5 constraint on Σ_U
         self._saved_Delta: np.ndarray | None = None  # for Δ = 0 constraint
 
         # ── Main layout: checkbox row on top, matrix widgets below ──────
@@ -119,17 +138,19 @@ class _StateTab(QWidget):
         chk_row = QHBoxLayout()
         chk_row.setSpacing(16)
 
-        self._constraint_A_check     = QCheckBox(f"Constraint on A({k})")
-        self._constraint_B_check     = QCheckBox(f"Constraint on B({k})")
-        self._constraint_C_check     = QCheckBox(f"Constraint on C({k})")
-        self._constraint_SU_check    = QCheckBox(f"Constraint on Σ_U({k})")
+        self._constraint_A_check = QCheckBox(f"Constraint on A({k})")
+        self._constraint_B_check = QCheckBox(f"Constraint on B({k})")
+        self._constraint_C_check = QCheckBox(f"Constraint on C({k})")
+        self._constraint_SU_check = QCheckBox(f"Constraint on Σ_U({k})")
         self._constraint_delta_check = QCheckBox("Δ = 0")
 
-        for key, chk in [("A",     self._constraint_A_check),
-                          ("B",     self._constraint_B_check),
-                          ("C",     self._constraint_C_check),
-                          ("SU",    self._constraint_SU_check),
-                          ("delta", self._constraint_delta_check)]:
+        for key, chk in [
+            ("A", self._constraint_A_check),
+            ("B", self._constraint_B_check),
+            ("C", self._constraint_C_check),
+            ("SU", self._constraint_SU_check),
+            ("delta", self._constraint_delta_check),
+        ]:
             chk.setStyleSheet(self._CHK_STYLES[key])
             chk_row.addWidget(chk)
 
@@ -141,8 +162,11 @@ class _StateTab(QWidget):
         widgets_row.setSpacing(16)
 
         self._f_widget = MatrixTableWidget(
-            q, s, is_covariance=False,
-            title=f"<i>F</i>({k})", default_value=0.0,
+            q,
+            s,
+            is_covariance=False,
+            title=f"<i>F</i>({k})",
+            default_value=0.0,
         )
         self._f_widget.set_matrix(np.eye(q + s) * 0.5)
 
@@ -168,37 +192,50 @@ class _StateTab(QWidget):
         widgets_row.addLayout(f_col)
 
         self._sigma_widget = MatrixTableWidget(
-            q, s, is_covariance=True,
-            title=f"Σ<sub>W</sub>({k})", default_value=0.1,
+            q,
+            s,
+            is_covariance=True,
+            title=f"Σ<sub>W</sub>({k})",
+            default_value=0.1,
         )
 
         self._mu_widget = VectorWidget(
-            q + s, title=f"μ<sub>z₀</sub>({k})", default_value=0.0,
+            q + s,
+            title=f"μ<sub>z₀</sub>({k})",
+            default_value=0.0,
         )
         self._bx_widget = VectorWidget(
-            q, title=f"<i>b</i><sub>X</sub>({k})", default_value=0.0,
+            q,
+            title=f"<i>b</i><sub>X</sub>({k})",
+            default_value=0.0,
         )
         self._by_widget = VectorWidget(
-            s, title=f"<i>b</i><sub>Y</sub>({k})", default_value=0.0,
+            s,
+            title=f"<i>b</i><sub>Y</sub>({k})",
+            default_value=0.0,
         )
 
-        for w in (self._sigma_widget,
-                  self._mu_widget, self._bx_widget, self._by_widget):
+        for w in (self._sigma_widget, self._mu_widget, self._bx_widget, self._by_widget):
             _col = QVBoxLayout()
             _col.setContentsMargins(0, 0, 0, 0)
             _col.setSpacing(2)
             _col.addWidget(w)
             _col.addStretch()
             widgets_row.addLayout(_col)
-        widgets_row.addStretch()          # prevent horizontal expansion
+        widgets_row.addStretch()  # prevent horizontal expansion
         layout.addLayout(widgets_row)
-        layout.addStretch()               # push everything to the top
+        layout.addStretch()  # push everything to the top
 
         # ── Signal connections ──────────────────────────────────────────
-        for w in (self._f_widget, self._sigma_widget,
-                  self._mu_widget, self._bx_widget, self._by_widget):
+        for w in (
+            self._f_widget,
+            self._sigma_widget,
+            self._mu_widget,
+            self._bx_widget,
+            self._by_widget,
+        ):
             w.validity_changed.connect(self._on_child_validity)
-            w.value_changed.connect(self.value_changed)   # forward upward
+            w.value_changed.connect(self.value_changed)  # forward upward
 
         self._f_widget.value_changed.connect(self._on_value_changed)
         self._sigma_widget.value_changed.connect(self._on_value_changed)
@@ -246,8 +283,8 @@ class _StateTab(QWidget):
     def set_b(self, vec: np.ndarray) -> None:
         """Accept full (q+s, 1) vector and split into b_X / b_Y."""
         flat = np.asarray(vec).ravel()
-        self._bx_widget.set_vector(flat[:self._q])
-        self._by_widget.set_vector(flat[self._q:])
+        self._bx_widget.set_vector(flat[: self._q])
+        self._by_widget.set_vector(flat[self._q :])
 
     def is_valid(self) -> bool:
         return (
@@ -264,10 +301,14 @@ class _StateTab(QWidget):
 
     def get_active_h5_constraint(self) -> str | None:
         """Return the active H5 constraint name ("A", "B", "C", "SU") or None."""
-        if self._constraint_A_check.isChecked():   return "A"
-        if self._constraint_B_check.isChecked():   return "B"
-        if self._constraint_C_check.isChecked():   return "C"
-        if self._constraint_SU_check.isChecked():  return "SU"
+        if self._constraint_A_check.isChecked():
+            return "A"
+        if self._constraint_B_check.isChecked():
+            return "B"
+        if self._constraint_C_check.isChecked():
+            return "C"
+        if self._constraint_SU_check.isChecked():
+            return "SU"
         return None
 
     def get_delta_active(self) -> bool:
@@ -290,9 +331,9 @@ class _StateTab(QWidget):
             self._constraint_delta_check.setChecked(delta)
         # 2. Uncheck all H5 checkboxes that should be off
         _h5_map = {
-            "A":  self._constraint_A_check,
-            "B":  self._constraint_B_check,
-            "C":  self._constraint_C_check,
+            "A": self._constraint_A_check,
+            "B": self._constraint_B_check,
+            "C": self._constraint_C_check,
             "SU": self._constraint_SU_check,
         }
         for name, chk in _h5_map.items():
@@ -312,7 +353,7 @@ class _StateTab(QWidget):
             self._uncheck_h5_others(self._constraint_A_check)
             F = self._f_widget.get_matrix()
             if F is not None:
-                self._saved_A = F[:self._q, :self._q].copy()
+                self._saved_A = F[: self._q, : self._q].copy()
             self._recompute_A()
             self.constraint_toggled.emit()
         else:
@@ -323,7 +364,7 @@ class _StateTab(QWidget):
             self._uncheck_h5_others(self._constraint_B_check)
             F = self._f_widget.get_matrix()
             if F is not None:
-                self._saved_B = F[:self._q, self._q:].copy()
+                self._saved_B = F[: self._q, self._q :].copy()
             self._recompute_B()
             self.constraint_toggled.emit()
         else:
@@ -334,7 +375,7 @@ class _StateTab(QWidget):
             self._uncheck_h5_others(self._constraint_C_check)
             F = self._f_widget.get_matrix()
             if F is not None:
-                self._saved_C = F[self._q:, :self._q].copy()
+                self._saved_C = F[self._q :, : self._q].copy()
             self._recompute_C()
             self.constraint_toggled.emit()
         else:
@@ -345,7 +386,7 @@ class _StateTab(QWidget):
             self._uncheck_h5_others(self._constraint_SU_check)
             Sw = self._sigma_widget.get_matrix()
             if Sw is not None:
-                self._saved_SU = Sw[:self._q, :self._q].copy()
+                self._saved_SU = Sw[: self._q, : self._q].copy()
             self._recompute_SU()
             self.constraint_toggled.emit()
         else:
@@ -356,7 +397,7 @@ class _StateTab(QWidget):
         if checked:
             Sw = self._sigma_widget.get_matrix()
             if Sw is not None:
-                self._saved_Delta = Sw[:self._q, self._q:].copy()
+                self._saved_Delta = Sw[: self._q, self._q :].copy()
             self._recompute_delta()
             self.constraint_toggled.emit()
         else:
@@ -386,13 +427,19 @@ class _StateTab(QWidget):
         if F is None or Sw is None:
             return
 
-        A_new = self._call_constraint(compute_A_from_h5, dict(
-            B=F[:self._q, self._q:], C=F[self._q:, :self._q], D=F[self._q:, self._q:],
-            SU=Sw[:self._q, :self._q], Dt=Sw[:self._q, self._q:], SV=Sw[self._q:, self._q:],
-        ))
+        A_new = self._call_constraint(
+            compute_A_from_h5,
+            dict(
+                B=F[: self._q, self._q :],
+                C=F[self._q :, : self._q],
+                D=F[self._q :, self._q :],
+                SU=Sw[: self._q, : self._q],
+                Dt=Sw[: self._q, self._q :],
+                SV=Sw[self._q :, self._q :],
+            ),
+        )
         if A_new is None:
-            self._f_widget.set_constraint_status(
-                "✗  A — singular system", _CONSTRAINT_ERR_STYLE)
+            self._f_widget.set_constraint_status("✗  A — singular system", _CONSTRAINT_ERR_STYLE)
             return
 
         q = self._q
@@ -403,7 +450,8 @@ class _StateTab(QWidget):
         self._f_widget.set_block_editable(0, q, 0, q, False)
         self._updating = False
         self._f_widget.set_constraint_status(
-            "✓  A satisfies constraint (4.8)", "color: #155399; font-size: 10px;")
+            "✓  A satisfies constraint (4.8)", "color: #155399; font-size: 10px;"
+        )
         self._update_stability_badges()
 
     def _recompute_B(self) -> None:
@@ -413,13 +461,19 @@ class _StateTab(QWidget):
         if F is None or Sw is None:
             return
 
-        B_new = self._call_constraint(compute_B_from_h5, dict(
-            A=F[:self._q, :self._q], C=F[self._q:, :self._q], D=F[self._q:, self._q:],
-            SU=Sw[:self._q, :self._q], Dt=Sw[:self._q, self._q:], SV=Sw[self._q:, self._q:],
-        ))
+        B_new = self._call_constraint(
+            compute_B_from_h5,
+            dict(
+                A=F[: self._q, : self._q],
+                C=F[self._q :, : self._q],
+                D=F[self._q :, self._q :],
+                SU=Sw[: self._q, : self._q],
+                Dt=Sw[: self._q, self._q :],
+                SV=Sw[self._q :, self._q :],
+            ),
+        )
         if B_new is None:
-            self._f_widget.set_constraint_status(
-                "✗  B — singular system", _CONSTRAINT_ERR_STYLE)
+            self._f_widget.set_constraint_status("✗  B — singular system", _CONSTRAINT_ERR_STYLE)
             return
 
         q, s = self._q, self._s
@@ -430,7 +484,8 @@ class _StateTab(QWidget):
         self._f_widget.set_block_editable(0, q, q, q + s, False)
         self._updating = False
         self._f_widget.set_constraint_status(
-            "✓  B satisfies constraint (4.8)", "color: #1a7a3a; font-size: 10px;")
+            "✓  B satisfies constraint (4.8)", "color: #1a7a3a; font-size: 10px;"
+        )
         self._update_stability_badges()
 
     def _recompute_SU(self) -> None:
@@ -440,14 +495,21 @@ class _StateTab(QWidget):
         if F is None or Sw is None:
             return
 
-        SU_new = self._call_constraint(compute_SU_from_h5, dict(
-            A=F[:self._q, :self._q], B=F[:self._q, self._q:],
-            C=F[self._q:, :self._q], D=F[self._q:, self._q:],
-            Dt=Sw[:self._q, self._q:], SV=Sw[self._q:, self._q:],
-        ))
+        SU_new = self._call_constraint(
+            compute_SU_from_h5,
+            dict(
+                A=F[: self._q, : self._q],
+                B=F[: self._q, self._q :],
+                C=F[self._q :, : self._q],
+                D=F[self._q :, self._q :],
+                Dt=Sw[: self._q, self._q :],
+                SV=Sw[self._q :, self._q :],
+            ),
+        )
         if SU_new is None:
             self._sigma_widget.set_constraint_status(
-                "✗  Σ_U — singular system", _CONSTRAINT_ERR_STYLE)
+                "✗  Σ_U — singular system", _CONSTRAINT_ERR_STYLE
+            )
             return
 
         q = self._q
@@ -458,7 +520,8 @@ class _StateTab(QWidget):
         self._sigma_widget.set_block_editable(0, q, 0, q, False)
         self._updating = False
         self._sigma_widget.set_constraint_status(
-            "✓  Σ_U satisfies constraint (4.8)", "color: #6c3483; font-size: 10px;")
+            "✓  Σ_U satisfies constraint (4.8)", "color: #6c3483; font-size: 10px;"
+        )
 
     def _recompute_C(self) -> None:
         if not self._constraint_C_check.isChecked() or self._updating:
@@ -471,14 +534,22 @@ class _StateTab(QWidget):
         # Use the current C block as warm start (preserves continuity during editing)
         C_init = F[q:, :q].copy()
 
-        C_new = self._call_constraint(compute_C_from_h5, dict(
-            A=F[:q, :q], B=F[:q, q:], D=F[q:, q:],
-            SU=Sw[:q, :q], Dt=Sw[:q, q:], SV=Sw[q:, q:],
-            C_init=C_init,
-        ))
+        C_new = self._call_constraint(
+            compute_C_from_h5,
+            dict(
+                A=F[:q, :q],
+                B=F[:q, q:],
+                D=F[q:, q:],
+                SU=Sw[:q, :q],
+                Dt=Sw[:q, q:],
+                SV=Sw[q:, q:],
+                C_init=C_init,
+            ),
+        )
         if C_new is None:
             self._f_widget.set_constraint_status(
-                "✗  C — non-convergence / singular", _CONSTRAINT_ERR_STYLE)
+                "✗  C — non-convergence / singular", _CONSTRAINT_ERR_STYLE
+            )
             return
 
         new_F = F.copy()
@@ -488,8 +559,8 @@ class _StateTab(QWidget):
         self._f_widget.set_block_editable(q, q + s, 0, q, False)
         self._updating = False
         self._f_widget.set_constraint_status(
-            "✓  C satisfies constraint (4.20) [iter]",
-            "color: #a04000; font-size: 10px;")
+            "✓  C satisfies constraint (4.20) [iter]", "color: #a04000; font-size: 10px;"
+        )
         self._update_stability_badges()
 
     def _recompute_delta(self) -> None:
@@ -506,8 +577,8 @@ class _StateTab(QWidget):
 
         q, s = self._q, self._s
         new_Sw = Sw.copy()
-        new_Sw[:q, q:] = 0.0   # Δ  = 0
-        new_Sw[q:, :q] = 0.0   # Δᵀ = 0
+        new_Sw[:q, q:] = 0.0  # Δ  = 0
+        new_Sw[q:, :q] = 0.0  # Δᵀ = 0
         self._updating = True
         self._sigma_widget.set_matrix(new_Sw)
         # Lock both off-diagonal blocks (top-right and bottom-left)
@@ -609,21 +680,25 @@ class _StateTab(QWidget):
         n = self._q + self._s
         self._set_badge(self._stab_F_badge, "ρ(F)", F, 0, n, 0, n)
         self._set_badge(self._stab_A_badge, "ρ(A)", F, 0, self._q, 0, self._q)
-        self._set_badge(self._stab_D_badge, "ρ(D)", F,
-                        self._q, self._q + self._s,
-                        self._q, self._q + self._s)
+        self._set_badge(
+            self._stab_D_badge, "ρ(D)", F, self._q, self._q + self._s, self._q, self._q + self._s
+        )
 
     @staticmethod
     def _set_badge(
         badge: QLabel,
         label: str,
         F: np.ndarray | None,
-        r0: int, r1: int,
-        c0: int, c1: int,
+        r0: int,
+        r1: int,
+        c0: int,
+        c1: int,
     ) -> None:
         """Extract block F[r0:r1, c0:c1], compute its spectral radius, style *badge*."""
-        _GREY = ("font-size: 10px; padding: 2px 8px; border-radius: 3px;"
-                 "background: #e9ecef; color: #6c757d; border: 1px solid #adb5bd;")
+        _GREY = (
+            "font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+            "background: #e9ecef; color: #6c757d; border: 1px solid #adb5bd;"
+        )
         if F is None:
             badge.setText(f"{label} = ?")
             badge.setStyleSheet(_GREY)
@@ -667,14 +742,14 @@ class _StateTab(QWidget):
         F_rand = F_raw * (target / max(rho, 1e-10))
 
         # Random SPD Σ_W: Wishart-like L @ L.T + ε·I, diagonal ≈ 0.1–0.5
-        L  = rng.uniform(-0.5, 0.5, (n, n))
+        L = rng.uniform(-0.5, 0.5, (n, n))
         Sw = L @ L.T + 0.05 * np.eye(n)
         Sw = Sw / (np.sqrt(np.diag(Sw).mean()) / 0.3)
 
         self._f_widget.set_matrix(F_rand)
         self._sigma_widget.set_matrix(Sw)
         self._update_stability_badges()
-        self.constraint_toggled.emit()   # reset plots in main window
+        self.constraint_toggled.emit()  # reset plots in main window
 
     def _uncheck_h5_others(self, keep: QCheckBox) -> None:
         """Silently uncheck the other H5 checkboxes ({A, B, C, Σ_U}) except *keep*.
@@ -682,9 +757,9 @@ class _StateTab(QWidget):
         Δ=0 is intentionally NOT touched — it can coexist with any H5 constraint.
         """
         for chk, restore in [
-            (self._constraint_A_check,  self._restore_A),
-            (self._constraint_B_check,  self._restore_B),
-            (self._constraint_C_check,  self._restore_C),
+            (self._constraint_A_check, self._restore_A),
+            (self._constraint_B_check, self._restore_B),
+            (self._constraint_C_check, self._restore_C),
             (self._constraint_SU_check, self._restore_SU),
         ]:
             if chk is not keep and chk.isChecked():
@@ -720,6 +795,7 @@ class _StateTab(QWidget):
 # ParamPanel
 # ---------------------------------------------------------------------------
 
+
 class ParamPanel(QWidget):
     """
     QTabWidget with K tabs (one per Markov state).
@@ -730,9 +806,9 @@ class ParamPanel(QWidget):
         Emitted whenever the overall validity changes.
     """
 
-    validity_changed   = pyqtSignal(bool)
-    value_changed      = pyqtSignal()   # forwarded from any _StateTab cell edit
-    constraint_toggled = pyqtSignal()   # forwarded from any _StateTab
+    validity_changed = pyqtSignal(bool)
+    value_changed = pyqtSignal()  # forwarded from any _StateTab cell edit
+    constraint_toggled = pyqtSignal()  # forwarded from any _StateTab
 
     def __init__(self, K: int, q: int, s: int, parent=None):
         super().__init__(parent)
@@ -743,9 +819,7 @@ class ParamPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        info = QLabel(
-            f"K = {K} states,  q = {q} (hidden),  s = {s} (observed)"
-        )
+        info = QLabel(f"K = {K} states,  q = {q} (hidden),  s = {s} (observed)")
         info.setStyleSheet("font-size: 11px; padding: 2px 4px;")
         layout.addWidget(info)
 
@@ -756,7 +830,7 @@ class ParamPanel(QWidget):
         for k in range(K):
             tab = _StateTab(k, q, s)
             tab.validity_changed.connect(self._on_tab_validity)
-            tab.value_changed.connect(self.value_changed)   # forward upward
+            tab.value_changed.connect(self.value_changed)  # forward upward
             tab.constraint_toggled.connect(self.constraint_toggled)
 
             scroll = QScrollArea()
@@ -779,8 +853,7 @@ class ParamPanel(QWidget):
         btn_rand_corner = QPushButton("🎲")
         btn_rand_corner.setFixedSize(26, 22)
         btn_rand_corner.setToolTip(
-            "Randomize F(k) and Σ_W(k) for the current state\n"
-            "with random stable parameters."
+            "Randomize F(k) and Σ_W(k) for the current state\nwith random stable parameters."
         )
         btn_rand_corner.clicked.connect(
             lambda: self._state_tabs[self._tabs.currentIndex()]._randomize()
@@ -892,11 +965,12 @@ class ParamPanel(QWidget):
         if src_k < 0 or src_k >= self._K:
             return
         src = self._state_tabs[src_k]
-        h5    = src.get_active_h5_constraint()
+        h5 = src.get_active_h5_constraint()
         delta = src.get_delta_active()
         # If nothing is active in the source tab, let the user know and bail.
         if h5 is None and not delta:
             from PyQt6.QtWidgets import QMessageBox
+
             QMessageBox.information(
                 self,
                 "Apply H5 to all states",

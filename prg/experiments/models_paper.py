@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/experiments/models_paper.py
 ================================
@@ -38,15 +37,15 @@ __all__ = [
 
 MODEL_NAMES = ("M1", "M2", "M3")
 
-_H5_ASSERT_TOL = 1e-8   # tighter than filter's H5_TOL=1e-6 for ground-truth models
+_H5_ASSERT_TOL = 1e-8  # tighter than filter's H5_TOL=1e-6 for ground-truth models
 
 
 def _check_h5(name: str, k: int, A, B, C, D, SU, Dt, SV) -> None:
     """Raise AssertionError if H5 residual is too large."""
     res = compute_h5_residual(A, B, C, D, SU, Dt, SV)
-    Z   = Dt.T @ A + SV @ B.T
+    Z = Dt.T @ A + SV @ B.T
     scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
-    rel   = float(np.linalg.norm(res, "fro")) / scale
+    rel = float(np.linalg.norm(res, "fro")) / scale
     assert rel < _H5_ASSERT_TOL, (
         f"Model {name} regime k={k}: H5 residual {rel:.2e} >= {_H5_ASSERT_TOL:.0e}"
     )
@@ -55,6 +54,7 @@ def _check_h5(name: str, k: int, A, B, C, D, SU, Dt, SV) -> None:
 # ---------------------------------------------------------------------------
 # M1  —  K=2, q=1, s=1
 # ---------------------------------------------------------------------------
+
 
 def get_params_M1() -> dict:
     """
@@ -75,15 +75,14 @@ def get_params_M1() -> dict:
     """
     K, q, s = 2, 1, 1
 
-    P = np.array([[0.97, 0.03],
-                  [0.02, 0.98]])
+    P = np.array([[0.97, 0.03], [0.02, 0.98]])
 
     A_raw = [np.array([[0.8]]), np.array([[0.5]])]
     C_raw = [np.array([[0.2]]), np.array([[0.1]])]
     D_raw = [np.array([[0.7]]), np.array([[0.6]])]
-    SU    = [np.array([[0.10]]), np.array([[0.20]])]
-    Dt    = [np.array([[0.05]]), np.array([[0.02]])]
-    SV    = [np.array([[0.10]]), np.array([[0.15]])]
+    SU = [np.array([[0.10]]), np.array([[0.20]])]
+    Dt = [np.array([[0.05]]), np.array([[0.02]])]
+    SV = [np.array([[0.10]]), np.array([[0.15]])]
 
     B_list = []
     for k in range(K):
@@ -96,22 +95,32 @@ def get_params_M1() -> dict:
         np.array([[0.10], [0.05]]),
         np.array([[-0.05], [0.02]]),
     ]
-    mu_z0  = [np.zeros((dim_z, 1)) for _ in range(K)]
+    mu_z0 = [np.zeros((dim_z, 1)) for _ in range(K)]
     Sig_z0 = [np.eye(dim_z) for _ in range(K)]
 
     return dict(
-        K=K, q=q, s=s, P=P,
-        A_list=A_raw, B_list=B_list, C_list=C_raw, D_list=D_raw,
-        Sigma_U_list=SU, Delta_list=Dt, Sigma_V_list=SV,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        A_list=A_raw,
+        B_list=B_list,
+        C_list=C_raw,
+        D_list=D_raw,
+        Sigma_U_list=SU,
+        Delta_list=Dt,
+        Sigma_V_list=SV,
         b_list=b_list,
         pi0=None,
-        mu_z0_list=mu_z0, Sigma_z0_list=Sig_z0,
+        mu_z0_list=mu_z0,
+        Sigma_z0_list=Sig_z0,
     )
 
 
 # ---------------------------------------------------------------------------
 # M2  —  K=2, q=2, s=2
 # ---------------------------------------------------------------------------
+
 
 def get_params_M2() -> dict:
     """
@@ -123,8 +132,7 @@ def get_params_M2() -> dict:
     """
     K, q, s = 2, 2, 2
 
-    P = np.array([[0.97, 0.03],
-                  [0.02, 0.98]])
+    P = np.array([[0.97, 0.03], [0.02, 0.98]])
 
     A_raw = [
         np.array([[0.80, 0.10], [0.05, 0.70]]),
@@ -158,23 +166,33 @@ def get_params_M2() -> dict:
         B_list.append(B)
 
     dim_z = q + s
-    b_list  = [np.zeros((dim_z, 1)) for _ in range(K)]
-    mu_z0   = [np.zeros((dim_z, 1)) for _ in range(K)]
-    Sig_z0  = [np.eye(dim_z) for _ in range(K)]
+    b_list = [np.zeros((dim_z, 1)) for _ in range(K)]
+    mu_z0 = [np.zeros((dim_z, 1)) for _ in range(K)]
+    Sig_z0 = [np.eye(dim_z) for _ in range(K)]
 
     return dict(
-        K=K, q=q, s=s, P=P,
-        A_list=A_raw, B_list=B_list, C_list=C_raw, D_list=D_raw,
-        Sigma_U_list=SU, Delta_list=Dt, Sigma_V_list=SV,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        A_list=A_raw,
+        B_list=B_list,
+        C_list=C_raw,
+        D_list=D_raw,
+        Sigma_U_list=SU,
+        Delta_list=Dt,
+        Sigma_V_list=SV,
         b_list=b_list,
         pi0=None,
-        mu_z0_list=mu_z0, Sigma_z0_list=Sig_z0,
+        mu_z0_list=mu_z0,
+        Sigma_z0_list=Sig_z0,
     )
 
 
 # ---------------------------------------------------------------------------
 # M3  —  K=3, q=1, s=1
 # ---------------------------------------------------------------------------
+
 
 def get_params_M3() -> dict:
     """
@@ -185,13 +203,11 @@ def get_params_M3() -> dict:
     """
     K, q, s = 3, 1, 1
 
-    P = np.array([[0.95, 0.04, 0.01],
-                  [0.10, 0.80, 0.10],
-                  [0.02, 0.03, 0.95]])
+    P = np.array([[0.95, 0.04, 0.01], [0.10, 0.80, 0.10], [0.02, 0.03, 0.95]])
 
-    A_vals  = [0.85, 0.30, 0.65]
-    C_vals  = [0.25, 0.40, 0.10]
-    D_vals  = [0.65, 0.50, 0.75]
+    A_vals = [0.85, 0.30, 0.65]
+    C_vals = [0.25, 0.40, 0.10]
+    D_vals = [0.65, 0.50, 0.75]
     SU_vals = [0.08, 0.25, 0.12]
     Dt_vals = [0.04, 0.02, 0.06]
     SV_vals = [0.09, 0.18, 0.11]
@@ -199,9 +215,9 @@ def get_params_M3() -> dict:
     A_raw = [np.array([[v]]) for v in A_vals]
     C_raw = [np.array([[v]]) for v in C_vals]
     D_raw = [np.array([[v]]) for v in D_vals]
-    SU    = [np.array([[v]]) for v in SU_vals]
-    Dt    = [np.array([[v]]) for v in Dt_vals]
-    SV    = [np.array([[v]]) for v in SV_vals]
+    SU = [np.array([[v]]) for v in SU_vals]
+    Dt = [np.array([[v]]) for v in Dt_vals]
+    SV = [np.array([[v]]) for v in SV_vals]
 
     B_list = []
     for k in range(K):
@@ -209,22 +225,31 @@ def get_params_M3() -> dict:
         _check_h5("M3", k, A_raw[k], B, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
         B_list.append(B)
 
-    dim_z  = q + s
+    dim_z = q + s
     b_list = [
         np.array([[0.08], [0.03]]),
         np.zeros((dim_z, 1)),
         np.array([[-0.06], [-0.02]]),
     ]
-    mu_z0  = [np.zeros((dim_z, 1)) for _ in range(K)]
+    mu_z0 = [np.zeros((dim_z, 1)) for _ in range(K)]
     Sig_z0 = [np.eye(dim_z) for _ in range(K)]
 
     return dict(
-        K=K, q=q, s=s, P=P,
-        A_list=A_raw, B_list=B_list, C_list=C_raw, D_list=D_raw,
-        Sigma_U_list=SU, Delta_list=Dt, Sigma_V_list=SV,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        A_list=A_raw,
+        B_list=B_list,
+        C_list=C_raw,
+        D_list=D_raw,
+        Sigma_U_list=SU,
+        Delta_list=Dt,
+        Sigma_V_list=SV,
         b_list=b_list,
         pi0=None,
-        mu_z0_list=mu_z0, Sigma_z0_list=Sig_z0,
+        mu_z0_list=mu_z0,
+        Sigma_z0_list=Sig_z0,
     )
 
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/experiments/fill_placeholders.py
 ======================================
@@ -30,14 +29,15 @@ import sys
 import numpy as np
 import pandas as pd
 
-REPO_ROOT  = pathlib.Path(__file__).resolve().parents[2]   # → exactIMM/
-TEX_PATH   = REPO_ROOT / "paper" / "sections" / "06_experiments.tex"
-DATA_DIR   = REPO_ROOT / "data" / "experiments"
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]  # → exactIMM/
+TEX_PATH = REPO_ROOT / "paper" / "sections" / "06_experiments.tex"
+DATA_DIR = REPO_ROOT / "data" / "experiments"
 
 
 # ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
+
 
 def _f(val: float, decimals: int = 4) -> str:
     """Format a float; return '\\ph{?}' if NaN."""
@@ -45,11 +45,13 @@ def _f(val: float, decimals: int = 4) -> str:
         return r"\ph{?}"
     return f"{val:.{decimals}f}"
 
+
 def _pct(val: float, decimals: int = 1) -> str:
     """Format a fraction as percentage."""
     if not np.isfinite(val):
         return r"\ph{?}"
-    return f"{val*100:.{decimals}f}\\%"
+    return f"{val * 100:.{decimals}f}\\%"
+
 
 def _sci(val: float) -> str:
     """Format as LaTeX scientific notation, e.g. $10^{-10}$."""
@@ -63,6 +65,7 @@ def _sci(val: float) -> str:
 # Load data
 # ---------------------------------------------------------------------------
 
+
 def _load_csv(path: pathlib.Path) -> pd.DataFrame | None:
     if not path.exists():
         print(f"  SKIP (not found): {path.name}")
@@ -74,6 +77,7 @@ def _load_csv(path: pathlib.Path) -> pd.DataFrame | None:
 # ---------------------------------------------------------------------------
 # Build replacement dict: {placeholder_text: replacement_string}
 # ---------------------------------------------------------------------------
+
 
 def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
     """
@@ -103,29 +107,33 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
                 # LB-pass: fraction of runs where p-value > 0.05 (not rejected)
                 lb_pass_pct = float((g["lb_pval"] > 0.05).mean() * 100)
                 cpu_s = g["cpu_s"].mean()
-                cpu_us = cpu_s / N * 1e6       # µs per step
-                rep[f"RMSE M1 {m_tag} N{n_tag}"]    = _f(rmse)
-                rep[f"NEES M1 {m_tag} N{n_tag}"]    = _f(nees, 3)
-                rep[f"LB M1 {m_tag} N{n_tag}"]      = _f(lb_pass_pct, 0)
-                rep[f"CPU M1 {m_tag} N{n_tag}"]     = _f(cpu_us, 1)
+                cpu_us = cpu_s / N * 1e6  # µs per step
+                rep[f"RMSE M1 {m_tag} N{n_tag}"] = _f(rmse)
+                rep[f"NEES M1 {m_tag} N{n_tag}"] = _f(nees, 3)
+                rep[f"LB M1 {m_tag} N{n_tag}"] = _f(lb_pass_pct, 0)
+                rep[f"CPU M1 {m_tag} N{n_tag}"] = _f(cpu_us, 1)
 
         # ---- RMSE gap M1 h5 vs imm at N=2000 (narrative) ---------------
-        h5  = df[(df["model"]=="M1")&(df["N"]==2000)&(df["mode"]=="h5_exact")]["rmse"].mean()
-        imm = df[(df["model"]=="M1")&(df["N"]==2000)&(df["mode"]=="imm_general")]["rmse"].mean()
+        h5 = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "h5_exact")][
+            "rmse"
+        ].mean()
+        imm = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "imm_general")][
+            "rmse"
+        ].mean()
         if np.isfinite(h5) and np.isfinite(imm) and imm > 0:
             gap_pct = (imm - h5) / imm * 100
             rep["RMSE gap h5 vs imm M1 N2000 pct"] = _f(gap_pct, 1)
 
         # ---- NEES direction for narrative (above/below 1) ---------------
         for mode, m_tag in [("h5_exact", "h5"), ("imm_general", "imm")]:
-            g = df[(df["model"]=="M1")&(df["N"]==2000)&(df["mode"]==mode)]
+            g = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == mode)]
             if not g.empty:
                 nees_val = g["nees"].mean()
                 rep[f"NEES M1 {m_tag} N2000"] = _f(nees_val, 3)
 
         # ---- LB reject rate for narrative --------------------------------
         for mode, m_tag in [("h5_exact", "h5"), ("imm_general", "imm")]:
-            g = df[(df["model"]=="M1")&(df["N"]==2000)&(df["mode"]==mode)]
+            g = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == mode)]
             if not g.empty:
                 reject_pct = float((g["lb_pval"] < 0.05).mean() * 100)
                 rep[f"LB reject M1 {m_tag} N2000"] = _f(reject_pct, 0)
@@ -139,18 +147,16 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
                 lb_pass_pct = float((g["lb_pval"] > 0.05).mean() * 100)
                 rep[f"RMSE {model} {m_tag}"] = _f(g["rmse"].mean())
                 rep[f"NEES {model} {m_tag}"] = _f(g["nees"].mean(), 3)
-                rep[f"LB {model} {m_tag}"]   = _f(lb_pass_pct, 0)
+                rep[f"LB {model} {m_tag}"] = _f(lb_pass_pct, 0)
 
         # ---- BIC (K=2, true model, from h5_exact log-lik) ---------------
         # Note: proper BIC for K≠2 requires separate EM fits per K.
         # Here we only compute the K=2 BIC as a reference.
         from prg.experiments.metrics import dof_h5
-        sub_bic = df[(df["model"] == "M1") & (df["N"] == 2000)
-                     & (df["mode"] == "h5_exact")]
+
+        sub_bic = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "h5_exact")]
         d2 = dof_h5(2, 1, 1)
-        bic2 = sub_bic["log_lik"].dropna().apply(
-            lambda ll: d2 * np.log(2000) - 2.0 * ll
-        ).mean()
+        bic2 = sub_bic["log_lik"].dropna().apply(lambda ll: d2 * np.log(2000) - 2.0 * ll).mean()
         rep["BIC K2 M1 N2000"] = _f(bic2, 1)
 
     # ==================================================================
@@ -158,8 +164,7 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
     # ==================================================================
     df_sup = _load_csv(data_dir / "supervised_results.csv")
     if df_sup is not None:
-        for c in ("rel_err_F", "rel_err_b", "h5_residual",
-                  "rmse_estimated", "rmse_oracle"):
+        for c in ("rel_err_F", "rel_err_b", "h5_residual", "rmse_estimated", "rmse_oracle"):
             df_sup[c] = pd.to_numeric(df_sup[c], errors="coerce")
 
         for proj in ("none", "b", "a", "su"):
@@ -185,8 +190,7 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
     # ==================================================================
     df_em = _load_csv(data_dir / "em_results.csv")
     if df_em is not None:
-        for c in ("best_log_lik", "basin_rate", "rel_err_F",
-                  "rmse_estimated", "rmse_oracle"):
+        for c in ("best_log_lik", "basin_rate", "rel_err_F", "rmse_estimated", "rmse_oracle"):
             df_em[c] = pd.to_numeric(df_em[c], errors="coerce")
 
         for var in ("PH", "GEM"):
@@ -195,15 +199,14 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
                 g = sub[sub["N"] == N]
                 if g.empty:
                     continue
-                rep[f"EM basin {var} N{N}"]    = _pct(g["basin_rate"].mean())
-                rep[f"EM relF {var} N{N}"]     = _f(g["rel_err_F"].mean())
-                rep[f"EM niter {var} N{N}"]    = _f(g["best_n_iter"].mean(), 1)
-                rep[f"EM rmse {var} N{N}"]     = _f(g["rmse_estimated"].mean())
-                rep[f"EM rmse oracle N{N}"]    = _f(g["rmse_oracle"].mean())
+                rep[f"EM basin {var} N{N}"] = _pct(g["basin_rate"].mean())
+                rep[f"EM relF {var} N{N}"] = _f(g["rel_err_F"].mean())
+                rep[f"EM niter {var} N{N}"] = _f(g["best_n_iter"].mean(), 1)
+                rep[f"EM rmse {var} N{N}"] = _f(g["rmse_estimated"].mean())
+                rep[f"EM rmse oracle N{N}"] = _f(g["rmse_oracle"].mean())
 
         # ---- EM basin rate as function of n_inits (post-hoc) --------
-        sub_ph = df_em[(df_em["model"]=="M1") & (df_em["N"]==2000)
-                       & (df_em["variant"]=="PH")]
+        sub_ph = df_em[(df_em["model"] == "M1") & (df_em["N"] == 2000) & (df_em["variant"] == "PH")]
         for n_init in (1, 2, 3, 5):
             rates = []
             for _, row in sub_ph.iterrows():
@@ -215,9 +218,9 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
                     continue
                 # Global best over ALL stored restarts
                 global_best = max(ll for ll in all_lls if np.isfinite(ll))
-                threshold   = global_best - 0.01 * abs(global_best)
+                threshold = global_best - 0.01 * abs(global_best)
                 # Does any of the first n_init restarts reach the global basin?
-                lls   = all_lls[:n_init]
+                lls = all_lls[:n_init]
                 basin = any(ll >= threshold for ll in lls if np.isfinite(ll))
                 rates.append(float(basin))
             if rates:
@@ -247,16 +250,16 @@ def _replace_in_text(text: str, rep: dict[str, str]) -> tuple[str, int]:
         if key in rep:
             count += 1
             return rep[key]
-        return m.group(0)   # leave unchanged
+        return m.group(0)  # leave unchanged
 
     return _PH_RE.sub(_sub, text), count
 
 
 def fill_placeholders(
-    tex_path:  pathlib.Path = TEX_PATH,
-    data_dir:  pathlib.Path = DATA_DIR,
-    dry_run:   bool = False,
-    verbose:   bool = True,
+    tex_path: pathlib.Path = TEX_PATH,
+    data_dir: pathlib.Path = DATA_DIR,
+    dry_run: bool = False,
+    verbose: bool = True,
 ) -> int:
     """
     Fill ``\\ph{...}`` placeholders in *tex_path* with computed values.
@@ -314,11 +317,12 @@ if __name__ == "__main__":
         description="Fill \\ph{} placeholders in 06_experiments.tex.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--tex",      default=str(TEX_PATH))
+    parser.add_argument("--tex", default=str(TEX_PATH))
     parser.add_argument("--data-dir", default=str(DATA_DIR))
-    parser.add_argument("--dry-run",  action="store_true",
-                        help="Preview replacements without writing the file.")
-    parser.add_argument("--quiet",    action="store_true")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Preview replacements without writing the file."
+    )
+    parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     fill_placeholders(

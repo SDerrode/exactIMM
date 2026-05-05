@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/experiments/run_simulations.py
 ===================================
@@ -32,9 +31,8 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import sys
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -61,14 +59,15 @@ logger = logging.getLogger("exactIMM.experiments")
 # Default protocol parameters (overridable via run_all arguments)
 # ---------------------------------------------------------------------------
 
-DEFAULT_N_RUNS  = 100
-DEFAULT_N_LIST  = (500, 2_000, 5_000)
-DEFAULT_MODES   = ("h5_exact", "imm_general")
+DEFAULT_N_RUNS = 100
+DEFAULT_N_LIST = (500, 2_000, 5_000)
+DEFAULT_MODES = ("h5_exact", "imm_general")
 DEFAULT_OUT_DIR = pathlib.Path("data") / "experiments"
 
 # ---------------------------------------------------------------------------
 # Helper: build GSSParams from a parameter dict
 # ---------------------------------------------------------------------------
+
 
 def _params_from_dict(d: dict) -> GSSParams:
     """
@@ -77,19 +76,27 @@ def _params_from_dict(d: dict) -> GSSParams:
     Mirrors the logic of :meth:`GSSParams.from_model` without requiring a
     full ``BaseGSSModel`` object.
     """
-    f_matrix  = FMatrix(
-        K=d["K"], q=d["q"], s=d["s"],
-        A_list=d["A_list"], B_list=d["B_list"],
-        C_list=d["C_list"], D_list=d["D_list"],
+    f_matrix = FMatrix(
+        K=d["K"],
+        q=d["q"],
+        s=d["s"],
+        A_list=d["A_list"],
+        B_list=d["B_list"],
+        C_list=d["C_list"],
+        D_list=d["D_list"],
     )
     noise_cov = GSSNoiseCovariance(
-        K=d["K"], q=d["q"], s=d["s"],
+        K=d["K"],
+        q=d["q"],
+        s=d["s"],
         Sigma_U_list=d["Sigma_U_list"],
         Delta_list=d["Delta_list"],
         Sigma_V_list=d["Sigma_V_list"],
     )
     return GSSParams(
-        K=d["K"], q=d["q"], s=d["s"],
+        K=d["K"],
+        q=d["q"],
+        s=d["s"],
         P=d["P"],
         f_matrix=f_matrix,
         noise_cov=noise_cov,
@@ -104,12 +111,13 @@ def _params_from_dict(d: dict) -> GSSParams:
 # Single-trial runner
 # ---------------------------------------------------------------------------
 
+
 def run_one_trial(
-    model_name:  str,
-    N:           int,
-    seed:        int,
+    model_name: str,
+    N: int,
+    seed: int,
     filter_mode: str,
-    lb_lags:     int = 20,
+    lb_lags: int = 20,
 ) -> dict:
     """
     Execute one Monte-Carlo trial and return a metrics dict.
@@ -136,20 +144,19 @@ def run_one_trial(
     """
     # --- Build model and filter -------------------------------------------
     param_dict = get_params(model_name)
-    params     = _params_from_dict(param_dict)
-    K, q, s    = params.K, params.q, params.s
+    params = _params_from_dict(param_dict)
+    K, q, s = params.K, params.q, params.s
 
     # Suppress H5 warnings: models_paper.py already asserts H5 residual < 1e-8
-    import warnings
     filt = GSSFilter(params, mode=filter_mode)
 
     # --- Simulate ---------------------------------------------------------
     sim = GSSSimulator(params, N=N, seed=seed)
 
     x_true_list: list[np.ndarray] = []
-    x_est_list:  list[np.ndarray] = []
-    var_x_list:  list[np.ndarray] = []
-    innov_list:  list[np.ndarray] = []
+    x_est_list: list[np.ndarray] = []
+    var_x_list: list[np.ndarray] = []
+    innov_list: list[np.ndarray] = []
     log_lik_total = 0.0
 
     t0 = time.perf_counter()
@@ -157,40 +164,40 @@ def run_one_trial(
     for _, _r, x, y in sim:
         result = filt.step(y)
 
-        x_true_list.append(x.ravel())                       # (q,)
-        x_est_list .append(result.E_x.ravel())              # (q,)
-        var_x_list .append(result.Var_x)                    # (q, q)
-        innov_list .append(result.innovation.ravel())        # (s,)
+        x_true_list.append(x.ravel())  # (q,)
+        x_est_list.append(result.E_x.ravel())  # (q,)
+        var_x_list.append(result.Var_x)  # (q, q)
+        innov_list.append(result.innovation.ravel())  # (s,)
         log_lik_total += result.log_lik
 
     cpu_s = time.perf_counter() - t0
 
     # --- Stack arrays -----------------------------------------------------
-    x_true  = np.array(x_true_list)    # (N, q)
-    x_est   = np.array(x_est_list)     # (N, q)
-    var_x   = np.array(var_x_list)     # (N, q, q)
-    innov   = np.array(innov_list)      # (N, s)
-    errors  = x_true - x_est           # (N, q)
+    x_true = np.array(x_true_list)  # (N, q)
+    x_est = np.array(x_est_list)  # (N, q)
+    var_x = np.array(var_x_list)  # (N, q, q)
+    innov = np.array(innov_list)  # (N, s)
+    errors = x_true - x_est  # (N, q)
 
     # --- Metrics ----------------------------------------------------------
-    rmse   = compute_rmse(x_true, x_est)
-    nees   = compute_nees(errors, var_x)
-    lb     = compute_ljung_box(innov, lags=lb_lags)
-    jb     = compute_jarque_bera(innov)
-    bic    = compute_bic(log_lik_total, N, K, q, s)
+    rmse = compute_rmse(x_true, x_est)
+    nees = compute_nees(errors, var_x)
+    lb = compute_ljung_box(innov, lags=lb_lags)
+    jb = compute_jarque_bera(innov)
+    bic = compute_bic(log_lik_total, N, K, q, s)
 
     return {
-        "model":   model_name,
-        "N":       N,
-        "seed":    seed,
-        "mode":    filter_mode,
-        "rmse":    rmse,
-        "nees":    nees,
+        "model": model_name,
+        "N": N,
+        "seed": seed,
+        "mode": filter_mode,
+        "rmse": rmse,
+        "nees": nees,
         "lb_pval": lb,
         "jb_pval": jb,
         "log_lik": log_lik_total,
-        "bic":     bic,
-        "cpu_s":   cpu_s,
+        "bic": bic,
+        "cpu_s": cpu_s,
     }
 
 
@@ -198,14 +205,15 @@ def run_one_trial(
 # Full Monte-Carlo runner
 # ---------------------------------------------------------------------------
 
+
 def run_all(
-    models:     Sequence[str]       = MODEL_NAMES,
-    N_list:     Sequence[int]       = DEFAULT_N_LIST,
-    modes:      Sequence[str]       = DEFAULT_MODES,
-    n_runs:     int                 = DEFAULT_N_RUNS,
-    lb_lags:    int                 = 20,
-    output_dir: str | pathlib.Path  = DEFAULT_OUT_DIR,
-    verbose:    bool                = True,
+    models: Sequence[str] = MODEL_NAMES,
+    N_list: Sequence[int] = DEFAULT_N_LIST,
+    modes: Sequence[str] = DEFAULT_MODES,
+    n_runs: int = DEFAULT_N_RUNS,
+    lb_lags: int = 20,
+    output_dir: str | pathlib.Path = DEFAULT_OUT_DIR,
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """
     Run the full Monte-Carlo simulation study and save results to CSV.
@@ -245,7 +253,7 @@ def run_all(
         )
 
     rows: list[dict] = []
-    done  = 0
+    done = 0
     t_all = time.perf_counter()
 
     for model_name in models:
@@ -263,15 +271,24 @@ def run_all(
                     except Exception as exc:
                         logger.error(
                             "Trial failed: model=%s N=%d mode=%s seed=%d — %s",
-                            model_name, N, mode, seed, exc,
+                            model_name,
+                            N,
+                            mode,
+                            seed,
+                            exc,
                         )
                         row = {
-                            "model": model_name, "N": N,
-                            "seed": seed,        "mode": mode,
-                            "rmse": float("nan"), "nees": float("nan"),
-                            "lb_pval": float("nan"), "jb_pval": float("nan"),
-                            "log_lik": float("nan"), "bic": float("nan"),
-                            "cpu_s":   float("nan"),
+                            "model": model_name,
+                            "N": N,
+                            "seed": seed,
+                            "mode": mode,
+                            "rmse": float("nan"),
+                            "nees": float("nan"),
+                            "lb_pval": float("nan"),
+                            "jb_pval": float("nan"),
+                            "log_lik": float("nan"),
+                            "bic": float("nan"),
+                            "cpu_s": float("nan"),
                         }
 
                     rows.append(row)
@@ -303,6 +320,7 @@ def run_all(
 # Quick summary of results
 # ---------------------------------------------------------------------------
 
+
 def _summary_table(df: pd.DataFrame) -> str:
     """Return a compact text summary of mean metrics per (model, N, mode)."""
     lines = [
@@ -326,41 +344,56 @@ def _summary_table(df: pd.DataFrame) -> str:
 # Command-line entry point
 # ---------------------------------------------------------------------------
 
+
 def _parse_args(argv: list[str] | None = None):
     import argparse
+
     parser = argparse.ArgumentParser(
         description="Run the Monte-Carlo simulation study (paper §6).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--models", nargs="+", default=list(MODEL_NAMES),
+        "--models",
+        nargs="+",
+        default=list(MODEL_NAMES),
         choices=list(MODEL_NAMES),
         help="Models to evaluate.",
     )
     parser.add_argument(
-        "--N-list", nargs="+", type=int, default=list(DEFAULT_N_LIST),
+        "--N-list",
+        nargs="+",
+        type=int,
+        default=list(DEFAULT_N_LIST),
         dest="N_list",
         help="Sequence lengths.",
     )
     parser.add_argument(
-        "--modes", nargs="+", default=list(DEFAULT_MODES),
+        "--modes",
+        nargs="+",
+        default=list(DEFAULT_MODES),
         choices=["h5_exact", "imm_general"],
         help="Filter modes.",
     )
     parser.add_argument(
-        "--n-runs", type=int, default=DEFAULT_N_RUNS,
+        "--n-runs",
+        type=int,
+        default=DEFAULT_N_RUNS,
         help="Number of MC runs (seeds 0..n_runs-1).",
     )
     parser.add_argument(
-        "--lb-lags", type=int, default=20,
+        "--lb-lags",
+        type=int,
+        default=20,
         help="Number of lags for Ljung-Box test.",
     )
     parser.add_argument(
-        "--output-dir", default=str(DEFAULT_OUT_DIR),
+        "--output-dir",
+        default=str(DEFAULT_OUT_DIR),
         help="Output directory for mc_results.csv.",
     )
     parser.add_argument(
-        "--quiet", action="store_true",
+        "--quiet",
+        action="store_true",
         help="Suppress progress output.",
     )
     return parser.parse_args(argv)

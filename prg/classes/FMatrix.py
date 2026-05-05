@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/classes/FMatrix.py
 ======================
@@ -88,9 +87,7 @@ class FMatrix:
 
         # Pre-build full F(k) matrices and cache them
         self._F: list[np.ndarray] = [
-            np.block([[self._A[k], self._B[k]],
-                      [self._C[k], self._D[k]]])
-            for k in range(self._K)
+            np.block([[self._A[k], self._B[k]], [self._C[k], self._D[k]]]) for k in range(self._K)
         ]
 
     # ------------------------------------------------------------------
@@ -108,24 +105,23 @@ class FMatrix:
 
     @staticmethod
     def _validate_blocks(
-        K: int, q: int, s: int,
-        A_list: list, B_list: list, C_list: list, D_list: list,
+        K: int,
+        q: int,
+        s: int,
+        A_list: list,
+        B_list: list,
+        C_list: list,
+        D_list: list,
     ) -> None:
-        expected = {"A_list": (q, q), "B_list": (q, s),
-                    "C_list": (s, q), "D_list": (s, s)}
+        expected = {"A_list": (q, q), "B_list": (q, s), "C_list": (s, q), "D_list": (s, s)}
         for name, lst in zip(expected, [A_list, B_list, C_list, D_list]):
             if not isinstance(lst, (list, tuple)) or len(lst) != K:
-                raise ParamError(
-                    f"{name} must be a list of {K} arrays, got length {len(lst)}."
-                )
+                raise ParamError(f"{name} must be a list of {K} arrays, got length {len(lst)}.")
             shape = expected[name]
             for k, arr in enumerate(lst):
                 arr = np.asarray(arr)
                 if arr.shape != shape:
-                    raise ParamError(
-                        f"{name}[{k}] must have shape {shape}, "
-                        f"got {arr.shape}."
-                    )
+                    raise ParamError(f"{name}[{k}] must have shape {shape}, got {arr.shape}.")
 
     # ------------------------------------------------------------------
     # Public interface

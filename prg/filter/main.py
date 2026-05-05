@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/filter/main.py
 ==================
@@ -45,7 +44,7 @@ from prg.utils.exceptions import GSSError
 from prg.utils.h5_constraint import apply_h5_constraint
 
 # ---------------------------------------------------------------------------
-_CONFIG_FILENAME  = "config.toml"
+_CONFIG_FILENAME = "config.toml"
 _DEFAULT_LOG_LEVEL = "INFO"
 
 
@@ -73,15 +72,15 @@ def _load_config(root: pathlib.Path) -> dict:
 
 def _setup_logging(
     log_level: str,
-    logs_dir:  pathlib.Path,
-    tag:       str,
-    verbose:   int,
+    logs_dir: pathlib.Path,
+    tag: str,
+    verbose: int,
 ) -> None:
     logs_dir.mkdir(parents=True, exist_ok=True)
-    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = logs_dir / f"filter_{tag}_{ts}.log"
-    numeric  = getattr(logging, log_level.upper(), logging.INFO)
-    fmt      = logging.Formatter(
+    numeric = getattr(logging, log_level.upper(), logging.INFO)
+    fmt = logging.Formatter(
         fmt="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
         datefmt="%H:%M:%S",
     )
@@ -108,16 +107,12 @@ def _load_model(model_name: str) -> BaseGSSModel:
     try:
         module = importlib.import_module(module_path)
     except ImportError as exc:
-        logging.getLogger("exactIMM").error(
-            "Cannot import model '%s': %s", module_path, exc
-        )
+        logging.getLogger("exactIMM").error("Cannot import model '%s': %s", module_path, exc)
         sys.exit(1)
     for _, obj in inspect.getmembers(module, inspect.isclass):
         if issubclass(obj, BaseGSSModel) and obj is not BaseGSSModel:
             return obj()
-    logging.getLogger("exactIMM").error(
-        "No BaseGSSModel subclass found in '%s'.", module_path
-    )
+    logging.getLogger("exactIMM").error("No BaseGSSModel subclass found in '%s'.", module_path)
     sys.exit(1)
 
 
@@ -133,41 +128,63 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--model", required=True, metavar="MODEL",
+        "--model",
+        required=True,
+        metavar="MODEL",
         help="Model name in prg/models/ (e.g. model_gss_K2_q1_s1).",
     )
     parser.add_argument(
-        "--csv", default=None, metavar="PATH",
+        "--csv",
+        default=None,
+        metavar="PATH",
         help="Path to an existing simulation CSV.  "
-             "If omitted, a new simulation is run (-N required).",
+        "If omitted, a new simulation is run (-N required).",
     )
     parser.add_argument(
-        "-N", dest="N", type=int, default=None, metavar="N",
+        "-N",
+        dest="N",
+        type=int,
+        default=None,
+        metavar="N",
         help="Number of time steps to simulate (required without --csv).",
     )
     parser.add_argument(
-        "--seed", type=int, default=None, metavar="SEED",
+        "--seed",
+        type=int,
+        default=None,
+        metavar="SEED",
         help="RNG seed for simulation (ignored when --csv is supplied).",
     )
     parser.add_argument(
-        "--output", default=None, metavar="FILENAME",
+        "--output",
+        default=None,
+        metavar="FILENAME",
         help="Output CSV for filter results (auto-generated if omitted).",
     )
     parser.add_argument(
-        "--log-level", default=None, metavar="LEVEL",
+        "--log-level",
+        default=None,
+        metavar="LEVEL",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
     parser.add_argument(
-        "--no-save", action="store_true",
+        "--no-save",
+        action="store_true",
         help="Do not write any CSV (dry run).",
     )
     parser.add_argument(
-        "--constraint", action="store_true",
+        "--constraint",
+        action="store_true",
         help="Enforce the H5 constraint (eq. 4.8): recompute every B(k) "
-             "from A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k) before filtering.",
+        "from A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k) before filtering.",
     )
     parser.add_argument(
-        "-v", "--verbose", type=int, default=1, choices=[0, 1, 2], metavar="LEVEL",
+        "-v",
+        "--verbose",
+        type=int,
+        default=1,
+        choices=[0, 1, 2],
+        metavar="LEVEL",
         help="Console verbosity: 0=silent  1=normal  2=debug.",
     )
     return parser
@@ -180,22 +197,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     parser = _build_parser()
-    args   = parser.parse_args()
+    args = parser.parse_args()
 
     # Validate: need -N when --csv is not given
     if args.csv is None and args.N is None:
         parser.error("Either --csv PATH or -N N is required.")
 
     root = _project_root()
-    cfg  = _load_config(root)
+    cfg = _load_config(root)
 
-    log_level = (
-        args.log_level
-        or cfg.get("general", {}).get("log_level", _DEFAULT_LOG_LEVEL)
-    )
-    paths_cfg  = cfg.get("paths", {})
-    logs_dir   = root / paths_cfg.get("logs", "logs")
-    data_dir   = root / paths_cfg.get("data_simulated", "data/simulated")
+    log_level = args.log_level or cfg.get("general", {}).get("log_level", _DEFAULT_LOG_LEVEL)
+    paths_cfg = cfg.get("paths", {})
+    logs_dir = root / paths_cfg.get("logs", "logs")
+    data_dir = root / paths_cfg.get("data_simulated", "data/simulated")
 
     tag = f"{args.model}_N{args.N or 'csv'}_seed{args.seed or 'random'}"
     _setup_logging(log_level, logs_dir, tag, args.verbose)
@@ -236,6 +250,7 @@ def main() -> None:
         # ---- Dry run ----
         if args.csv:
             import pandas as pd
+
             df_in = pd.read_csv(pathlib.Path(args.csv))
             y_cols = [f"y_{i}" for i in range(params.s)]
             for _, row in df_in.iterrows():
@@ -243,6 +258,7 @@ def main() -> None:
                 filt.step(y)
         else:
             from prg.classes.GSSSimulator import GSSSimulator
+
             sim = GSSSimulator(params, N=args.N, seed=args.seed)
             for _, _r, _x, y in sim:
                 filt.step(y)
@@ -291,8 +307,9 @@ def _resolve_output(
         return p
     data_dir.mkdir(parents=True, exist_ok=True)
     seed_str = str(seed) if seed is not None else "random"
-    n_str    = str(N) if N is not None else "csv"
+    n_str = str(N) if N is not None else "csv"
     from datetime import datetime
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return data_dir / f"filter_{model_name}_N{n_str}_seed{seed_str}_{ts}.csv"
 

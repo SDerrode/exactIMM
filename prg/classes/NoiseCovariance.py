@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 prg/classes/NoiseCovariance.py
 ==============================
@@ -93,15 +92,17 @@ class GSSNoiseCovariance:
         self._dim_z = q + s
 
         self._Sigma_U = [np.array(M, dtype=float) for M in Sigma_U_list]
-        self._Delta   = [np.array(M, dtype=float) for M in Delta_list]
+        self._Delta = [np.array(M, dtype=float) for M in Delta_list]
         self._Sigma_V = [np.array(M, dtype=float) for M in Sigma_V_list]
 
         # Build full Sigma_W(k) for each state
         self._Sigma_W: list[np.ndarray] = [
-            np.block([
-                [self._Sigma_U[k], self._Delta[k]],
-                [self._Delta[k].T, self._Sigma_V[k]],
-            ])
+            np.block(
+                [
+                    [self._Sigma_U[k], self._Delta[k]],
+                    [self._Delta[k].T, self._Sigma_V[k]],
+                ]
+            )
             for k in range(self._K)
         ]
 
@@ -132,27 +133,26 @@ class GSSNoiseCovariance:
 
     @staticmethod
     def _validate_blocks(
-        K: int, q: int, s: int,
-        Sigma_U_list: list, Delta_list: list, Sigma_V_list: list,
+        K: int,
+        q: int,
+        s: int,
+        Sigma_U_list: list,
+        Delta_list: list,
+        Sigma_V_list: list,
     ) -> None:
         expected = {
             "Sigma_U_list": (q, q),
-            "Delta_list":   (q, s),
+            "Delta_list": (q, s),
             "Sigma_V_list": (s, s),
         }
         for name, lst in zip(expected, [Sigma_U_list, Delta_list, Sigma_V_list]):
             if not isinstance(lst, (list, tuple)) or len(lst) != K:
-                raise ParamError(
-                    f"{name} must be a list of {K} arrays, got length {len(lst)}."
-                )
+                raise ParamError(f"{name} must be a list of {K} arrays, got length {len(lst)}.")
             shape = expected[name]
             for k, arr in enumerate(lst):
                 arr = np.asarray(arr)
                 if arr.shape != shape:
-                    raise ParamError(
-                        f"{name}[{k}] must have shape {shape}, "
-                        f"got {arr.shape}."
-                    )
+                    raise ParamError(f"{name}[{k}] must have shape {shape}, got {arr.shape}.")
 
     # ------------------------------------------------------------------
     # Properties

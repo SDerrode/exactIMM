@@ -23,8 +23,23 @@ cd ..
 git clone https://github.com/SDerrode/exactIMM.wiki.git
 
 # Each time you update wiki/*.md, rsync and push.
-rsync -av --delete --exclude README.md exactIMM/wiki/ exactIMM.wiki/
-cd exactIMM.wiki
+# IMPORTANT: --exclude='.git/' is required — without it, rsync --delete
+# would wipe the wiki repo's .git/ directory (destination matches source,
+# and the local wiki/ source has no .git/). --exclude='.gitignore' keeps
+# the wiki free of a file that's only meaningful in the main repo.
+WIKI_DIR=exactIMM.wiki
+# Guard: re-clone if the directory exists but its .git/ is missing
+# (e.g. wiped by a previous bad rsync).
+if [ -d "$WIKI_DIR" ] && [ ! -d "$WIKI_DIR/.git" ]; then
+    rm -rf "$WIKI_DIR"
+    git clone https://github.com/SDerrode/exactIMM.wiki.git "$WIKI_DIR"
+fi
+rsync -av --delete \
+    --exclude='.git/' \
+    --exclude='.gitignore' \
+    --exclude='README.md' \
+    exactIMM/wiki/ "$WIKI_DIR/"
+cd "$WIKI_DIR"
 git add . && git commit -m "Update wiki" && git push
 ```
 

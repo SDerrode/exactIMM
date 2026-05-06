@@ -12,9 +12,10 @@ Filters compared (extensible — baselines plug in via the FILTERS dict):
     h5_exact        : our filter under (H5) assumption (biased if B≠0)
     imm_general     : our filter, general IMM recursion
     kalman_k1       : single Kalman (K=1, no regime switching)
-    imm_standard    : Blom-Bar-Shalom approximate IMM            [TODO]
-    gpb2            : Generalized Pseudo-Bayesian order 2         [TODO]
-    rbpf            : Rao-Blackwellised particle filter            [TODO]
+
+Additional benchmark baselines (Blom-Bar-Shalom IMM, GPB2,
+Rao-Blackwellised particle filter) are tracked separately:
+https://github.com/SDerrode/exactIMM/issues/5
 
 Outputs
 -------

@@ -12,7 +12,7 @@ prg/
 ├── models/         # Built-in BaseGSSModel subclasses
 ├── experiments/    # Paper-reproduction pipelines (§6, §7)
 ├── gui/            # PyQt6 interface (optional)
-├── utils/          # Errors, matrix checks, H5 closed form
+├── utils/          # Errors, matrix checks, AB constraint closed form
 ├── simulate.py     # CLI: simulator
 └── filter/main.py  # CLI: filter
 ```
@@ -75,9 +75,9 @@ fairness comparison).
 
 ### `fit_supervised(rs, xs, ys, K, q, s, constraint=None, …)`
 
-Per-regime weighted OLS in closed form. `constraint ∈ {'a','b','su'}`
-applies a post-hoc H5 projection. Returns a parameter dict ready for
-`GSSParams`.
+Per-regime weighted OLS in closed form. `constraint='ab'` applies a
+post-hoc (H5)-compatible AB projection. Returns a parameter dict
+ready for `GSSParams`.
 
 ### `fit_semi_supervised(xs, ys, K, n_inits=10, max_iter=100, constraint=None, constraint_each_iter=False, …)`
 
@@ -92,14 +92,21 @@ constraint holds throughout).
 
 ## Utilities
 
-### `apply_h5_constraint(params)`
+### `apply_AB_constraint(params)`
 
-Recompute \(B(k)\) for every regime from \(A, C, D, \Sigma_U,
-\Delta, \Sigma_V, P\) using the closed-form (H5) identity.
+Recompute \(A(k)\) and \(B(k)\) for every regime from
+\((C, D, \Delta, \Sigma_V)\) via the closed-form AB constraint
+\(A = \Delta\,\Sigma_V^{-1}\,C\), \(B = \Delta\,\Sigma_V^{-1}\,D\).
 
-### `compute_B_from_h5(A, C, D, Su, Delta, Sv, P, k)`
+### `compute_AB(C, D, Delta, Sv)`
 
-Same, for a single regime. Useful in tests.
+Same, for a single regime. Returns the tuple `(A, B)`.
+
+### `compute_h5_residual(A, B, C, D, Su, Delta, Sv)`
+
+Frobenius-norm residual of the (H5) algebraic identity
+\(\Delta^T A^T + \Sigma_V B^T - P M^{-1}(Q A^T + R B^T + \Delta^T)\).
+Returns a `(s, q)` array; \(\|F\|_F = 0\) iff (H5) holds.
 
 ### Error hierarchy
 

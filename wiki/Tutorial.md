@@ -29,12 +29,12 @@ regime probabilities.
 # Supervised (R is in the CSV)
 python -m prg.learning.supervised \
     data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv \
-    --constraint b --output prg/models/model_learned_K2.py
+    --constraint ab --output prg/models/model_learned_K2.py
 
 # Semi-supervised (ignores the r column, recovers regimes by EM)
 python -m prg.learning.semi_supervised \
     data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv \
-    -K 2 --constraint b --n-inits 5 --output prg/models/model_em_K2.py
+    -K 2 --constraint ab --n-inits 5 --output prg/models/model_em_K2.py
 ```
 
 Both write a Python file containing a `BaseGSSModel` subclass with

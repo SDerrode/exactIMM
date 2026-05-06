@@ -87,7 +87,8 @@ def compute_h5_residual(
     M = Q @ C.T + R @ D.T + SV
     W = Q @ A.T + R @ B.T + Dt.T
     Z = Dt.T @ A.T + SV @ B.T
-    return Z - P @ np.linalg.solve(M, W)
+    residual: np.ndarray = Z - P @ np.linalg.solve(M, W)
+    return residual
 
 
 # ---------------------------------------------------------------------------

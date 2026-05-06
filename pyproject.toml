@@ -27,6 +27,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov",
     "pytest-qt>=4.4",
+    "mypy>=1.10",
     "ruff>=0.6",
 ]
 paper = [
@@ -49,6 +50,19 @@ addopts = "-v --tb=short"
 [tool.coverage.run]
 source = ["prg"]
 omit = ["tests/*"]
+
+[tool.mypy]
+# Strict typing is enforced only on prg/utils/h5_constraint.py (the
+# central, mathematical, well-tested module).  Other modules are
+# imported in "silent" mode to avoid noise from incomplete annotations
+# in numpy stubs and the rest of the codebase.
+files = ["prg/utils/h5_constraint.py"]
+strict = true
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

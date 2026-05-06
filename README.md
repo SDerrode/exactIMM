@@ -92,7 +92,7 @@ exactIMM/
 │   ├── baselines/
 │   ├── figures/
 │   └── e{1,2,3}_*.py
-├── tests/                      # 201 pytest tests
+├── tests/                      # 209 pytest tests
 ├── data/
 │   ├── simulated/              # Generated CSV files (gitignored)
 │   └── real/                   # Real datasets: ENSO (NOAA SST), SP500/VIX
@@ -606,8 +606,8 @@ removed (see `scripts/build_enso_csv.py` if you need a clean rebuild).
 
 - All scripts accept `--seed` (default 42) and write `*_summary.json`
   alongside `*.tex` for byte-level reproducibility.
-- The 204-test suite (`pytest`) runs in under a minute and validates
-  the underlying components (filter, EM, projections, H5 constraint)
+- The 209-test suite (`pytest`) runs in under a minute and validates
+  the underlying components (filter, EM, AB constraint, GUI badges)
   on which the paper claims rest.
 
 ---
@@ -616,10 +616,11 @@ removed (see `scripts/build_enso_csv.py` if you need a clean rebuild).
 
 ```bash
 source .venv/bin/activate
-pytest
+pytest                        # 209 tests, ~45 s
+mypy                          # strict typing on prg/utils/h5_constraint.py
 ```
 
-204 tests covering matrix diagnostics, parameter validation, iterator
+209 tests covering matrix diagnostics, parameter validation, iterator
 protocol, reproducibility, CSV output, statistical sanity, filter
 correctness, H5 constraint computation, supervised OLS estimation, and
 Baum-Welch EM (forward/backward, weighted M-step, multi-start,

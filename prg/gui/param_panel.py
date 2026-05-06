@@ -50,7 +50,12 @@ from PyQt6.QtWidgets import (
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
-from prg.utils.h5_constraint import compute_AB
+from prg.utils.h5_constraint import compute_AB, compute_h5_residual
+
+# Tolerance for the live (H5) residual badge — kept in sync with
+# prg.filter.gss_filter.H5_TOL so the GUI shows a green badge in
+# exactly the regime where mode='h5_exact' would not warn.
+_H5_BADGE_TOL = 1e-6
 
 # Pill style for constraint error messages (explicit background → readable on any theme)
 _CONSTRAINT_ERR_STYLE = (
@@ -130,7 +135,10 @@ class _StateTab(QWidget):
         )
         self._f_widget.set_matrix(np.eye(q + s) * 0.5)
 
-        # Stability badges live in a sub-column directly below _f_widget
+        # Stability badges live in a sub-column directly below _f_widget.
+        # The (H5) residual badge — green when ‖F‖_F < _H5_BADGE_TOL,
+        # amber otherwise — lives beside them so the user sees at a glance
+        # whether the current model is (H5)-compatible.
         self._stab_F_badge = QLabel()
         self._stab_F_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._stab_F_badge.setFixedHeight(16)
@@ -140,6 +148,9 @@ class _StateTab(QWidget):
         self._stab_D_badge = QLabel()
         self._stab_D_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._stab_D_badge.setFixedHeight(16)
+        self._h5_badge = QLabel()
+        self._h5_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._h5_badge.setFixedHeight(16)
 
         f_col = QVBoxLayout()
         f_col.setSpacing(2)
@@ -148,6 +159,7 @@ class _StateTab(QWidget):
         f_col.addWidget(self._stab_F_badge)
         f_col.addWidget(self._stab_A_badge)
         f_col.addWidget(self._stab_D_badge)
+        f_col.addWidget(self._h5_badge)
         f_col.addStretch()
         widgets_row.addLayout(f_col)
 
@@ -356,13 +368,62 @@ class _StateTab(QWidget):
     # ------------------------------------------------------------------
 
     def _update_stability_badges(self) -> None:
-        """Recompute ρ(F(k)), ρ(A(k)) and ρ(D(k)); refresh all three badges."""
+        """Recompute ρ(F), ρ(A), ρ(D) and the (H5) residual; refresh all four badges."""
         F = self._f_widget.get_matrix()
         n = self._q + self._s
         self._set_badge(self._stab_F_badge, "ρ(F)", F, 0, n, 0, n)
         self._set_badge(self._stab_A_badge, "ρ(A)", F, 0, self._q, 0, self._q)
         self._set_badge(
             self._stab_D_badge, "ρ(D)", F, self._q, self._q + self._s, self._q, self._q + self._s
+        )
+        self._update_h5_badge()
+
+    def _update_h5_badge(self) -> None:
+        """Compute the (H5) Frobenius residual and style ``_h5_badge``.
+
+        Green ✓ when ‖F‖_F < ``_H5_BADGE_TOL`` (model is (H5)-compatible
+        and ``mode='h5_exact'`` is safe), amber ⚠ otherwise (filter would
+        emit a warning), grey ? when the residual cannot be evaluated
+        (singular M, missing matrix data).
+        """
+        _GREY = (
+            "font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+            "background: #e9ecef; color: #6c757d; border: 1px solid #adb5bd;"
+        )
+        F = self._f_widget.get_matrix()
+        Sw = self._sigma_widget.get_matrix()
+        if F is None or Sw is None:
+            self._h5_badge.setText("(H5) = ?")
+            self._h5_badge.setStyleSheet(_GREY)
+            return
+
+        q, s = self._q, self._s
+        try:
+            res = compute_h5_residual(
+                A=F[:q, :q],
+                B=F[:q, q:],
+                C=F[q:, :q],
+                D=F[q:, q:],
+                SU=Sw[:q, :q],
+                Dt=Sw[:q, q:],
+                SV=Sw[q:, q:],
+            )
+            res_norm = float(np.linalg.norm(res, "fro"))
+        except (np.linalg.LinAlgError, ValueError):
+            self._h5_badge.setText("(H5) = ?")
+            self._h5_badge.setStyleSheet(_GREY)
+            return
+
+        if res_norm < _H5_BADGE_TOL:
+            bg, fg, border = "#d4edda", "#155724", "#c3e6cb"
+            icon = "✓"
+        else:
+            bg, fg, border = "#fff3cd", "#856404", "#ffc107"
+            icon = "⚠"
+        self._h5_badge.setText(f"(H5) ‖F‖ = {res_norm:.2e} {icon}")
+        self._h5_badge.setStyleSheet(
+            f"font-size: 10px; padding: 2px 8px; border-radius: 3px;"
+            f"background: {bg}; color: {fg}; border: 1px solid {border};"
         )
 
     @staticmethod

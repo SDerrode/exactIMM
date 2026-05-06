@@ -3,14 +3,13 @@
 """
 scripts/verify_h5_compat.py
 ============================
-Numerical verification of F. Lehmann's closed-form (H5)-compatible
-parametrisation:
+Numerical verification of the closed-form (H5)-compatible AB constraint:
 
     A(r) = Δ(r) Σ_V(r)⁻¹ C(r),
-    B(r) = Δ(r) Σ_V(r)⁻¹ D(r).                              (c)
+    B(r) = Δ(r) Σ_V(r)⁻¹ D(r).                              (★)
 
 For each random draw of (C, D, Σ_U, Σ_V, Δ) per regime r ∈ Ω = {1, …, K}:
-    1. Build A, B via formula (c).
+    1. Build A, B via formula (★).
     2. For every pair (r_1, r_2) ∈ Ω², evaluate the (H5) residual
             F  =  (Δ_{r_1}ᵀ A_{r_2}ᵀ + Σ_V_{r_1} B_{r_2}ᵀ)
                 − P_{r_1,r_2} M_{r_1,r_2}⁻¹
@@ -23,23 +22,10 @@ Convention
 ----------
 We use the form
 
-    Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ)            (16)
+    Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ)
 
 obtained from the appendix-B derivation `A Δ + B Σ_V = T M⁻¹ R` by
-transposing both sides (cf. paper/appendix/B_h5_derivation.tex,
-eq. h5_first → h5_compact_app). NB: section 4 of
-paper/sections/04_constraint.tex displays the LHS as `Δᵀ A + Σ_V Bᵀ`
-(without the transpose on A) — this is a typo: formula (c) only
-closes algebraically with `Aᵀ`, and the same is true of the
-appendix-B step `transposing both sides`.
-
-References
-----------
-    [1] F. Lehmann, "(H5)-compatible parametrisation via uniform
-        Σ(r₁) cancellation", handwritten note, 6 May 2026.
-    [2] S. Derrode, C. Fernandes, F. Lehmann, W. Pieczynski,
-        "On fast optimal filtering in Gaussian switching systems"
-        (Article V2.docx, eq. 16), Prop. 2.
+transposing both sides.
 
 Usage
 -----
@@ -169,7 +155,7 @@ def evaluate_all_pairs(C, D, SU, SV, Dt, A, B) -> np.ndarray:
 # ---------------------------------------------------------------------------
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Verify Lehmann's closed-form (H5)-compatible "
+        description="Verify the closed-form (H5)-compatible AB constraint "
         "parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D."
     )
     ap.add_argument("-K", type=int, default=3, help="Number of regimes (default 3).")
@@ -186,7 +172,7 @@ def main() -> int:
 
     rng = np.random.default_rng(args.seed)
 
-    print(f"Verification of (c): A(r) = Δ Σ_V⁻¹ C, B(r) = Δ Σ_V⁻¹ D")
+    print(f"Verification of AB constraint: A(r) = Δ Σ_V⁻¹ C, B(r) = Δ Σ_V⁻¹ D")
     print(f"Setup: K={args.K}, q={args.q}, s={args.s}, "
           f"n_draws={args.n_draws}, seed={args.seed}")
     print()
@@ -198,7 +184,7 @@ def main() -> int:
 
     for trial in range(args.n_draws):
         C, D, SU, SV, Dt = random_model(args.K, args.q, args.s, rng)
-        # (c) — should give zero residuals
+        # AB constraint — should give zero residuals
         A_c, B_c = build_AB_from_c(C, D, SV, Dt)
         norms_c = evaluate_all_pairs(C, D, SU, SV, Dt, A_c, B_c)
         max_res_c[trial] = norms_c.max()
@@ -212,7 +198,7 @@ def main() -> int:
 
     print(f"{'Strategy':<32} {'min ‖F‖':>12} {'med ‖F‖':>12} {'max ‖F‖':>12}")
     print("-" * 72)
-    print(f"{'(c) Lehmann (closed-form)':<32} "
+    print(f"{'AB constraint (closed-form)':<32} "
           f"{max_res_c.min():12.3e} {np.median(max_res_c):12.3e} {max_res_c.max():12.3e}")
     print(f"{'random A, B (negative control)':<32} "
           f"{max_res_rand.min():12.3e} {np.median(max_res_rand):12.3e} "
@@ -220,7 +206,7 @@ def main() -> int:
     print()
 
     if args.show_pair_table:
-        print(f"Residual table for draw 0 — (c) Lehmann (max should be 0):")
+        print(f"Residual table for draw 0 — AB constraint (max should be 0):")
         print(_format_table(first_norms_c))
         print()
         print(f"Residual table for draw 0 — random A, B (max should be Ω(1)):")
@@ -232,7 +218,7 @@ def main() -> int:
     pass_rand = max_res_rand.min() > args.tol
 
     if pass_c and pass_rand:
-        print(f"OK  : (c) gives ‖F‖ < {args.tol:.0e} for every (r_1, r_2) "
+        print(f"OK  : AB constraint gives ‖F‖ < {args.tol:.0e} for every (r_1, r_2) "
               f"and every draw.")
         print(f"OK  : random A, B yields strictly positive residuals "
               f"(negative control sane).")

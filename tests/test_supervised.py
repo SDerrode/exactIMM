@@ -8,7 +8,7 @@ Coverage
 --------
 - _read_csv: valid input, missing columns, empty file, bad rows
 - _fit_regime: OLS exactness on noise-free data, residual covariance shape,
-               delta_zero zeroes Δ, constraint='lehmann' enforces A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D
+               delta_zero zeroes Δ, constraint='ab' enforces A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D
 - fit_supervised: output keys/shapes, P is row-stochastic, SPD guarantees,
                   missing-regime error, consistency after simulate
 - _fmt_arr / _fmt_list: eval-roundtrip
@@ -207,15 +207,15 @@ class TestFitRegime:
         np.linalg.cholesky(SU)
         np.linalg.cholesky(SV)
 
-    def test_constraint_lehmann(self, noise_free_data):
-        """After constraint='lehmann', A, B should match the closed form."""
-        from prg.utils.h5_constraint import compute_AB_lehmann
+    def test_constraint_ab(self, noise_free_data):
+        """After constraint='ab', A, B should match the closed form."""
+        from prg.utils.h5_constraint import compute_AB
 
         Z_curr, Z_next, q, s, _, _ = noise_free_data
         A, B, C, D, SU, Dt, SV, _ = _fit_regime(
-            Z_curr, Z_next, q, s, constraint="lehmann", delta_zero=False
+            Z_curr, Z_next, q, s, constraint="ab", delta_zero=False
         )
-        A_check, B_check = compute_AB_lehmann(C, D, Dt, SV)
+        A_check, B_check = compute_AB(C, D, Dt, SV)
         np.testing.assert_allclose(A, A_check, atol=1e-8)
         np.testing.assert_allclose(B, B_check, atol=1e-8)
 
@@ -317,14 +317,14 @@ class TestFitSupervised:
         for Dt in params["Delta_list"]:
             np.testing.assert_array_equal(Dt, np.zeros((q, s)))
 
-    def test_constraint_lehmann(self, simulated_csv):
-        """Estimated A(k), B(k) should match the Lehmann closed form."""
-        from prg.utils.h5_constraint import compute_AB_lehmann
+    def test_constraint_ab(self, simulated_csv):
+        """Estimated A(k), B(k) should match the AB-constraint closed form."""
+        from prg.utils.h5_constraint import compute_AB
 
         rs, xs, ys, K, q, s = _read_csv(simulated_csv)
-        params = fit_supervised(rs, xs, ys, K, q, s, constraint="lehmann")
+        params = fit_supervised(rs, xs, ys, K, q, s, constraint="ab")
         for k in range(K):
-            A_check, B_check = compute_AB_lehmann(
+            A_check, B_check = compute_AB(
                 params["C_list"][k],
                 params["D_list"][k],
                 params["Delta_list"][k],
@@ -459,9 +459,9 @@ class TestGenerateModelCode:
             sys.path.pop(0)
             sys.modules.pop("model_gen_test", None)
 
-    def test_constraint_note_lehmann(self, minimal_params):
-        code = _generate_model_code(minimal_params, "M", "m", "x.csv", "lehmann", False)
-        assert "LEHMANN" in code or "lehmann" in code.lower()
+    def test_constraint_note_ab(self, minimal_params):
+        code = _generate_model_code(minimal_params, "M", "m", "x.csv", "ab", False)
+        assert "AB" in code or "ab" in code.lower()
 
     def test_delta_zero_note(self, minimal_params):
         code = _generate_model_code(minimal_params, "M", "m", "x.csv", None, True)
@@ -491,13 +491,13 @@ class TestCLI:
         assert out.exists()
         assert "BaseGSSModel" in out.read_text(encoding="utf-8")
 
-    def test_constraint_lehmann_flag(self, simulated_csv, tmp_path):
-        out = tmp_path / "model_cli_lehmann.py"
+    def test_constraint_ab_flag(self, simulated_csv, tmp_path):
+        out = tmp_path / "model_cli_ab.py"
         self._run_main(
             [
                 str(simulated_csv),
                 "--constraint",
-                "lehmann",
+                "ab",
                 "--output",
                 str(out),
             ]

@@ -24,7 +24,7 @@ the preprint is accepted.)
   author       = {Derrode, St{\'e}phane and Pieczynski, Wojciech},
   title        = {{exactIMM: Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
-  version      = {0.12.0},
+  version      = {0.13.0},
   url          = {https://github.com/SDerrode/exactIMM},
   license      = {AGPL-3.0},
 }

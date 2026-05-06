@@ -1333,7 +1333,7 @@ class GSSMainWindow(QMainWindow):
             "               holds: the algebraic constraint\n"
             "               Δᵀ Aᵀ + Σ_V Bᵀ = P M⁻¹ W linking the 7 blocks.\n"
             "               Emits a warning when the residual exceeds the\n"
-            "               tolerance. Tick the per-regime Lehmann checkbox\n"
+            "               tolerance. Tick the per-regime 'AB constraint'\n"
             "               to enforce it (sets A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)."
         )
         mode_row.addWidget(self._mode_combo)
@@ -1625,7 +1625,7 @@ class GSSMainWindow(QMainWindow):
         self._refresh_session_summary()
 
         # When a preset is loaded at startup: ensure h5_exact is the active
-        # filter mode.  The Lehmann constraint stays unchecked by default so
+        # filter mode.  The AB constraint stays unchecked by default so
         # the user can opt in explicitly.
         if _preset_loaded:
             idx_h5 = self._mode_combo.findData("h5_exact")
@@ -2416,7 +2416,7 @@ class GSSMainWindow(QMainWindow):
             for k in range(K):
                 self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu_list[k], b_list[k])
 
-            # Re-apply any active Lehmann constraint to the newly loaded
+            # Re-apply any active AB constraint to the newly loaded
             # parameter values.  The ParamPanel signals are still blocked here,
             # so constraint_toggled cannot propagate to _on_reset.
             self._param_panel.reapply_active_constraints()

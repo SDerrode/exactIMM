@@ -336,7 +336,7 @@ class TestEMRun:
 
     def test_with_constraint_b(self, simulated):
         """Default (post-hoc) mode: H5 still satisfied at the end."""
-        from prg.utils.h5_constraint import compute_AB_lehmann
+        from prg.utils.h5_constraint import compute_AB
 
         xs, ys, _, _ = simulated
         Z = np.hstack([xs, ys])
@@ -346,14 +346,14 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="lehmann",
+            constraint="ab",
             delta_zero=False,
             max_iter=10,
             tol=1e-5,
             verbose=False,
         )
         for k in range(2):
-            A_check, B_check = compute_AB_lehmann(
+            A_check, B_check = compute_AB(
                 params["C_list"][k],
                 params["D_list"][k],
                 params["Delta_list"][k],
@@ -376,7 +376,7 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="lehmann",
+            constraint="ab",
             delta_zero=False,
             max_iter=20,
             tol=1e-8,
@@ -395,7 +395,7 @@ class TestEMRun:
         during the loop (so log-lik may not be strictly monotone — only
         check final feasibility).
         """
-        from prg.utils.h5_constraint import compute_AB_lehmann
+        from prg.utils.h5_constraint import compute_AB
 
         xs, ys, _, _ = simulated
         Z = np.hstack([xs, ys])
@@ -405,7 +405,7 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="lehmann",
+            constraint="ab",
             delta_zero=False,
             max_iter=10,
             tol=1e-5,
@@ -413,7 +413,7 @@ class TestEMRun:
             constraint_each_iter=True,
         )
         for k in range(2):
-            A_check, B_check = compute_AB_lehmann(
+            A_check, B_check = compute_AB(
                 params["C_list"][k],
                 params["D_list"][k],
                 params["Delta_list"][k],
@@ -436,7 +436,7 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="lehmann",
+            constraint="ab",
             delta_zero=False,
             max_iter=15,
             tol=1e-6,
@@ -449,7 +449,7 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="lehmann",
+            constraint="ab",
             delta_zero=False,
             max_iter=15,
             tol=1e-6,
@@ -530,15 +530,15 @@ class TestFitSemiSupervised:
             xs,
             ys,
             K=2,
-            constraint="lehmann",
+            constraint="ab",
             n_inits=2,
             max_iter=15,
             seed=0,
         )
-        from prg.utils.h5_constraint import compute_AB_lehmann
+        from prg.utils.h5_constraint import compute_AB
 
         for k in range(2):
-            A_check, B_check = compute_AB_lehmann(
+            A_check, B_check = compute_AB(
                 params["C_list"][k],
                 params["D_list"][k],
                 params["Delta_list"][k],
@@ -554,16 +554,16 @@ class TestFitSemiSupervised:
             xs,
             ys,
             K=2,
-            constraint="lehmann",
+            constraint="ab",
             constraint_each_iter=True,
             n_inits=2,
             max_iter=15,
             seed=0,
         )
-        from prg.utils.h5_constraint import compute_AB_lehmann
+        from prg.utils.h5_constraint import compute_AB
 
         for k in range(2):
-            A_check, B_check = compute_AB_lehmann(
+            A_check, B_check = compute_AB(
                 params["C_list"][k],
                 params["D_list"][k],
                 params["Delta_list"][k],
@@ -690,7 +690,7 @@ class TestCLI:
 
     def test_constraint_each_iter_flag(self, simulated, tmp_path):
         """The --constraint-each-iter flag is accepted and produces a model."""
-        from prg.utils.h5_constraint import compute_AB_lehmann
+        from prg.utils.h5_constraint import compute_AB
 
         _, _, _, csv = simulated
         out = tmp_path / "model_em_gem.py"
@@ -700,7 +700,7 @@ class TestCLI:
                 "-K",
                 "2",
                 "--constraint",
-                "lehmann",
+                "ab",
                 "--constraint-each-iter",
                 "--n-inits",
                 "2",
@@ -719,7 +719,7 @@ class TestCLI:
             inst = mod.ModelEmGem()
             p = inst.get_params()
             for k in range(2):
-                A_check, B_check = compute_AB_lehmann(
+                A_check, B_check = compute_AB(
                     p["C_list"][k],
                     p["D_list"][k],
                     p["Delta_list"][k],

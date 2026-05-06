@@ -11,7 +11,7 @@ M2  K=2, q=2, s=2  — multivariate cross-coupled case (Table 1 in §6.1)
 M3  K=3, q=1, s=1  — three-regime scalar case (§6.1)
 
 All models satisfy (H5) exactly: A(k) and B(k) are computed from
-C, D, Δ, Σ_V via Lehmann's closed-form parametrisation
+C, D, Δ, Σ_V via the closed-form (H5)-compatible AB constraint
 A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.  An assertion at module construction
 time verifies the H5 residual < 1e-8 for every regime.
 
@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from prg.utils.h5_constraint import compute_AB_lehmann, compute_h5_residual
+from prg.utils.h5_constraint import compute_AB, compute_h5_residual
 
 __all__ = [
     "get_params_M1",
@@ -70,7 +70,7 @@ def get_params_M1() -> dict:
         Σ_U: [0.10]  / [0.20]
         Δ:   [0.05]  / [0.02]
         Σ_V: [0.10]  / [0.15]
-        A, B: computed from the Lehmann (H5)-compatible parametrisation
+        A, B: computed from the (H5)-compatible AB constraint
               A = Δ Σ_V⁻¹ C,   B = Δ Σ_V⁻¹ D.
         b:   [0.10, 0.05]^T  /  [-0.05, 0.02]^T
     """
@@ -86,7 +86,7 @@ def get_params_M1() -> dict:
 
     A_list, B_list = [], []
     for k in range(K):
-        A_k, B_k = compute_AB_lehmann(C_raw[k], D_raw[k], Dt[k], SV[k])
+        A_k, B_k = compute_AB(C_raw[k], D_raw[k], Dt[k], SV[k])
         _check_h5("M1", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
         A_list.append(A_k)
         B_list.append(B_k)
@@ -127,8 +127,8 @@ def get_params_M2() -> dict:
     """
     Return a parameter dict for model M2 (K=2, q=s=2).
 
-    Full 2×2 matrices per regime; A, B computed from the Lehmann
-    (H5)-compatible parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
+    Full 2×2 matrices per regime; A, B computed from the (H5)-compatible
+    AB constraint A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
     No bias (b_r = 0) to isolate the cross-coupling effect.
     See Table 1 in §6.1 of the paper.
     """
@@ -159,7 +159,7 @@ def get_params_M2() -> dict:
 
     A_list, B_list = [], []
     for k in range(K):
-        A_k, B_k = compute_AB_lehmann(C_raw[k], D_raw[k], Dt[k], SV[k])
+        A_k, B_k = compute_AB(C_raw[k], D_raw[k], Dt[k], SV[k])
         _check_h5("M2", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
         A_list.append(A_k)
         B_list.append(B_k)
@@ -199,8 +199,7 @@ def get_params_M3() -> dict:
 
     Three regimes: two persistent (0 and 2) and one transient (1).
     Non-zero bias on regimes 0 and 2.
-    A, B computed from the Lehmann parametrisation A = Δ Σ_V⁻¹ C,
-    B = Δ Σ_V⁻¹ D.
+    A, B computed from the AB constraint A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
     """
     K, q, s = 3, 1, 1
 
@@ -220,7 +219,7 @@ def get_params_M3() -> dict:
 
     A_list, B_list = [], []
     for k in range(K):
-        A_k, B_k = compute_AB_lehmann(C_raw[k], D_raw[k], Dt[k], SV[k])
+        A_k, B_k = compute_AB(C_raw[k], D_raw[k], Dt[k], SV[k])
         _check_h5("M3", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
         A_list.append(A_k)
         B_list.append(B_k)

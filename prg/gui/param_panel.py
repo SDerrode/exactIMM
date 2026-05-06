@@ -9,10 +9,10 @@ Each tab (_StateTab) exposes:
   - Σ_W(k)   : MatrixTableWidget (SPD check enabled)
   - μ_z0(k), b_X(k), b_Y(k) : VectorWidgets
 
-Lehmann (H5)-compatible constraint
+(H5)-compatible AB constraint
 ----------------------------------
-A single checkbox per regime enforces Lehmann's closed-form (H5)-compatible
-parametrisation::
+A single checkbox per regime enforces the closed-form (H5)-compatible
+"AB constraint" parametrisation::
 
     A(k) = Δ(k) Σ_V(k)⁻¹ C(k),
     B(k) = Δ(k) Σ_V(k)⁻¹ D(k).
@@ -50,7 +50,7 @@ from PyQt6.QtWidgets import (
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
-from prg.utils.h5_constraint import compute_AB_lehmann
+from prg.utils.h5_constraint import compute_AB
 
 # Pill style for constraint error messages (explicit background → readable on any theme)
 _CONSTRAINT_ERR_STYLE = (
@@ -58,7 +58,7 @@ _CONSTRAINT_ERR_STYLE = (
     "background: #fff8f8; color: #c0392b; border: 1px solid #f5c6cb;"
 )
 
-# Style of the checked Lehmann constraint status badge
+# Style of the checked AB constraint status badge
 _CONSTRAINT_OK_STYLE = "color: #155399; font-size: 10px;"
 
 
@@ -69,14 +69,14 @@ _CONSTRAINT_OK_STYLE = "color: #155399; font-size: 10px;"
 
 class _StateTab(QWidget):
     """One tab: F(k), Σ_W(k), μ_z0(k), b_X(k), b_Y(k) side by side,
-    plus a Lehmann (H5)-compatible constraint checkbox and stability badges."""
+    plus a (H5)-compatible AB constraint checkbox and stability badges."""
 
     validity_changed = pyqtSignal(bool)
     value_changed = pyqtSignal()  # emitted whenever any cell changes
-    constraint_toggled = pyqtSignal()  # emitted when the Lehmann checkbox is toggled
+    constraint_toggled = pyqtSignal()  # emitted when the AB-constraint checkbox is toggled
 
     # Checkbox colour palette  (text-color, checked-fill, border)
-    _CHK_STYLE_LEHMANN = (
+    _CHK_STYLE_AB = (
         "QCheckBox { color: #155399; font-weight: bold; font-size: 11px; }"
         "QCheckBox::indicator:checked   { border: 2px solid #155399;"
         "                                 background-color: #2980b9; }"
@@ -99,20 +99,20 @@ class _StateTab(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        # -- Constraint checkbox row (single Lehmann box) + stability badges --
+        # -- Constraint checkbox row (single AB-constraint box) + stability badges --
         chk_row = QHBoxLayout()
         chk_row.setSpacing(16)
 
-        self._constraint_lehmann_check = QCheckBox(
-            f"Lehmann constraint on (A({k}), B({k}))"
+        self._constraint_AB_check = QCheckBox(
+            f"AB constraint on (A({k}), B({k}))"
         )
-        self._constraint_lehmann_check.setToolTip(
+        self._constraint_AB_check.setToolTip(
             "Force A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k).\n"
             "These are the unique (A, B) compatible with the (H5) constraint\n"
             "for any Σ_U; A and B blocks become read-only while checked."
         )
-        self._constraint_lehmann_check.setStyleSheet(self._CHK_STYLE_LEHMANN)
-        chk_row.addWidget(self._constraint_lehmann_check)
+        self._constraint_AB_check.setStyleSheet(self._CHK_STYLE_AB)
+        chk_row.addWidget(self._constraint_AB_check)
 
         chk_row.addStretch()
         layout.addLayout(chk_row)
@@ -200,7 +200,7 @@ class _StateTab(QWidget):
         self._f_widget.value_changed.connect(self._on_value_changed)
         self._sigma_widget.value_changed.connect(self._on_value_changed)
 
-        self._constraint_lehmann_check.toggled.connect(self._on_lehmann_toggled)
+        self._constraint_AB_check.toggled.connect(self._on_AB_toggled)
 
         # Initialise the badges with the default matrix
         self._update_stability_badges()
@@ -255,34 +255,34 @@ class _StateTab(QWidget):
     # Constraint state — public accessors
     # ------------------------------------------------------------------
 
-    def is_lehmann_active(self) -> bool:
-        """Return True iff the Lehmann (A, B) constraint is currently active."""
-        return self._constraint_lehmann_check.isChecked()
+    def is_AB_constraint_active(self) -> bool:
+        """Return True iff the (A, B) constraint is currently active."""
+        return self._constraint_AB_check.isChecked()
 
-    def apply_constraint(self, lehmann: bool) -> None:
-        """Programmatically set the Lehmann constraint flag.
+    def apply_constraint(self, active: bool) -> None:
+        """Programmatically set the AB constraint flag.
 
         Mirrors the user clicking the checkbox so that all the recompute
         and constraint_toggled logic fires normally.
         """
-        if self._constraint_lehmann_check.isChecked() != lehmann:
-            self._constraint_lehmann_check.setChecked(lehmann)
+        if self._constraint_AB_check.isChecked() != active:
+            self._constraint_AB_check.setChecked(active)
 
     # ------------------------------------------------------------------
     # Constraint toggle handlers
     # ------------------------------------------------------------------
 
-    def _on_lehmann_toggled(self, checked: bool) -> None:
+    def _on_AB_toggled(self, checked: bool) -> None:
         if checked:
             F = self._f_widget.get_matrix()
             if F is not None:
                 q, s = self._q, self._s
                 self._saved_A = F[:q, :q].copy()
                 self._saved_B = F[:q, q:].copy()
-            self._recompute_lehmann()
+            self._recompute_AB()
             self.constraint_toggled.emit()
         else:
-            self._restore_lehmann()
+            self._restore_AB()
             self.constraint_toggled.emit()
 
     # ------------------------------------------------------------------
@@ -290,14 +290,14 @@ class _StateTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_value_changed(self) -> None:
-        """Re-run the Lehmann projection on every value edit; refresh badges."""
-        if self._constraint_lehmann_check.isChecked():
-            self._recompute_lehmann()
+        """Re-run the AB-constraint projection on every value edit; refresh badges."""
+        if self._constraint_AB_check.isChecked():
+            self._recompute_AB()
         self._update_stability_badges()
 
-    def _recompute_lehmann(self) -> None:
-        """Replace A(k), B(k) blocks of F(k) by the Lehmann closed form."""
-        if not self._constraint_lehmann_check.isChecked() or self._updating:
+    def _recompute_AB(self) -> None:
+        """Replace A(k), B(k) blocks of F(k) by the AB-constraint closed form."""
+        if not self._constraint_AB_check.isChecked() or self._updating:
             return
         F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
         if F is None or Sw is None:
@@ -305,7 +305,7 @@ class _StateTab(QWidget):
 
         q, s = self._q, self._s
         try:
-            A_new, B_new = compute_AB_lehmann(
+            A_new, B_new = compute_AB(
                 C=F[q:, :q],
                 D=F[q:, q:],
                 Dt=Sw[:q, q:],
@@ -313,7 +313,7 @@ class _StateTab(QWidget):
             )
         except ValueError:
             self._f_widget.set_constraint_status(
-                "✗  Lehmann — Σ_V singular", _CONSTRAINT_ERR_STYLE
+                "✗  AB constraint — Σ_V singular", _CONSTRAINT_ERR_STYLE
             )
             return
 
@@ -327,12 +327,12 @@ class _StateTab(QWidget):
         self._f_widget.set_block_editable(0, q, q, q + s, False)
         self._updating = False
         self._f_widget.set_constraint_status(
-            "✓  A, B satisfy Lehmann (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)",
+            "✓  A, B satisfy the AB constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)",
             _CONSTRAINT_OK_STYLE,
         )
         self._update_stability_badges()
 
-    def _restore_lehmann(self) -> None:
+    def _restore_AB(self) -> None:
         """Unlock A and B blocks; restore their saved values."""
         q, s = self._q, self._s
         self._f_widget.set_block_editable(0, q, 0, q, True)
@@ -488,7 +488,7 @@ class ParamPanel(QWidget):
             self._tabs.addTab(scroll, f"State {k}")
             self._state_tabs.append(tab)
 
-        # Corner widget: [🎲] and (K>1) [Apply Lehmann → all] in the tab-bar top-right.
+        # Corner widget: [🎲] and (K>1) [Apply AB → all] in the tab-bar top-right.
         corner = QWidget()
         c_lay = QHBoxLayout(corner)
         c_lay.setContentsMargins(0, 0, 4, 0)
@@ -505,15 +505,15 @@ class ParamPanel(QWidget):
         c_lay.addWidget(btn_rand_corner)
 
         if K > 1:
-            self._btn_apply_lehmann_all = QPushButton("Apply Lehmann → all")
-            self._btn_apply_lehmann_all.setFixedHeight(22)
-            self._btn_apply_lehmann_all.setToolTip(
-                "Copy the Lehmann constraint state from the currently visible\n"
+            self._btn_apply_AB_all = QPushButton("Apply AB → all")
+            self._btn_apply_AB_all.setFixedHeight(22)
+            self._btn_apply_AB_all.setToolTip(
+                "Copy the AB constraint state from the currently visible\n"
                 "state tab to ALL other states.  Each target tab recomputes\n"
                 "its (A, B) blocks from its own (C, D, Δ, Σ_V)."
             )
-            self._btn_apply_lehmann_all.clicked.connect(self._on_apply_lehmann_all)
-            c_lay.addWidget(self._btn_apply_lehmann_all)
+            self._btn_apply_AB_all.clicked.connect(self._on_apply_AB_all)
+            c_lay.addWidget(self._btn_apply_AB_all)
 
         self._tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
@@ -581,7 +581,7 @@ class ParamPanel(QWidget):
         return all(tab.is_valid() for tab in self._state_tabs)
 
     def reapply_active_constraints(self) -> None:
-        """Re-evaluate active Lehmann constraints on each state tab.
+        """Re-evaluate active AB constraints on each state tab.
 
         Call this after loading external parameter values (e.g. session
         restore) to ensure that any checked constraint boxes are re-projected
@@ -589,8 +589,8 @@ class ParamPanel(QWidget):
         so no simulation reset is triggered.
         """
         for tab in self._state_tabs:
-            if tab.is_lehmann_active():
-                tab._recompute_lehmann()
+            if tab.is_AB_constraint_active():
+                tab._recompute_AB()
 
     # ------------------------------------------------------------------
     # Internal
@@ -599,23 +599,23 @@ class ParamPanel(QWidget):
     def _on_tab_validity(self, _: bool) -> None:
         self.validity_changed.emit(self.is_valid())
 
-    def _on_apply_lehmann_all(self) -> None:
-        """Copy the Lehmann constraint state from the current tab to all others."""
+    def _on_apply_AB_all(self) -> None:
+        """Copy the AB constraint state from the current tab to all others."""
         src_k = self._tabs.currentIndex()
         if src_k < 0 or src_k >= self._K:
             return
         src = self._state_tabs[src_k]
-        lehmann = src.is_lehmann_active()
-        if not lehmann:
+        active = src.is_AB_constraint_active()
+        if not active:
             from PyQt6.QtWidgets import QMessageBox
 
             QMessageBox.information(
                 self,
-                "Apply Lehmann to all states",
-                "The Lehmann constraint is not active on the current tab.\n"
+                "Apply AB constraint to all states",
+                "The AB constraint is not active on the current tab.\n"
                 "Check it first, then click this button.",
             )
             return
         for k, tab in enumerate(self._state_tabs):
             if k != src_k:
-                tab.apply_constraint(lehmann)
+                tab.apply_constraint(active)

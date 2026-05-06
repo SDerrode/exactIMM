@@ -35,8 +35,9 @@ Modes
 
     tying together all 7 parameter matrices (A, B, C, D, Σ_U, Σ_V, Δ) of
     each regime. (H5) is **not** equivalent to B(k) = 0 — A(k) and B(k)
-    are determined together from (C, D, Δ, Σ_V) by Lehmann's closed form
-    A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D; see :mod:`prg.utils.h5_constraint`.
+    are determined together from (C, D, Δ, Σ_V) by the closed-form
+    "AB constraint" A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D;
+    see :mod:`prg.utils.h5_constraint`.
     When (H5) is violated a ``RuntimeWarning`` is emitted at construction
     (relative residual above ``H5_TOL``).
 
@@ -177,9 +178,9 @@ class GSSFilter:
           the (H5) algebraic constraint holds for every regime k;
           emits a ``RuntimeWarning`` at construction when the relative
           residual exceeds ``H5_TOL``. To enforce (H5) automatically,
-          use :func:`prg.utils.h5_constraint.apply_lehmann_constraint`,
+          use :func:`prg.utils.h5_constraint.apply_AB_constraint`,
           which recomputes A(k), B(k) from (C, D, Δ, Σ_V) via the
-          Lehmann closed form A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
+          closed form A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
 
     Examples
     --------
@@ -276,9 +277,9 @@ class GSSFilter:
                 f"regime — but the model has max relative residual = "
                 f"{max_rel:.3g} (worst at k={worst_k}). The filter will be "
                 f"biased. Use mode='imm_general' for non-(H5) models, or "
-                f"apply prg.utils.h5_constraint.apply_lehmann_constraint to "
-                f"enforce (H5) by recomputing A(k), B(k) via the Lehmann "
-                f"closed form A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.",
+                f"apply prg.utils.h5_constraint.apply_AB_constraint to "
+                f"enforce (H5) by recomputing A(k), B(k) via the closed "
+                f"form A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.",
                 RuntimeWarning,
                 stacklevel=3,
             )

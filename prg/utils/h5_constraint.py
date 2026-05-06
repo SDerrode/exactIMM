@@ -2,7 +2,7 @@
 """
 prg/utils/h5_constraint.py
 ==========================
-Lehmann's closed-form (H5)-compatible parametrisation.
+Closed-form (H5)-compatible "AB constraint" parametrisation.
 
 The (H5) algebraic constraint, derived from the Markovianity of (R, Y)
 (paper appendix B), reads
@@ -11,8 +11,8 @@ The (H5) algebraic constraint, derived from the Markovianity of (R, Y)
 
 with P = Δᵀ Cᵀ + Σ_V Dᵀ, Q = C Σ_U + D Δᵀ, R = C Δ + D Σ_V,
 M = Q Cᵀ + R Dᵀ + Σ_V. Requiring this to hold *uniformly* in the
-joint covariance Σ(r₁) = [[Σ_U, Δ], [Δᵀ, Σ_V]] (Lehmann's argument)
-collapses A and B onto the closed form
+joint covariance Σ(r₁) = [[Σ_U, Δ], [Δᵀ, Σ_V]] collapses A and B
+onto the closed form
 
     A = Δ Σ_V⁻¹ C,        B = Δ Σ_V⁻¹ D.
 
@@ -22,18 +22,13 @@ satisfied. (C, D, Σ_U, Σ_V, Δ) are free.
 
 Public API
 ----------
-compute_AB_lehmann(C, D, Dt, SV) -> (A, B)
+compute_AB(C, D, Dt, SV) -> (A, B)
     Closed-form A, B from C, D, Δ, Σ_V.
-apply_lehmann_constraint(params, *, logger=None) -> GSSParams
+apply_AB_constraint(params, *, logger=None) -> GSSParams
     Return a new GSSParams with each regime's (A_k, B_k) replaced by
-    the Lehmann formula.
+    the closed form.
 compute_h5_residual(A, B, C, D, SU, Dt, SV) -> ndarray (s, q)
     Frobenius-norm-zero ⇔ (H5) holds.
-
-Reference
----------
-F. Lehmann, "(H5)-compatible parametrisation via uniform Σ(r₁)
-cancellation", note manuscrite (3 p.), 6 May 2026.
 """
 
 from __future__ import annotations
@@ -47,8 +42,8 @@ if TYPE_CHECKING:
     from prg.classes.GSSParams import GSSParams
 
 __all__ = [
-    "apply_lehmann_constraint",
-    "compute_AB_lehmann",
+    "apply_AB_constraint",
+    "compute_AB",
     "compute_h5_residual",
 ]
 
@@ -96,16 +91,16 @@ def compute_h5_residual(
 
 
 # ---------------------------------------------------------------------------
-# Lehmann closed form
+# Closed-form AB constraint
 # ---------------------------------------------------------------------------
-def compute_AB_lehmann(
+def compute_AB(
     C: np.ndarray,   # (s, q)
     D: np.ndarray,   # (s, s)
     Dt: np.ndarray,  # (q, s)  Δ
     SV: np.ndarray,  # (s, s)  Σ_V (symmetric ≻ 0)
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Closed-form Lehmann parametrisation:
+    Closed-form (H5)-compatible AB parametrisation:
 
         A = Δ Σ_V⁻¹ C,        B = Δ Σ_V⁻¹ D.
 
@@ -147,14 +142,14 @@ def compute_AB_lehmann(
 # ---------------------------------------------------------------------------
 # Application to a GSSParams object
 # ---------------------------------------------------------------------------
-def apply_lehmann_constraint(
+def apply_AB_constraint(
     params: GSSParams,
     *,
     logger: logging.Logger | None = None,
 ) -> GSSParams:
     """
     Return a new GSSParams whose A(k), B(k) blocks are replaced by the
-    Lehmann closed-form ``A_k = Δ_k Σ_V_k⁻¹ C_k``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``
+    closed form ``A_k = Δ_k Σ_V_k⁻¹ C_k``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``
     for every regime k. C, D, Σ_U, Σ_V, Δ, Π, π₀, μ_z₀, Σ_z₀, b are
     preserved unchanged.
 
@@ -194,16 +189,16 @@ def apply_lehmann_constraint(
         SV_k = params.noise_cov.Sigma_V(k)
 
         try:
-            A_new, B_new = compute_AB_lehmann(C_k, D_k, Dt_k, SV_k)
+            A_new, B_new = compute_AB(C_k, D_k, Dt_k, SV_k)
         except ValueError as exc:
             raise ValueError(
-                f"Lehmann constraint cannot be applied for regime k={k}: {exc}"
+                f"AB constraint cannot be applied for regime k={k}: {exc}"
             ) from exc
 
         A_old = params.f_matrix.A(k)
         B_old = params.f_matrix.B(k)
         log.info(
-            "k=%d  Lehmann  ‖ΔA‖_F = %.4g, ‖ΔB‖_F = %.4g",
+            "k=%d  AB-constraint  ‖ΔA‖_F = %.4g, ‖ΔB‖_F = %.4g",
             k,
             float(np.linalg.norm(A_new - A_old, "fro")),
             float(np.linalg.norm(B_new - B_old, "fro")),

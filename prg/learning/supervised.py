@@ -6,8 +6,8 @@ Supervised estimation of a GSS model from fully-observed (R, X, Y) data.
 
 Given a CSV produced by ``prg.simulate`` (columns: n, r, x_0, …, x_{q-1},
 y_0, …, y_{s-1}), this module estimates all model parameters by ordinary
-least squares (OLS) per regime, then optionally enforces Lehmann's
-(H5)-compatible parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D post-hoc,
+least squares (OLS) per regime, then optionally enforces the
+(H5)-compatible AB constraint A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D post-hoc,
 and saves the result as a ready-to-use model file in ``prg/models/``.
 
 Estimation approach
@@ -24,10 +24,10 @@ Step 1 — free OLS
 Step 2 — Δ = 0 (optional)
     Zero out the off-diagonal block Δ(k) of Σ_W(k).
 
-Step 3 — Lehmann (H5)-compatible projection (optional)
-    Recompute A(k) and B(k) jointly via the closed-form Lehmann
-    parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D, which makes (H5)
-    hold uniformly in Σ(r₁) for every regime pair.
+Step 3 — (H5)-compatible AB projection (optional)
+    Recompute A(k) and B(k) jointly via the closed form
+    A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D, which makes (H5) hold uniformly
+    in Σ(r₁) for every regime pair.
 
 The Markov transition matrix P is estimated by maximum-likelihood
 (transition frequency counts, then row-normalise).
@@ -39,7 +39,7 @@ Usage
 Options
 -------
     csv                    Path to the simulation CSV (required)
-    --constraint lehmann   Apply Lehmann's (H5)-compatible parametrisation
+    --constraint ab   Apply the (H5)-compatible AB constraint
     --delta-zero           Force Δ(k)=0 before the projection
     --output PATH          Output .py path (default: prg/models/<auto>.py)
     --model-name NAME      File/class base name (default: model_learned_K…)
@@ -48,9 +48,9 @@ Options
 Examples
 --------
     python -m prg.learning.supervised data/simulated/sim.csv
-    python -m prg.learning.supervised data/simulated/sim.csv --constraint lehmann -v
+    python -m prg.learning.supervised data/simulated/sim.csv --constraint ab -v
     python -m prg.learning.supervised data/simulated/sim.csv \\
-        --constraint lehmann --delta-zero --output prg/models/my_model.py
+        --constraint ab --delta-zero --output prg/models/my_model.py
 """
 
 from __future__ import annotations
@@ -202,7 +202,7 @@ def _fit_regime(
 ]:
     """
     Estimate F(k), b(k), Σ_W(k) for one regime by OLS, then apply
-    optional Δ=0 and Lehmann post-processing.
+    optional Δ=0 and AB-constraint post-processing.
 
     OLS model
     ---------
@@ -216,7 +216,7 @@ def _fit_regime(
     ---------------------
     1. If *delta_zero*: set Δ block of Σ_W to zero.
     2. Clamp Σ_U, Σ_V to nearest SPD (numerical safety).
-    3. If *constraint* == 'lehmann': overwrite A, B with the closed form
+    3. If *constraint* == 'ab': overwrite A, B with the closed form
        A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
     """
     N_k, dim_z = Z_curr.shape
@@ -254,11 +254,11 @@ def _fit_regime(
     SU = _nearest_spd(SU)
     SV = _nearest_spd(SV)
 
-    # --- Step 3: Lehmann (H5)-compatible projection on A, B ---
-    if constraint == "lehmann":
-        from prg.utils.h5_constraint import compute_AB_lehmann
+    # --- Step 3: (H5)-compatible AB projection ---
+    if constraint == "ab":
+        from prg.utils.h5_constraint import compute_AB
 
-        A, B = compute_AB_lehmann(C, D, Dt, SV)
+        A, B = compute_AB(C, D, Dt, SV)
 
     return A, B, C, D, SU, Dt, SV, b_full
 
@@ -292,8 +292,8 @@ def fit_supervised(
         Observed-state sequence.
     K, q, s : int
         Model dimensions.
-    constraint : None | 'lehmann'
-        If ``'lehmann'``, apply A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D after OLS.
+    constraint : None | 'ab'
+        If ``'ab'``, apply A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D after OLS.
         ``None`` means no constraint.
     delta_zero : bool
         Force Δ(k) = 0 (zero cross-covariance) for all regimes.
@@ -591,11 +591,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--constraint",
-        choices=["lehmann"],
+        choices=["ab"],
         default=None,
         metavar="TARGET",
         help=(
-            "Enforce Lehmann's (H5)-compatible parametrisation post-hoc: "
+            "Enforce the (H5)-compatible AB constraint post-hoc: "
             "recompute A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k) "
             "from the other estimated parameters."
         ),

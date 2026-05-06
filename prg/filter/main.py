@@ -41,7 +41,7 @@ from prg.classes.GSSParams import GSSParams
 from prg.filter.gss_filter import GSSFilter
 from prg.models.base_gss_model import BaseGSSModel
 from prg.utils.exceptions import GSSError
-from prg.utils.h5_constraint import apply_lehmann_constraint
+from prg.utils.h5_constraint import apply_AB_constraint
 
 # ---------------------------------------------------------------------------
 _CONFIG_FILENAME = "config.toml"
@@ -175,7 +175,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--constraint",
         action="store_true",
-        help="Enforce Lehmann's (H5)-compatible parametrisation: recompute "
+        help="Enforce the (H5)-compatible AB constraint: recompute "
         "A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k) for every "
         "regime before filtering.",
     )
@@ -228,15 +228,15 @@ def main() -> None:
     if args.verbose >= 2:
         params.summary()
 
-    # --- Apply Lehmann (H5) parametrisation to A, B (optional) ---
+    # --- Apply (H5) AB constraint to A, B (optional) ---
     if args.constraint:
-        log.info("--constraint: applying Lehmann (H5) parametrisation to A(k), B(k) …")
+        log.info("--constraint: applying (H5) AB constraint to A(k), B(k) …")
         try:
-            params = apply_lehmann_constraint(params, logger=log)
+            params = apply_AB_constraint(params, logger=log)
         except ValueError as exc:
-            log.error("Lehmann constraint failed: %s", exc)
+            log.error("AB constraint failed: %s", exc)
             sys.exit(1)
-        log.info("Lehmann constraint applied — A(k), B(k) updated for all %d regimes.", params.K)
+        log.info("AB constraint applied — A(k), B(k) updated for all %d regimes.", params.K)
         if args.verbose >= 2:
             log.info("Updated parameters:")
             params.summary()

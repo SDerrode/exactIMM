@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-05-06
+
+### Changed
+
+- **Renamed the (H5)-compatible (A, B) parametrisation** introduced in
+  v0.12.0 to **"AB constraint"** in the public API. The mathematical
+  content is unchanged; only the spelling differs (the personal name
+  attached to the original derivation is kept only in the math note
+  ``docs/wojciech/H5_isolation_difficulty.tex``). Public renames:
+
+  | v0.12.0                              | v0.13.0                  |
+  | ------------------------------------ | ------------------------ |
+  | ``compute_AB_lehmann``               | ``compute_AB``           |
+  | ``apply_lehmann_constraint``         | ``apply_AB_constraint``  |
+  | ``--constraint lehmann`` (CLI)       | ``--constraint ab``      |
+  | ``constraint='lehmann'`` (Python)    | ``constraint='ab'``      |
+  | "Lehmann constraint on (A(k), B(k))" | "AB constraint on (A(k), B(k))" |
+
+  Internal GUI methods follow the same convention
+  (``is_AB_constraint_active``, ``_recompute_AB``, ``_restore_AB``,
+  ``_on_AB_toggled``, ``_on_apply_AB_all``, ``_constraint_AB_check``).
+
 ## [0.12.0] — 2026-05-06
 
 ### Added

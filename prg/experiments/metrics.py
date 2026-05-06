@@ -10,7 +10,7 @@ that the Monte-Carlo runner can call them from any parallelisation backend.
 
 Functions
 ---------
-dof_h5                — free-parameter count d_{H5}(K, q, s) under Lehmann
+dof_h5                — free-parameter count d_{H5}(K, q, s) under the AB constraint
 compute_rmse          — root mean squared filtering error (scalar)
 compute_nees          — average normalised estimation error squared (ANEES)
 compute_ljung_box     — Ljung–Box test p-value for innovation whiteness
@@ -40,10 +40,10 @@ __all__ = [
 def dof_h5(K: int, q: int, s: int) -> int:
     """
     Number of free parameters of an (H5)-compatible GSS(K, q, s) model
-    under Lehmann's closed-form parametrisation.
+    under the closed-form AB constraint.
 
-    Under (H5) Lehmann (Note manuscrite, 6 May 2026) showed that A(k)
-    and B(k) are *both* determined by (C, D, Δ, Σ_V) via
+    Under (H5) the closed-form AB constraint determines A(k) and B(k)
+    *both* from (C, D, Δ, Σ_V) via
 
         A(k) = Δ(k) Σ_V(k)⁻¹ C(k),
         B(k) = Δ(k) Σ_V(k)⁻¹ D(k),

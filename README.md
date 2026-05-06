@@ -24,8 +24,8 @@ The central objective is to compute $\mathbb{E}[X_n \mid Y_{1:n}]$ efficiently (
 
 The (H5) structural assumption translates into an algebraic constraint
 between the seven block matrices $(A, B, C, D, \Sigma_U, \Sigma_V, \Delta)$
-of each regime. Since **v0.12.0** the constraint is enforced by
-**Lehmann's closed-form parametrisation** (note manuscrite, May 2026):
+of each regime. Since **v0.13.0** the constraint is enforced by the
+closed-form **AB constraint**:
 
 $$
 A(k) = \Delta(k)\,\Sigma_V(k)^{-1}\,C(k),
@@ -39,19 +39,19 @@ regime-pair equations of (H5) trivially satisfied. The free blocks per
 regime become $(C, D, \Sigma_U, \Sigma_V, \Delta)$.
 
 ```python
-from prg.utils.h5_constraint import compute_AB_lehmann, apply_lehmann_constraint
+from prg.utils.h5_constraint import compute_AB, apply_AB_constraint
 
 # Single regime: closed-form helper
-A, B = compute_AB_lehmann(C, D, Delta, Sigma_V)
+A, B = compute_AB(C, D, Delta, Sigma_V)
 
 # All regimes at once: project an existing GSSParams onto the (H5) manifold
-constrained_params = apply_lehmann_constraint(params)
+constrained_params = apply_AB_constraint(params)
 ```
 
-In the GUI, a single "Lehmann constraint on (A(k), B(k))" checkbox per
+In the GUI, a single "AB constraint on (A(k), B(k))" checkbox per
 regime locks both blocks simultaneously. See the
-[CHANGELOG](CHANGELOG.md) entry for v0.12.0 for details and a v0.11→v0.12
-migration table.
+[CHANGELOG](CHANGELOG.md) for details and the v0.11 → v0.13 migration
+table.
 
 ---
 
@@ -63,7 +63,7 @@ exactIMM/
 │   ├── utils/
 │   │   ├── exceptions.py       # GSSError hierarchy
 │   │   ├── matrix_checks.py    # CovarianceMatrix, StochasticMatrix diagnostics
-│   │   └── h5_constraint.py    # Lehmann (H5) closed form: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D
+│   │   └── h5_constraint.py    # (H5) AB constraint closed form: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D
 │   ├── models/
 │   │   ├── base_gss_model.py   # BaseGSSModel (abstract)
 │   │   └── model_gss_K2_q1_s1.py  # Example: K=2, q=1, s=1
@@ -133,7 +133,7 @@ python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42
 # Dry run (no CSV written), full debug output
 python -m prg.simulate --model model_gss_K2_q1_s1 -N 500 --no-save --log-level DEBUG -v 2
 
-# Enforce Lehmann (H5) parametrisation: A, B from (C, D, Δ, Σ_V) before simulating
+# Enforce (H5) AB constraint: A, B from (C, D, Δ, Σ_V) before simulating
 python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42 --constraint
 
 # Custom output directory
@@ -153,7 +153,7 @@ Log files are written automatically to `logs/`.
 | `--output` | auto | Output CSV filename |
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip CSV writing (dry run) |
-| `--constraint` | `False` | Apply Lehmann (H5)-compatible parametrisation: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
+| `--constraint` | `False` | Apply (H5)-compatible AB constraint: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
 
 ---
@@ -170,7 +170,7 @@ python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42
 python -m prg.filter.main --model model_gss_K2_q1_s1 \
     --csv data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
 
-# Enforce Lehmann (H5) parametrisation before filtering
+# Enforce (H5) AB constraint before filtering
 python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42 --constraint
 
 # Dry run (no CSV written)
@@ -197,7 +197,7 @@ Output CSV columns: `n, E_x_0, …, E_x_{q-1}, V_x_0, …, V_x_{q-1}, p_r_0, …
 | `--output` | auto | Output CSV filename for filter results |
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip all CSV writing (dry run) |
-| `--constraint` | `False` | Apply Lehmann (H5)-compatible parametrisation: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
+| `--constraint` | `False` | Apply (H5)-compatible AB constraint: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
 
 ### Python API
@@ -221,18 +221,18 @@ for y in observations:          # y shape (s,) or (s, 1)
 sim_path, df = filt.run(N=1000, seed=42, output_dir="data/simulated")
 ```
 
-### Lehmann (H5) parametrisation API
+### (H5) AB constraint API
 
 ```python
 from prg.utils.h5_constraint import (
-    apply_lehmann_constraint, compute_AB_lehmann, compute_h5_residual,
+    apply_AB_constraint, compute_AB, compute_h5_residual,
 )
 
 # Apply A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D to all regimes at once
-constrained_params = apply_lehmann_constraint(params)
+constrained_params = apply_AB_constraint(params)
 
 # Or compute (A, B) for a single regime from (C, D, Δ, Σ_V)
-A, B = compute_AB_lehmann(C, D, Delta, SV)
+A, B = compute_AB(C, D, Delta, SV)
 
 # Verify any (A, B, C, D, Σ_U, Δ, Σ_V) satisfies (H5):
 F = compute_h5_residual(A, B, C, D, SU, Delta, SV)  # ‖F‖_F = 0 ⇔ (H5) holds
@@ -264,11 +264,11 @@ $(R_n, X_n, Y_n)$ CSV (such as those produced by the simulator).
 # Estimate from a simulated CSV (no constraint)
 python -m prg.learning.supervised data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
 
-# Apply Lehmann (H5) parametrisation post-hoc and force Δ = 0
-python -m prg.learning.supervised sim.csv --constraint lehmann --delta-zero
+# Apply (H5) AB constraint post-hoc and force Δ = 0
+python -m prg.learning.supervised sim.csv --constraint ab --delta-zero
 
-# Lehmann + custom output file
-python -m prg.learning.supervised sim.csv --constraint lehmann \
+# AB constraint + custom output file
+python -m prg.learning.supervised sim.csv --constraint ab \
     --output prg/models/model_my_estimated.py --model-name model_my_estimated
 
 # Verbose output (per-regime summaries)
@@ -287,7 +287,7 @@ python -m prg.filter.main --model model_learned_K2_q1_s1 -N 1000 --seed 42
 | Option | Default | Description |
 |---|---|---|
 | `csv` | — | Path to simulation CSV (required) |
-| `--constraint lehmann` | `None` | Apply Lehmann (H5) parametrisation post-hoc |
+| `--constraint ab` | `None` | Apply (H5) AB constraint post-hoc |
 | `--delta-zero` | `False` | Force Δ(k) = 0 before the projection |
 | `--output PATH` | auto | Destination `.py` file |
 | `--model-name NAME` | auto | File/class base name |
@@ -300,7 +300,7 @@ from prg.learning.supervised import fit_supervised, _read_csv
 import pathlib
 
 rs, xs, ys, K, q, s = _read_csv(pathlib.Path("sim.csv"))
-params = fit_supervised(rs, xs, ys, K, q, s, constraint="lehmann", delta_zero=True)
+params = fit_supervised(rs, xs, ys, K, q, s, constraint="ab", delta_zero=True)
 
 # params is a dict ready for GSSParams.from_model() or code generation
 from prg.classes.GSSParams import GSSParams
@@ -329,7 +329,7 @@ For each regime $k$ the model is $Z_{n+1} = F(k)\,Z_n + b(k) + W_{n+1}$.
 
 2. **Δ = 0** *(optional)* — zero out the off-diagonal block of $\Sigma_W(k)$.
 
-3. **Lehmann (H5) projection** *(optional)* — recompute $A$ and $B$
+3. **(H5) AB projection** *(optional)* — recompute $A$ and $B$
    *jointly* via the closed form $A = \Delta \Sigma_V^{-1} C$,
    $B = \Delta \Sigma_V^{-1} D$, which makes (H5) hold uniformly in
    $\Sigma(r_1)$ for every regime pair.
@@ -352,13 +352,13 @@ python -m prg.learning.semi_supervised data/simulated/sim.csv -K 2
 python -m prg.learning.semi_supervised sim.csv -K 2 \
     --n-inits 20 --seed 42 -v
 
-# Lehmann (H5) parametrisation applied once at the end of EM (default — log-lik monotone)
+# (H5) AB constraint applied once at the end of EM (default — log-lik monotone)
 python -m prg.learning.semi_supervised sim.csv -K 2 \
-    --constraint lehmann --delta-zero
+    --constraint ab --delta-zero
 
 # Same constraint, but enforced at every M-step (Generalized EM mode)
 python -m prg.learning.semi_supervised sim.csv -K 2 \
-    --constraint lehmann --delta-zero --constraint-each-iter
+    --constraint ab --delta-zero --constraint-each-iter
 ```
 
 ### CLI options
@@ -367,7 +367,7 @@ python -m prg.learning.semi_supervised sim.csv -K 2 \
 |---|---|---|
 | `csv` | — | Input CSV (the `r` column is ignored if present) |
 | `-K`, `--K` | — | Number of regimes (required) |
-| `--constraint lehmann` | `None` | Apply Lehmann (H5) parametrisation (post-hoc by default) |
+| `--constraint ab` | `None` | Apply (H5) AB constraint (post-hoc by default) |
 | `--delta-zero` | `False` | Force Δ(k) = 0 before the projection |
 | `--constraint-each-iter` | `False` | Apply the constraint at every M-step (GEM); otherwise applied once at the end |
 | `--n-inits` | `10` | Number of independent EM restarts |
@@ -652,7 +652,7 @@ If you use this code or the (H5) framework in your work, please cite:
   title        = {{On Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
   howpublished = {\url{https://github.com/SDerrode/exactIMM}},
-  note         = {Software v0.12.0, accompanying paper preprint},
+  note         = {Software v0.13.0, accompanying paper preprint},
 }
 ```
 

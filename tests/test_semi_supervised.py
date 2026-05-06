@@ -336,7 +336,7 @@ class TestEMRun:
 
     def test_with_constraint_b(self, simulated):
         """Default (post-hoc) mode: H5 still satisfied at the end."""
-        from prg.utils.h5_constraint import compute_B_from_h5
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
         xs, ys, _, _ = simulated
         Z = np.hstack([xs, ys])
@@ -346,21 +346,20 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="b",
+            constraint="lehmann",
             delta_zero=False,
             max_iter=10,
             tol=1e-5,
             verbose=False,
         )
         for k in range(2):
-            B_check = compute_B_from_h5(
-                params["A_list"][k],
+            A_check, B_check = compute_AB_lehmann(
                 params["C_list"][k],
                 params["D_list"][k],
-                params["Sigma_U_list"][k],
                 params["Delta_list"][k],
                 params["Sigma_V_list"][k],
             )
+            np.testing.assert_allclose(params["A_list"][k], A_check, atol=1e-8)
             np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
 
     def test_post_hoc_keeps_log_lik_monotone(self, simulated):
@@ -377,7 +376,7 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="b",
+            constraint="lehmann",
             delta_zero=False,
             max_iter=20,
             tol=1e-8,
@@ -396,7 +395,7 @@ class TestEMRun:
         during the loop (so log-lik may not be strictly monotone — only
         check final feasibility).
         """
-        from prg.utils.h5_constraint import compute_B_from_h5
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
         xs, ys, _, _ = simulated
         Z = np.hstack([xs, ys])
@@ -406,7 +405,7 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="b",
+            constraint="lehmann",
             delta_zero=False,
             max_iter=10,
             tol=1e-5,
@@ -414,14 +413,13 @@ class TestEMRun:
             constraint_each_iter=True,
         )
         for k in range(2):
-            B_check = compute_B_from_h5(
-                params["A_list"][k],
+            A_check, B_check = compute_AB_lehmann(
                 params["C_list"][k],
                 params["D_list"][k],
-                params["Sigma_U_list"][k],
                 params["Delta_list"][k],
                 params["Sigma_V_list"][k],
             )
+            np.testing.assert_allclose(params["A_list"][k], A_check, atol=1e-8)
             np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
 
     def test_post_hoc_vs_each_iter_differ(self, simulated):
@@ -438,7 +436,7 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="b",
+            constraint="lehmann",
             delta_zero=False,
             max_iter=15,
             tol=1e-6,
@@ -451,7 +449,7 @@ class TestEMRun:
             q=1,
             s=1,
             init_seed=0,
-            constraint="b",
+            constraint="lehmann",
             delta_zero=False,
             max_iter=15,
             tol=1e-6,
@@ -532,22 +530,21 @@ class TestFitSemiSupervised:
             xs,
             ys,
             K=2,
-            constraint="b",
+            constraint="lehmann",
             n_inits=2,
             max_iter=15,
             seed=0,
         )
-        from prg.utils.h5_constraint import compute_B_from_h5
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
         for k in range(2):
-            B_check = compute_B_from_h5(
-                params["A_list"][k],
+            A_check, B_check = compute_AB_lehmann(
                 params["C_list"][k],
                 params["D_list"][k],
-                params["Sigma_U_list"][k],
                 params["Delta_list"][k],
                 params["Sigma_V_list"][k],
             )
+            np.testing.assert_allclose(params["A_list"][k], A_check, atol=1e-8)
             np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
 
     def test_constraint_each_iter_passes(self, simulated):
@@ -557,23 +554,22 @@ class TestFitSemiSupervised:
             xs,
             ys,
             K=2,
-            constraint="b",
+            constraint="lehmann",
             constraint_each_iter=True,
             n_inits=2,
             max_iter=15,
             seed=0,
         )
-        from prg.utils.h5_constraint import compute_B_from_h5
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
         for k in range(2):
-            B_check = compute_B_from_h5(
-                params["A_list"][k],
+            A_check, B_check = compute_AB_lehmann(
                 params["C_list"][k],
                 params["D_list"][k],
-                params["Sigma_U_list"][k],
                 params["Delta_list"][k],
                 params["Sigma_V_list"][k],
             )
+            np.testing.assert_allclose(params["A_list"][k], A_check, atol=1e-8)
             np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
 
 
@@ -694,7 +690,7 @@ class TestCLI:
 
     def test_constraint_each_iter_flag(self, simulated, tmp_path):
         """The --constraint-each-iter flag is accepted and produces a model."""
-        from prg.utils.h5_constraint import compute_B_from_h5
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
         _, _, _, csv = simulated
         out = tmp_path / "model_em_gem.py"
@@ -704,7 +700,7 @@ class TestCLI:
                 "-K",
                 "2",
                 "--constraint",
-                "b",
+                "lehmann",
                 "--constraint-each-iter",
                 "--n-inits",
                 "2",
@@ -723,19 +719,14 @@ class TestCLI:
             inst = mod.ModelEmGem()
             p = inst.get_params()
             for k in range(2):
-                B_check = compute_B_from_h5(
-                    p["A_list"][k],
+                A_check, B_check = compute_AB_lehmann(
                     p["C_list"][k],
                     p["D_list"][k],
-                    p["Sigma_U_list"][k],
                     p["Delta_list"][k],
                     p["Sigma_V_list"][k],
                 )
-                np.testing.assert_allclose(
-                    p["B_list"][k],
-                    B_check,
-                    atol=1e-8,
-                )
+                np.testing.assert_allclose(p["A_list"][k], A_check, atol=1e-8)
+                np.testing.assert_allclose(p["B_list"][k], B_check, atol=1e-8)
         finally:
             sys.path.pop(0)
             sys.modules.pop("model_em_gem", None)

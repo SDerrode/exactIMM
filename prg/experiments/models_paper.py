@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from prg.utils.h5_constraint import compute_B_from_h5, compute_h5_residual
+from prg.utils.h5_constraint import compute_AB_lehmann, compute_h5_residual
 
 __all__ = [
     "get_params_M1",
@@ -64,31 +64,31 @@ def get_params_M1() -> dict:
         P = [[0.97, 0.03], [0.02, 0.98]]
 
     Per-regime parameters (regime index 0 = regime 1 in the paper)
-        A:   [0.8]   / [0.5]
         C:   [0.2]   / [0.1]
         D:   [0.7]   / [0.6]
         Σ_U: [0.10]  / [0.20]
         Δ:   [0.05]  / [0.02]
         Σ_V: [0.10]  / [0.15]
-        B:   computed from H5 projection (eq. 4.8)
+        A, B: computed from the Lehmann (H5)-compatible parametrisation
+              A = Δ Σ_V⁻¹ C,   B = Δ Σ_V⁻¹ D.
         b:   [0.10, 0.05]^T  /  [-0.05, 0.02]^T
     """
     K, q, s = 2, 1, 1
 
     P = np.array([[0.97, 0.03], [0.02, 0.98]])
 
-    A_raw = [np.array([[0.8]]), np.array([[0.5]])]
     C_raw = [np.array([[0.2]]), np.array([[0.1]])]
     D_raw = [np.array([[0.7]]), np.array([[0.6]])]
     SU = [np.array([[0.10]]), np.array([[0.20]])]
     Dt = [np.array([[0.05]]), np.array([[0.02]])]
     SV = [np.array([[0.10]]), np.array([[0.15]])]
 
-    B_list = []
+    A_list, B_list = [], []
     for k in range(K):
-        B = compute_B_from_h5(A_raw[k], C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
-        _check_h5("M1", k, A_raw[k], B, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
-        B_list.append(B)
+        A_k, B_k = compute_AB_lehmann(C_raw[k], D_raw[k], Dt[k], SV[k])
+        _check_h5("M1", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
+        A_list.append(A_k)
+        B_list.append(B_k)
 
     dim_z = q + s
     b_list = [
@@ -103,7 +103,7 @@ def get_params_M1() -> dict:
         q=q,
         s=s,
         P=P,
-        A_list=A_raw,
+        A_list=A_list,
         B_list=B_list,
         C_list=C_raw,
         D_list=D_raw,
@@ -126,7 +126,8 @@ def get_params_M2() -> dict:
     """
     Return a parameter dict for model M2 (K=2, q=s=2).
 
-    Full 2×2 matrices per regime; B computed from H5 projection.
+    Full 2×2 matrices per regime; A, B computed from the Lehmann
+    (H5)-compatible parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
     No bias (b_r = 0) to isolate the cross-coupling effect.
     See Table 1 in §6.1 of the paper.
     """
@@ -134,10 +135,6 @@ def get_params_M2() -> dict:
 
     P = np.array([[0.97, 0.03], [0.02, 0.98]])
 
-    A_raw = [
-        np.array([[0.80, 0.10], [0.05, 0.70]]),
-        np.array([[0.50, 0.15], [0.10, 0.60]]),
-    ]
     C_raw = [
         np.array([[0.30, 0.10], [0.05, 0.20]]),
         np.array([[0.20, 0.05], [0.10, 0.15]]),
@@ -159,11 +156,12 @@ def get_params_M2() -> dict:
         np.array([[0.12, 0.03], [0.03, 0.14]]),
     ]
 
-    B_list = []
+    A_list, B_list = [], []
     for k in range(K):
-        B = compute_B_from_h5(A_raw[k], C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
-        _check_h5("M2", k, A_raw[k], B, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
-        B_list.append(B)
+        A_k, B_k = compute_AB_lehmann(C_raw[k], D_raw[k], Dt[k], SV[k])
+        _check_h5("M2", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
+        A_list.append(A_k)
+        B_list.append(B_k)
 
     dim_z = q + s
     b_list = [np.zeros((dim_z, 1)) for _ in range(K)]
@@ -175,7 +173,7 @@ def get_params_M2() -> dict:
         q=q,
         s=s,
         P=P,
-        A_list=A_raw,
+        A_list=A_list,
         B_list=B_list,
         C_list=C_raw,
         D_list=D_raw,
@@ -200,30 +198,31 @@ def get_params_M3() -> dict:
 
     Three regimes: two persistent (0 and 2) and one transient (1).
     Non-zero bias on regimes 0 and 2.
+    A, B computed from the Lehmann parametrisation A = Δ Σ_V⁻¹ C,
+    B = Δ Σ_V⁻¹ D.
     """
     K, q, s = 3, 1, 1
 
     P = np.array([[0.95, 0.04, 0.01], [0.10, 0.80, 0.10], [0.02, 0.03, 0.95]])
 
-    A_vals = [0.85, 0.30, 0.65]
     C_vals = [0.25, 0.40, 0.10]
     D_vals = [0.65, 0.50, 0.75]
     SU_vals = [0.08, 0.25, 0.12]
     Dt_vals = [0.04, 0.02, 0.06]
     SV_vals = [0.09, 0.18, 0.11]
 
-    A_raw = [np.array([[v]]) for v in A_vals]
     C_raw = [np.array([[v]]) for v in C_vals]
     D_raw = [np.array([[v]]) for v in D_vals]
     SU = [np.array([[v]]) for v in SU_vals]
     Dt = [np.array([[v]]) for v in Dt_vals]
     SV = [np.array([[v]]) for v in SV_vals]
 
-    B_list = []
+    A_list, B_list = [], []
     for k in range(K):
-        B = compute_B_from_h5(A_raw[k], C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
-        _check_h5("M3", k, A_raw[k], B, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
-        B_list.append(B)
+        A_k, B_k = compute_AB_lehmann(C_raw[k], D_raw[k], Dt[k], SV[k])
+        _check_h5("M3", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
+        A_list.append(A_k)
+        B_list.append(B_k)
 
     dim_z = q + s
     b_list = [
@@ -239,7 +238,7 @@ def get_params_M3() -> dict:
         q=q,
         s=s,
         P=P,
-        A_list=A_raw,
+        A_list=A_list,
         B_list=B_list,
         C_list=C_raw,
         D_list=D_raw,

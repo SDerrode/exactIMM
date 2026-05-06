@@ -2,31 +2,38 @@
 """
 prg/utils/h5_constraint.py
 ==========================
-Enforce the H5 constraint on a GSSParams object.
+Lehmann's closed-form (H5)-compatible parametrisation.
 
-The constraint (eq. 16 of Article V2.docx, equivalently appendix B of
-the local paper, derived from `A Δ + B Σ_V = T M⁻¹ R` after transposing
-both sides) says that, given A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k),
-the block B(k) of the transition matrix F(k) is uniquely determined by:
+The (H5) algebraic constraint, derived from the Markovianity of (R, Y)
+(paper appendix B), reads
 
-    B(k)ᵀ = L(k)⁻¹ · (P(k) M(k)⁻¹ (Q(k) A(k)ᵀ + Δ(k)ᵀ) − Δ(k)ᵀ A(k)ᵀ)
+    Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ),
 
-where (subscript k omitted):
-    P = Δᵀ Cᵀ + Σ_V Dᵀ        (s × s)
-    Q = C Σ_U + D Δᵀ           (s × q)
-    R = C Δ + D Σ_V  (= Pᵀ)   (s × s)
-    M = Q Cᵀ + R Dᵀ + Σ_V     (s × s)   symmetric, > 0 if Σ_U, Σ_V > 0
-    L = Σ_V − P M⁻¹ Pᵀ        (s × s)   Schur complement of M
+with P = Δᵀ Cᵀ + Σ_V Dᵀ, Q = C Σ_U + D Δᵀ, R = C Δ + D Σ_V,
+M = Q Cᵀ + R Dᵀ + Σ_V. Requiring this to hold *uniformly* in the
+joint covariance Σ(r₁) = [[Σ_U, Δ], [Δᵀ, Σ_V]] (Lehmann's argument)
+collapses A and B onto the closed form
 
-The full residual form of (H5) is:
+    A = Δ Σ_V⁻¹ C,        B = Δ Σ_V⁻¹ D.
 
-    Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ).
+This is the *only* parametrisation compatible with (H5) for arbitrary
+Σ(r₁); the K² regime-pair equations of (H5) are then trivially
+satisfied. (C, D, Σ_U, Σ_V, Δ) are free.
 
 Public API
 ----------
-apply_h5_constraint(params, *, logger=None) -> GSSParams
-    Return a **new** GSSParams whose B(k) blocks satisfy the constraint.
-    Raises ValueError if the system is singular for any k.
+compute_AB_lehmann(C, D, Dt, SV) -> (A, B)
+    Closed-form A, B from C, D, Δ, Σ_V.
+apply_lehmann_constraint(params, *, logger=None) -> GSSParams
+    Return a new GSSParams with each regime's (A_k, B_k) replaced by
+    the Lehmann formula.
+compute_h5_residual(A, B, C, D, SU, Dt, SV) -> ndarray (s, q)
+    Frobenius-norm-zero ⇔ (H5) holds.
+
+Reference
+---------
+F. Lehmann, "(H5)-compatible parametrisation via uniform Σ(r₁)
+cancellation", note manuscrite (3 p.), 6 May 2026.
 """
 
 from __future__ import annotations
@@ -40,20 +47,15 @@ if TYPE_CHECKING:
     from prg.classes.GSSParams import GSSParams
 
 __all__ = [
-    "apply_h5_constraint",
-    "compute_B_from_h5",
-    "compute_A_from_h5",
-    "compute_SU_from_h5",
-    "compute_C_from_h5",
+    "apply_lehmann_constraint",
+    "compute_AB_lehmann",
     "compute_h5_residual",
 ]
 
 
 # ---------------------------------------------------------------------------
-# Residual of the (H5) algebraic constraint
+# (H5) residual
 # ---------------------------------------------------------------------------
-
-
 def compute_h5_residual(
     A: np.ndarray,  # (q, q)
     B: np.ndarray,  # (q, s)
@@ -64,31 +66,25 @@ def compute_h5_residual(
     SV: np.ndarray,  # (s, s)  Σ_V
 ) -> np.ndarray:
     """
-    Evaluate the (H5) algebraic constraint residual.
+    Evaluate the (H5) algebraic constraint residual
 
-    The constraint (eq. 16 of Article V2.docx, see also paper appendix B
-    `eq:h5_first` after transposing both sides) is
+        F = (Δᵀ Aᵀ + Σ_V Bᵀ) − P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ),
 
-        Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ)
-
-    with the auxiliary matrices
+    with the auxiliary blocks
 
         P = Δᵀ Cᵀ + Σ_V Dᵀ          (s × s)
         Q = C Σ_U + D Δᵀ            (s × q)
         R = C Δ  + D Σ_V  (= Pᵀ)    (s × s)
-        M = Q Cᵀ + R Dᵀ + Σ_V       (s × s, symmetric, > 0 if Σ_U, Σ_V > 0)
-        W = Q Aᵀ + R Bᵀ + Δᵀ        (s × q)
+        M = Q Cᵀ + R Dᵀ + Σ_V       (s × s, symmetric, ≻ 0 if Σ_U, Σ_V ≻ 0).
 
     Returns
     -------
-    F : ndarray of shape (s, q)
-        The residual ``F = Z − P M⁻¹ W`` with ``Z = Δᵀ Aᵀ + Σ_V Bᵀ``.
-        ``‖F‖ = 0`` ⇔ (H5) holds exactly.
+    F : ndarray of shape (s, q).  ``‖F‖ = 0`` ⇔ (H5) holds exactly.
 
     Raises
     ------
     numpy.linalg.LinAlgError
-        If M is singular (cannot invert).
+        If M is singular.
     """
     P = Dt.T @ C.T + SV @ D.T
     Q = C @ SU + D @ Dt.T
@@ -96,402 +92,92 @@ def compute_h5_residual(
     M = Q @ C.T + R @ D.T + SV
     W = Q @ A.T + R @ B.T + Dt.T
     Z = Dt.T @ A.T + SV @ B.T
-    X = np.linalg.solve(M, W)  # X = M⁻¹ W
-    return Z - P @ X
+    return Z - P @ np.linalg.solve(M, W)
 
 
 # ---------------------------------------------------------------------------
-# Core formula
+# Lehmann closed form
 # ---------------------------------------------------------------------------
-
-
-def compute_B_from_h5(
-    A: np.ndarray,  # (q, q)
-    C: np.ndarray,  # (s, q)
-    D: np.ndarray,  # (s, s)
-    SU: np.ndarray,  # (q, q)  Σ_U
+def compute_AB_lehmann(
+    C: np.ndarray,   # (s, q)
+    D: np.ndarray,   # (s, s)
     Dt: np.ndarray,  # (q, s)  Δ
-    SV: np.ndarray,  # (s, s)  Σ_V
-) -> np.ndarray:
+    SV: np.ndarray,  # (s, s)  Σ_V (symmetric ≻ 0)
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Compute B (q × s) from the H5 constraint (eq. 4.8).
+    Closed-form Lehmann parametrisation:
 
-    Returns
-    -------
-    ndarray of shape (q, s)
+        A = Δ Σ_V⁻¹ C,        B = Δ Σ_V⁻¹ D.
 
-    Raises
-    ------
-    ValueError
-        If M or L (Schur complement) is singular or numerically ill-conditioned.
-    """
-    P = Dt.T @ C.T + SV @ D.T
-    Q = C @ SU + D @ Dt.T
-    R = C @ Dt + D @ SV
-    M = Q @ C.T + R @ D.T + SV  # s × s, symmetric
-
-    cond_M = np.linalg.cond(M)
-    if cond_M > 1e12:
-        raise ValueError(
-            f"M is ill-conditioned (cond = {cond_M:.3e}); cannot reliably solve for B."
-        )
-
-    # PM_inv = P M⁻¹  — solved as (Mᵀ \ Pᵀ)ᵀ to avoid forming explicit inverse
-    try:
-        PM_inv = np.linalg.solve(M.T, P.T).T
-    except np.linalg.LinAlgError as exc:
-        raise ValueError(f"M is singular: {exc}") from exc
-
-    L = SV - PM_inv @ R  # Schur complement, s × s
-    rhs = PM_inv @ (Q @ A.T + Dt.T) - Dt.T @ A.T  # s × q
-
-    cond_L = np.linalg.cond(L)
-    if cond_L > 1e12:
-        raise ValueError(
-            f"L is ill-conditioned (cond = {cond_L:.3e}); cannot reliably solve for B."
-        )
-
-    try:
-        B_T = np.linalg.solve(L, rhs)
-    except np.linalg.LinAlgError as exc:
-        raise ValueError(f"L (Schur complement) is singular: {exc}") from exc
-
-    if not np.isfinite(B_T).all():
-        raise ValueError("B_T contains non-finite values after solving.")
-
-    return B_T.T  # q × s
-
-
-def compute_A_from_h5(
-    B: np.ndarray,  # (q, s)
-    C: np.ndarray,  # (s, q)
-    D: np.ndarray,  # (s, s)
-    SU: np.ndarray,  # (q, q)  Σ_U
-    Dt: np.ndarray,  # (q, s)  Δ
-    SV: np.ndarray,  # (s, s)  Σ_V
-) -> np.ndarray:
-    """
-    Compute A (q × q) from the H5 constraint with B fixed (eq. 4.8).
-
-    Rearranging the constraint for A gives the linear system:
-        G Aᵀ = rhs_A
-    with  G = PM⁻¹Q − Δᵀ  (s × q)
-          rhs_A = L Bᵀ − PM⁻¹Δᵀ  (s × q)
-
-    Returns
-    -------
-    ndarray of shape (q, q)
-
-    Raises
-    ------
-    ValueError
-        If M or L is ill-conditioned, or A is not uniquely determined.
-    """
-    P = Dt.T @ C.T + SV @ D.T
-    Q = C @ SU + D @ Dt.T
-    R = C @ Dt + D @ SV
-    M = Q @ C.T + R @ D.T + SV
-
-    cond_M = np.linalg.cond(M)
-    if cond_M > 1e12:
-        raise ValueError(
-            f"M is ill-conditioned (cond = {cond_M:.3e}); cannot reliably solve for A."
-        )
-
-    try:
-        PM_inv = np.linalg.solve(M.T, P.T).T
-    except np.linalg.LinAlgError as exc:
-        raise ValueError(f"M is singular: {exc}") from exc
-
-    L = SV - PM_inv @ R
-
-    cond_L = np.linalg.cond(L)
-    if cond_L > 1e12:
-        raise ValueError(
-            f"L is ill-conditioned (cond = {cond_L:.3e}); cannot reliably solve for A."
-        )
-
-    G = PM_inv @ Q - Dt.T  # s × q
-    rhs_A = L @ B.T - PM_inv @ Dt.T  # s × q
-
-    # Solve G @ A^T = rhs_A (lstsq handles s ≠ q)
-    A_T, _, rank, _ = np.linalg.lstsq(G, rhs_A, rcond=None)
-
-    if rank < min(G.shape):
-        raise ValueError(f"G is rank-deficient (rank={rank}); A is not uniquely determined.")
-
-    if not np.isfinite(A_T).all():
-        raise ValueError("A contains non-finite values after solving.")
-
-    return A_T.T  # q × q
-
-
-def compute_SU_from_h5(
-    A: np.ndarray,  # (q, q)
-    B: np.ndarray,  # (q, s)
-    C: np.ndarray,  # (s, q)
-    D: np.ndarray,  # (s, s)
-    Dt: np.ndarray,  # (q, s)  Δ
-    SV: np.ndarray,  # (s, s)  Σ_V
-) -> np.ndarray:
-    """
-    Compute Σ_U (q × q) from the H5 constraint with A, B, C, D, Δ, Σ_V fixed.
-
-    The constraint  Z = P M⁻¹ W  is equivalent (when P is invertible) to
-    the form  W = M P⁻¹ Z, which is *exact* and linear in Σ_U after
-    substituting M = M₀ + C Σ_U Cᵀ and W = W₀ + C Σ_U Aᵀ:
-
-        C Σ_U (Aᵀ − Cᵀ P⁻¹ Z) = M₀ P⁻¹ Z − W₀,
-
-    where Z = Δᵀ Aᵀ + Σ_V Bᵀ (LHS of (H5)),
-          R  = C Δ + D Σ_V,
-          M₀ = (D Δᵀ) Cᵀ + R Dᵀ + Σ_V (Σ_U-independent part of M),
-          W₀ = (D Δᵀ) Aᵀ + R Bᵀ + Δᵀ (Σ_U-independent part of W).
-
-    Setting F := Aᵀ − Cᵀ P⁻¹ Z (q × q), the vectorised (qs × q²) system
-    reads
-        (Fᵀ ⊗ C) vec(Σ_U) = vec(M₀ P⁻¹ Z − W₀).
-
-    The solution is then symmetrised (Σ_U ← ½(Σ_U + Σ_Uᵀ)) and
-    Cholesky-checked for positive definiteness.
-
-    Returns
-    -------
-    ndarray of shape (q, q), symmetric positive definite
-
-    Raises
-    ------
-    ValueError
-        If P is singular (e.g. D = 0 and Δ = 0), if the Kronecker system
-        is rank-deficient (e.g. F not full rank — possible when A, B, C, D,
-        Δ, Σ_V are themselves (H5)-compatible *for any* Σ_U via the Lehmann
-        parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D), or if the recovered
-        Σ_U is not positive definite.
-    """
-    P = Dt.T @ C.T + SV @ D.T  # s × s
-    Q0 = D @ Dt.T  # s × q  (Q = C Σ_U + Q0)
-    R = C @ Dt + D @ SV  # s × s
-    M0 = Q0 @ C.T + R @ D.T + SV  # s × s  (M = M0 + C Σ_U Cᵀ)
-
-    Z = Dt.T @ A.T + SV @ B.T  # s × q   (LHS of (H5))
-    W0 = Q0 @ A.T + R @ B.T + Dt.T  # s × q  (Σ_U-independent part of W)
-
-    cond_P = np.linalg.cond(P)
-    if cond_P > 1e12:
-        raise ValueError(
-            f"P is ill-conditioned (cond = {cond_P:.3e}); cannot reliably "
-            "solve for Σ_U via the W = M P⁻¹ Z form."
-        )
-
-    try:
-        P_inv_Z = np.linalg.solve(P, Z)  # s × q
-    except np.linalg.LinAlgError as exc:
-        raise ValueError(f"P is singular: {exc}") from exc
-
-    F = A.T - C.T @ P_inv_Z  # q × q
-    RHS = M0 @ P_inv_Z - W0  # s × q
-
-    KronMat = np.kron(F.T, C)  # (sq × q²)
-    rhs_vec = RHS.ravel(order="F")  # (sq,)
-
-    SU_vec, _, rank, _ = np.linalg.lstsq(KronMat, rhs_vec, rcond=None)
-
-    q = A.shape[0]
-    if rank < q * q:
-        raise ValueError(
-            f"Kronecker system is rank-deficient (rank={rank} < {q * q}); "
-            "Σ_U is not uniquely determined (the model may already satisfy "
-            "the Lehmann parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D, in "
-            "which case (H5) holds for any Σ_U)."
-        )
-
-    SU = SU_vec.reshape(q, q, order="F")
-    SU = (SU + SU.T) / 2  # enforce symmetry
-
-    if not np.isfinite(SU).all():
-        raise ValueError("Σ_U contains non-finite values after solving.")
-
-    try:
-        np.linalg.cholesky(SU)
-    except np.linalg.LinAlgError:
-        raise ValueError("Computed Σ_U is not positive definite.")
-
-    return SU
-
-
-def compute_C_from_h5(
-    A: np.ndarray,  # (q, q)
-    B: np.ndarray,  # (q, s)
-    D: np.ndarray,  # (s, s)
-    SU: np.ndarray,  # (q, q)  Σ_U
-    Dt: np.ndarray,  # (q, s)  Δ
-    SV: np.ndarray,  # (s, s)  Σ_V
-    *,
-    C_init: np.ndarray | None = None,
-    max_iter: int = 50,
-    tol: float = 1e-9,
-    lambda_relax: float = 0.5,
-) -> np.ndarray:
-    """
-    Compute C (s × q) from the H5 constraint by fixed-point iteration.
-
-    Unlike A, B, and Σ_U — which give linear systems — the H5 constraint is
-    *quadratic* in C through both M = QCᵀ + RDᵀ + Σ_V (with Q, R linear in C)
-    and W = CK + W₀ (linear in C). This function uses a frozen-Jacobi
-    iteration: at step (n), G̃ := P̃ M̃⁻¹ is frozen at the previous iterate,
-    and the constraint Z = G W = G(CK + W₀) becomes the linear system
-
-        G̃ C K = T̃ ,    T̃ := Z − G̃ W₀
-
-    solved by lstsq, then relaxed:
-
-        C^(n+1) ← (1 − λ) C̃ + λ C_lstsq
-
-    Convergence is monitored on the full non-linearised residual
-    F(C) = Z − P(C) M(C)⁻¹ W(C) (which is the actual H5 constraint).
-
-    Initialising at C_init = 0 selects the branch closest to the CGOMSM
-    solution (C = 0 corresponds to hypothesis H4).
+    A model with these blocks satisfies (H5) for every regime pair
+    (r₁, r₂), independently of Σ_U.
 
     Parameters
     ----------
-    A, B, D, SU, Dt, SV : ndarray
-        The six fixed matrices (shapes as in compute_B_from_h5).
-    C_init : ndarray of shape (s, q), optional
-        Initial iterate.  Default: zeros (CGOMSM branch).
-    max_iter : int
-        Maximum number of iterations (default 50).
-    tol : float
-        Convergence threshold on ‖F(C)‖_F / max(1, ‖Z‖_F) (default 1e-9).
-    lambda_relax : float
-        Relaxation factor ∈ (0, 1] (default 0.5).
+    C : ndarray (s, q)
+    D : ndarray (s, s)
+    Dt : ndarray (q, s)  -- Δ
+    SV : ndarray (s, s)  -- Σ_V (symmetric positive definite)
 
     Returns
     -------
-    ndarray of shape (s, q)
+    (A, B) : tuple of ndarrays of shapes (q, q) and (q, s).
 
     Raises
     ------
     ValueError
-        If M̃ or the Kronecker system is ill-conditioned, if C is not
-        uniquely determined, or if the iteration does not converge.
+        If Σ_V is singular or ill-conditioned.
     """
-    q = A.shape[0]
-    s = D.shape[0]
-    C = np.zeros((s, q)) if C_init is None else np.array(C_init, dtype=float)
-
-    # Quantities constant in C
-    Z = Dt.T @ A.T + SV @ B.T  # s × q  (= lhs of H5: Δᵀ Aᵀ + Σ_V Bᵀ)
-    K = SU @ A.T + Dt @ B.T  # q × q
-    W0 = D @ Dt.T @ A.T + D @ SV @ B.T + Dt.T  # s × q  (= W at C=0)
-    Z_norm = max(float(np.linalg.norm(Z, "fro")), 1.0)
-
-    def _residual(C_: np.ndarray) -> np.ndarray:
-        """F(C) = Z − P M⁻¹ W  (the H5 constraint in residual form)."""
-        Q_ = C_ @ SU + D @ Dt.T
-        R_ = C_ @ Dt + D @ SV
-        P_ = Dt.T @ C_.T + SV @ D.T
-        M_ = Q_ @ C_.T + R_ @ D.T + SV
-        W_ = Q_ @ A.T + R_ @ B.T + Dt.T
-        # Solve M_ X = W_  ⟹  X = M_⁻¹ W_
-        X, _, _, _ = np.linalg.lstsq(M_, W_, rcond=1e-12)
-        return Z - P_ @ X
-
-    res_norm = float(np.linalg.norm(_residual(C), "fro")) / Z_norm
-
-    for _it in range(max_iter):
-        if res_norm < tol:
-            break
-
-        # Freeze current C in M̃ and P̃; keep C in W = C K + W₀
-        Q_t = C @ SU + D @ Dt.T
-        R_t = C @ Dt + D @ SV
-        P_t = Dt.T @ C.T + SV @ D.T
-        M_t = Q_t @ C.T + R_t @ D.T + SV  # s × s
-
-        # G̃ = P̃ M̃⁻¹  (s × s), computed via lstsq for stability
-        # G̃ X = P_t  ⟺  M_t^T G̃^T = P_t^T
-        G_t = np.linalg.lstsq(M_t.T, P_t.T, rcond=1e-12)[0].T  # s × s
-
-        # T̃ = Z − G̃ W₀  (constant part of the rhs for this frozen iterate)
-        T_t = Z - G_t @ W0  # s × q
-
-        # Solve  G̃ C K = T̃  ⟺  (Kᵀ ⊗ G̃) vec(C) = vec(T̃)
-        KronMat = np.kron(K.T, G_t)  # (sq × sq)
-        rhs_vec = T_t.ravel(order="F")  # (sq,)
-        C_vec, _, rank, _ = np.linalg.lstsq(KronMat, rhs_vec, rcond=1e-12)
-
-        if rank < s * q:
-            raise ValueError(
-                f"Kronecker system is rank-deficient (rank={rank} < {s * q}) "
-                f"at iteration {_it}; C is not uniquely determined."
-            )
-
-        C_new = C_vec.reshape(s, q, order="F")
-
-        # Armijo-style line search: halve λ until residual decreases
-        lam = lambda_relax
-        for _ in range(8):
-            C_try = (1.0 - lam) * C + lam * C_new
-            res_try = float(np.linalg.norm(_residual(C_try), "fro")) / Z_norm
-            if res_try <= res_norm or lam < 1e-4:
-                break
-            lam *= 0.5
-
-        C = C_try
-        res_norm = res_try
-
-    if res_norm >= tol:
+    cond_SV = np.linalg.cond(SV)
+    if cond_SV > 1e12:
         raise ValueError(
-            f"compute_C_from_h5 did not converge after {max_iter} iterations "
-            f"(residual = {res_norm:.3e} > tol = {tol:.3e}). "
-            "Try increasing max_iter, reducing lambda_relax, or providing C_init."
+            f"Σ_V is ill-conditioned (cond = {cond_SV:.3e}); "
+            "cannot reliably solve A = Δ Σ_V⁻¹ C."
         )
-
-    if not np.isfinite(C).all():
-        raise ValueError("C contains non-finite values after iteration.")
-
-    return C
+    try:
+        SV_inv_C = np.linalg.solve(SV, C)  # Σ_V⁻¹ C  (s × q)
+        SV_inv_D = np.linalg.solve(SV, D)  # Σ_V⁻¹ D  (s × s)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError(f"Σ_V is singular: {exc}") from exc
+    A = Dt @ SV_inv_C  # (q, q)
+    B = Dt @ SV_inv_D  # (q, s)
+    return A, B
 
 
 # ---------------------------------------------------------------------------
-# High-level function
+# Application to a GSSParams object
 # ---------------------------------------------------------------------------
-
-
-def apply_h5_constraint(
+def apply_lehmann_constraint(
     params: GSSParams,
     *,
     logger: logging.Logger | None = None,
 ) -> GSSParams:
     """
-    Return a **new** GSSParams whose B(k) blocks satisfy the H5 constraint.
-
-    For each regime k, B(k) is replaced by the solution of eq. (4.8).
-    All other parameters (A, C, D, noise covariances, biases, …) are
+    Return a new GSSParams whose A(k), B(k) blocks are replaced by the
+    Lehmann closed-form ``A_k = Δ_k Σ_V_k⁻¹ C_k``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``
+    for every regime k. C, D, Σ_U, Σ_V, Δ, Π, π₀, μ_z₀, Σ_z₀, b are
     preserved unchanged.
 
     Parameters
     ----------
     params : GSSParams
-        Original parameter set.
     logger : logging.Logger, optional
-        If provided, INFO messages report the per-regime B correction and
-        the Frobenius-norm distance ‖B_new − B_old‖_F.
+        If provided, INFO messages report the per-regime ‖A_new − A_old‖_F
+        and ‖B_new − B_old‖_F.
 
     Returns
     -------
     GSSParams
-        New parameter set with corrected B matrices.
+        A *new* object with updated A, B blocks.
 
     Raises
     ------
     ValueError
-        If the constraint system is singular for any regime k.
+        If Σ_V(k) is singular for any k.
     """
     # Import here to avoid circular imports at module level
     from prg.classes.FMatrix import FMatrix
-    from prg.classes.GSSParams import GSSParams
+    from prg.classes.GSSParams import GSSParams as _GSSParams
 
     log = logger or logging.getLogger("exactIMM.h5_constraint")
     K, q, s = params.K, params.q, params.s
@@ -502,48 +188,38 @@ def apply_h5_constraint(
     D_list: list[np.ndarray] = []
 
     for k in range(K):
-        A = params.f_matrix.A(k)
-        C = params.f_matrix.C(k)
-        D = params.f_matrix.D(k)
-        SU = params.noise_cov.Sigma_U(k)
-        Dt = params.noise_cov.Delta(k)
-        SV = params.noise_cov.Sigma_V(k)
+        C_k = params.f_matrix.C(k)
+        D_k = params.f_matrix.D(k)
+        Dt_k = params.noise_cov.Delta(k)
+        SV_k = params.noise_cov.Sigma_V(k)
 
         try:
-            B_new = compute_B_from_h5(A, C, D, SU, Dt, SV)
+            A_new, B_new = compute_AB_lehmann(C_k, D_k, Dt_k, SV_k)
         except ValueError as exc:
-            raise ValueError(f"H5 constraint cannot be satisfied for regime k={k}: {exc}") from exc
+            raise ValueError(
+                f"Lehmann constraint cannot be applied for regime k={k}: {exc}"
+            ) from exc
 
+        A_old = params.f_matrix.A(k)
         B_old = params.f_matrix.B(k)
-        delta = float(np.linalg.norm(B_new - B_old, "fro"))
         log.info(
-            "k=%d  B corrected  ‖ΔB‖_F = %.4g  (old %s → new %s)",
+            "k=%d  Lehmann  ‖ΔA‖_F = %.4g, ‖ΔB‖_F = %.4g",
             k,
-            delta,
-            np.array2string(B_old.ravel(), precision=4, suppress_small=True),
-            np.array2string(B_new.ravel(), precision=4, suppress_small=True),
+            float(np.linalg.norm(A_new - A_old, "fro")),
+            float(np.linalg.norm(B_new - B_old, "fro")),
         )
-        A_list.append(A)
+        A_list.append(A_new)
         B_list.append(B_new)
-        C_list.append(C)
-        D_list.append(D)
+        C_list.append(C_k)
+        D_list.append(D_k)
 
-    # Build updated FMatrix
     new_f_matrix = FMatrix(
-        K=K,
-        q=q,
-        s=s,
-        A_list=A_list,
-        B_list=B_list,
-        C_list=C_list,
-        D_list=D_list,
+        K=K, q=q, s=s,
+        A_list=A_list, B_list=B_list, C_list=C_list, D_list=D_list,
     )
 
-    # Rebuild GSSParams (all other fields unchanged)
-    return GSSParams(
-        K=K,
-        q=q,
-        s=s,
+    return _GSSParams(
+        K=K, q=q, s=s,
         P=params.P,
         f_matrix=new_f_matrix,
         noise_cov=params.noise_cov,

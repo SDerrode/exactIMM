@@ -32,7 +32,7 @@ exactIMM/
 │   ├── utils/
 │   │   ├── exceptions.py       # GSSError hierarchy
 │   │   ├── matrix_checks.py    # CovarianceMatrix, StochasticMatrix diagnostics
-│   │   └── h5_constraint.py    # H5 constraint: compute B(k) from A,C,D,Σ_U,Δ,Σ_V
+│   │   └── h5_constraint.py    # Lehmann (H5) closed form: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D
 │   ├── models/
 │   │   ├── base_gss_model.py   # BaseGSSModel (abstract)
 │   │   └── model_gss_K2_q1_s1.py  # Example: K=2, q=1, s=1
@@ -102,7 +102,7 @@ python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42
 # Dry run (no CSV written), full debug output
 python -m prg.simulate --model model_gss_K2_q1_s1 -N 500 --no-save --log-level DEBUG -v 2
 
-# Enforce H5 constraint: recompute B(k) before simulating
+# Enforce Lehmann (H5) parametrisation: A, B from (C, D, Δ, Σ_V) before simulating
 python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42 --constraint
 
 # Custom output directory
@@ -122,7 +122,7 @@ Log files are written automatically to `logs/`.
 | `--output` | auto | Output CSV filename |
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip CSV writing (dry run) |
-| `--constraint` | `False` | Enforce H5 constraint (eq. 4.8): recompute B(k) before run |
+| `--constraint` | `False` | Apply Lehmann (H5)-compatible parametrisation: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
 
 ---
@@ -139,7 +139,7 @@ python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42
 python -m prg.filter.main --model model_gss_K2_q1_s1 \
     --csv data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
 
-# Enforce H5 constraint before filtering
+# Enforce Lehmann (H5) parametrisation before filtering
 python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42 --constraint
 
 # Dry run (no CSV written)
@@ -166,7 +166,7 @@ Output CSV columns: `n, E_x_0, …, E_x_{q-1}, V_x_0, …, V_x_{q-1}, p_r_0, …
 | `--output` | auto | Output CSV filename for filter results |
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip all CSV writing (dry run) |
-| `--constraint` | `False` | Enforce H5 constraint (eq. 4.8): recompute B(k) before run |
+| `--constraint` | `False` | Apply Lehmann (H5)-compatible parametrisation: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
 
 ### Python API
@@ -190,16 +190,21 @@ for y in observations:          # y shape (s,) or (s, 1)
 sim_path, df = filt.run(N=1000, seed=42, output_dir="data/simulated")
 ```
 
-### H5 constraint API
+### Lehmann (H5) parametrisation API
 
 ```python
-from prg.utils.h5_constraint import apply_h5_constraint, compute_B_from_h5
+from prg.utils.h5_constraint import (
+    apply_lehmann_constraint, compute_AB_lehmann, compute_h5_residual,
+)
 
-# Apply to all regimes at once
-constrained_params = apply_h5_constraint(params)
+# Apply A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D to all regimes at once
+constrained_params = apply_lehmann_constraint(params)
 
-# Or compute B for a single regime
-B = compute_B_from_h5(A, C, D, SU, Delta, SV)   # returns (q, s) array
+# Or compute (A, B) for a single regime from (C, D, Δ, Σ_V)
+A, B = compute_AB_lehmann(C, D, Delta, SV)
+
+# Verify any (A, B, C, D, Σ_U, Δ, Σ_V) satisfies (H5):
+F = compute_h5_residual(A, B, C, D, SU, Delta, SV)  # ‖F‖_F = 0 ⇔ (H5) holds
 ```
 
 ---
@@ -228,11 +233,11 @@ $(R_n, X_n, Y_n)$ CSV (such as those produced by the simulator).
 # Estimate from a simulated CSV (no constraint)
 python -m prg.learning.supervised data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
 
-# Enforce H5 constraint on B (post-hoc) and force Δ = 0
-python -m prg.learning.supervised sim.csv --constraint b --delta-zero
+# Apply Lehmann (H5) parametrisation post-hoc and force Δ = 0
+python -m prg.learning.supervised sim.csv --constraint lehmann --delta-zero
 
-# Enforce H5 constraint on A; save to a custom file
-python -m prg.learning.supervised sim.csv --constraint a \
+# Lehmann + custom output file
+python -m prg.learning.supervised sim.csv --constraint lehmann \
     --output prg/models/model_my_estimated.py --model-name model_my_estimated
 
 # Verbose output (per-regime summaries)
@@ -251,8 +256,8 @@ python -m prg.filter.main --model model_learned_K2_q1_s1 -N 1000 --seed 42
 | Option | Default | Description |
 |---|---|---|
 | `csv` | — | Path to simulation CSV (required) |
-| `--constraint {a,b,su}` | `None` | H5 post-hoc projection on A, B, or Σ_U |
-| `--delta-zero` | `False` | Force Δ(k) = 0 before the H5 step |
+| `--constraint lehmann` | `None` | Apply Lehmann (H5) parametrisation post-hoc |
+| `--delta-zero` | `False` | Force Δ(k) = 0 before the projection |
 | `--output PATH` | auto | Destination `.py` file |
 | `--model-name NAME` | auto | File/class base name |
 | `-v` / `--verbose` | `False` | Print per-regime fit summaries |
@@ -264,7 +269,7 @@ from prg.learning.supervised import fit_supervised, _read_csv
 import pathlib
 
 rs, xs, ys, K, q, s = _read_csv(pathlib.Path("sim.csv"))
-params = fit_supervised(rs, xs, ys, K, q, s, constraint="b", delta_zero=True)
+params = fit_supervised(rs, xs, ys, K, q, s, constraint="lehmann", delta_zero=True)
 
 # params is a dict ready for GSSParams.from_model() or code generation
 from prg.classes.GSSParams import GSSParams
@@ -293,12 +298,13 @@ For each regime $k$ the model is $Z_{n+1} = F(k)\,Z_n + b(k) + W_{n+1}$.
 
 2. **Δ = 0** *(optional)* — zero out the off-diagonal block of $\Sigma_W(k)$.
 
-3. **H5 projection** *(optional)* — recompute $A$, $B$, or $\Sigma_U$ from the
-   remaining estimated blocks using the analytical H5 formula (eq. 4.8).
+3. **Lehmann (H5) projection** *(optional)* — recompute $A$ and $B$
+   *jointly* via the closed form $A = \Delta \Sigma_V^{-1} C$,
+   $B = \Delta \Sigma_V^{-1} D$, which makes (H5) hold uniformly in
+   $\Sigma(r_1)$ for every regime pair.
 
 The Markov matrix $P$ is estimated by transition-frequency counts.
-Constraints `--constraint {a,b,su}` are mutually exclusive; `--delta-zero`
-is independent and applied before the H5 step.
+`--delta-zero` is independent and applied before the projection.
 
 ---
 
@@ -315,13 +321,13 @@ python -m prg.learning.semi_supervised data/simulated/sim.csv -K 2
 python -m prg.learning.semi_supervised sim.csv -K 2 \
     --n-inits 20 --seed 42 -v
 
-# H5 constraint applied once at the end of EM (default — log-lik monotone)
+# Lehmann (H5) parametrisation applied once at the end of EM (default — log-lik monotone)
 python -m prg.learning.semi_supervised sim.csv -K 2 \
-    --constraint b --delta-zero
+    --constraint lehmann --delta-zero
 
 # Same constraint, but enforced at every M-step (Generalized EM mode)
 python -m prg.learning.semi_supervised sim.csv -K 2 \
-    --constraint b --delta-zero --constraint-each-iter
+    --constraint lehmann --delta-zero --constraint-each-iter
 ```
 
 ### CLI options
@@ -330,8 +336,8 @@ python -m prg.learning.semi_supervised sim.csv -K 2 \
 |---|---|---|
 | `csv` | — | Input CSV (the `r` column is ignored if present) |
 | `-K`, `--K` | — | Number of regimes (required) |
-| `--constraint {a,b,su}` | `None` | H5 projection target (post-hoc by default) |
-| `--delta-zero` | `False` | Force Δ(k) = 0 before the H5 step |
+| `--constraint lehmann` | `None` | Apply Lehmann (H5) parametrisation (post-hoc by default) |
+| `--delta-zero` | `False` | Force Δ(k) = 0 before the projection |
 | `--constraint-each-iter` | `False` | Apply the constraint at every M-step (GEM); otherwise applied once at the end |
 | `--n-inits` | `10` | Number of independent EM restarts |
 | `--max-iter` | `100` | Maximum EM iterations per run |
@@ -615,7 +621,7 @@ If you use this code or the (H5) framework in your work, please cite:
   title        = {{On Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
   howpublished = {\url{https://github.com/SDerrode/exactIMM}},
-  note         = {Software v0.11.0, accompanying paper preprint},
+  note         = {Software v0.12.0, accompanying paper preprint},
 }
 ```
 

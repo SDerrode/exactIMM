@@ -8,7 +8,7 @@ Coverage
 --------
 - _read_csv: valid input, missing columns, empty file, bad rows
 - _fit_regime: OLS exactness on noise-free data, residual covariance shape,
-               delta_zero zeroes Δ, constraint='b' satisfies H5
+               delta_zero zeroes Δ, constraint='lehmann' enforces A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D
 - fit_supervised: output keys/shapes, P is row-stochastic, SPD guarantees,
                   missing-regime error, consistency after simulate
 - _fmt_arr / _fmt_list: eval-roundtrip
@@ -207,15 +207,16 @@ class TestFitRegime:
         np.linalg.cholesky(SU)
         np.linalg.cholesky(SV)
 
-    def test_constraint_b(self, noise_free_data):
-        """After constraint='b', the H5 equation should be satisfied."""
-        from prg.utils.h5_constraint import compute_B_from_h5
+    def test_constraint_lehmann(self, noise_free_data):
+        """After constraint='lehmann', A, B should match the closed form."""
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
         Z_curr, Z_next, q, s, _, _ = noise_free_data
         A, B, C, D, SU, Dt, SV, _ = _fit_regime(
-            Z_curr, Z_next, q, s, constraint="b", delta_zero=False
+            Z_curr, Z_next, q, s, constraint="lehmann", delta_zero=False
         )
-        B_check = compute_B_from_h5(A, C, D, SU, Dt, SV)
+        A_check, B_check = compute_AB_lehmann(C, D, Dt, SV)
+        np.testing.assert_allclose(A, A_check, atol=1e-8)
         np.testing.assert_allclose(B, B_check, atol=1e-8)
 
 
@@ -316,21 +317,20 @@ class TestFitSupervised:
         for Dt in params["Delta_list"]:
             np.testing.assert_array_equal(Dt, np.zeros((q, s)))
 
-    def test_constraint_b(self, simulated_csv):
-        """Estimated B(k) should satisfy the H5 constraint."""
-        from prg.utils.h5_constraint import compute_B_from_h5
+    def test_constraint_lehmann(self, simulated_csv):
+        """Estimated A(k), B(k) should match the Lehmann closed form."""
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
         rs, xs, ys, K, q, s = _read_csv(simulated_csv)
-        params = fit_supervised(rs, xs, ys, K, q, s, constraint="b")
+        params = fit_supervised(rs, xs, ys, K, q, s, constraint="lehmann")
         for k in range(K):
-            B_check = compute_B_from_h5(
-                params["A_list"][k],
+            A_check, B_check = compute_AB_lehmann(
                 params["C_list"][k],
                 params["D_list"][k],
-                params["Sigma_U_list"][k],
                 params["Delta_list"][k],
                 params["Sigma_V_list"][k],
             )
+            np.testing.assert_allclose(params["A_list"][k], A_check, atol=1e-8)
             np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
 
     def test_statistical_recovery(self, simulated_csv, params_k2q1s1):
@@ -459,9 +459,9 @@ class TestGenerateModelCode:
             sys.path.pop(0)
             sys.modules.pop("model_gen_test", None)
 
-    def test_constraint_note_b(self, minimal_params):
-        code = _generate_model_code(minimal_params, "M", "m", "x.csv", "b", False)
-        assert "B" in code
+    def test_constraint_note_lehmann(self, minimal_params):
+        code = _generate_model_code(minimal_params, "M", "m", "x.csv", "lehmann", False)
+        assert "LEHMANN" in code or "lehmann" in code.lower()
 
     def test_delta_zero_note(self, minimal_params):
         code = _generate_model_code(minimal_params, "M", "m", "x.csv", None, True)
@@ -491,13 +491,13 @@ class TestCLI:
         assert out.exists()
         assert "BaseGSSModel" in out.read_text(encoding="utf-8")
 
-    def test_constraint_b_flag(self, simulated_csv, tmp_path):
-        out = tmp_path / "model_cli_b.py"
+    def test_constraint_lehmann_flag(self, simulated_csv, tmp_path):
+        out = tmp_path / "model_cli_lehmann.py"
         self._run_main(
             [
                 str(simulated_csv),
                 "--constraint",
-                "b",
+                "lehmann",
                 "--output",
                 str(out),
             ]

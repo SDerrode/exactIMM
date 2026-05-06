@@ -101,10 +101,8 @@ __all__ = ["GSSFilter", "FilterResult"]
 
 FILTER_MODES = ("h5_exact", "imm_general")
 # Relative residual ‖F(k)‖_F / max(‖Z(k)‖_F, 1) of the (H5) constraint
-# F(k) = Z(k) − P(k) M(k)⁻¹ W(k)  (paper eq. 4.4) below this → (H5) holds.
-# 1e-6 is the practical floor for float64 matrix arithmetic (two solve() calls
-# in compute_B_from_h5 accumulate O(ε · κ(M) · κ(L)) rounding errors that
-# can legitimately reach ~1e-8 even when (H5) is exactly enforced).
+# F(k) = Z(k) − P(k) M(k)⁻¹ W(k) below this → (H5) holds. 1e-6 is the
+# practical floor for float64 matrix arithmetic.
 H5_TOL = 1e-6
 
 logger = logging.getLogger("exactIMM.filter")
@@ -177,12 +175,12 @@ class GSSFilter:
           model, in particular those that do not satisfy (H5).
         * ``"h5_exact"`` — exact IMM under hypothesis (H5), with
           stationary pre-computed regime moments. Requires (H5), i.e.
-          the algebraic constraint of paper eq. (4.4) holds for every
-          regime k; emits a ``RuntimeWarning`` at construction when the
-          relative residual exceeds ``H5_TOL``. To enforce (H5)
-          automatically, use
-          :func:`prg.utils.h5_constraint.apply_h5_constraint`, which
-          recomputes B(k) from the other 6 matrices via eq. (4.8).
+          the (H5) algebraic constraint holds for every regime k;
+          emits a ``RuntimeWarning`` at construction when the relative
+          residual exceeds ``H5_TOL``. To enforce (H5) automatically,
+          use :func:`prg.utils.h5_constraint.apply_lehmann_constraint`,
+          which recomputes A(k), B(k) from (C, D, Δ, Σ_V) via the
+          Lehmann closed form A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
 
     Examples
     --------
@@ -279,8 +277,9 @@ class GSSFilter:
                 f"regime — but the model has max relative residual = "
                 f"{max_rel:.3g} (worst at k={worst_k}). The filter will be "
                 f"biased. Use mode='imm_general' for non-(H5) models, or "
-                f"apply prg.utils.h5_constraint.apply_h5_constraint to enforce "
-                f"(H5) by recomputing B(k) from the other 6 matrices.",
+                f"apply prg.utils.h5_constraint.apply_lehmann_constraint to "
+                f"enforce (H5) by recomputing A(k), B(k) via the Lehmann "
+                f"closed form A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.",
                 RuntimeWarning,
                 stacklevel=3,
             )

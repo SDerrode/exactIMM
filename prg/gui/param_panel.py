@@ -7,26 +7,21 @@ ParamPanel — QTabWidget with one tab per Markov state k.
 Each tab (_StateTab) exposes:
   - F(k)     : MatrixTableWidget (no SPD check)
   - Σ_W(k)   : MatrixTableWidget (SPD check enabled)
+  - μ_z0(k), b_X(k), b_Y(k) : VectorWidgets
 
-Constraint checkboxes (eq. 4.8 / 4.20)
-----------------------------------------
-The constraint is a single equation in A, B, C, D, Σ_U, Δ, Σ_V.
-It can be solved for exactly one of {A, B, C, Σ_U} at a time — those four
-are therefore mutually exclusive.
+Lehmann (H5)-compatible constraint
+----------------------------------
+A single checkbox per regime enforces Lehmann's closed-form (H5)-compatible
+parametrisation::
 
-Δ = 0 is an independent constraint (it zeros the off-diagonal block of
-Σ_W) and can coexist with any of {A, B, C, Σ_U}.  When Δ changes state,
-the active H5 constraint is automatically re-evaluated with the new Δ.
+    A(k) = Δ(k) Σ_V(k)⁻¹ C(k),
+    B(k) = Δ(k) Σ_V(k)⁻¹ D(k).
 
-Valid combinations:
-  □ A alone  □ B alone  □ C alone  □ Σ_U alone
-  □ Δ=0 alone  □ Δ=0 + A  □ Δ=0 + B  □ Δ=0 + C  □ Δ=0 + Σ_U
+When checked, the A and B blocks of F(k) are read-only and are recomputed
+on every edit of (C(k), D(k), Δ(k), Σ_V(k)). When unchecked, the previous
+(saved) values of A and B are restored and the blocks become editable again.
 
-  □ Constraint on A(k)   — A determined by B, C, D, Σ_U, Δ, Σ_V  (eq. 4.8)
-  □ Constraint on B(k)   — B determined by A, C, D, Σ_U, Δ, Σ_V  (eq. 4.8)
-  □ Constraint on C(k)   — C determined by A, B, D, Σ_U, Δ, Σ_V  (eq. 4.20, iterative)
-  □ Constraint on Σ_U(k) — Σ_U determined by A, B, C, D, Δ, Σ_V  (eq. 4.8)
-  □ Δ = 0(k)             — off-diagonal block of Σ_W forced to zero (independent)
+The constraint is unchecked by default on every newly built / loaded tab.
 
 Stability indicators
 --------------------
@@ -55,18 +50,16 @@ from PyQt6.QtWidgets import (
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
-from prg.utils.h5_constraint import (
-    compute_A_from_h5,
-    compute_B_from_h5,
-    compute_C_from_h5,
-    compute_SU_from_h5,
-)
+from prg.utils.h5_constraint import compute_AB_lehmann
 
 # Pill style for constraint error messages (explicit background → readable on any theme)
 _CONSTRAINT_ERR_STYLE = (
     "font-size: 10px; padding: 1px 6px; border-radius: 3px;"
     "background: #fff8f8; color: #c0392b; border: 1px solid #f5c6cb;"
 )
+
+# Style of the checked Lehmann constraint status badge
+_CONSTRAINT_OK_STYLE = "color: #155399; font-size: 10px;"
 
 
 # ---------------------------------------------------------------------------
@@ -76,45 +69,19 @@ _CONSTRAINT_ERR_STYLE = (
 
 class _StateTab(QWidget):
     """One tab: F(k), Σ_W(k), μ_z0(k), b_X(k), b_Y(k) side by side,
-    plus four mutually exclusive constraint checkboxes and a stability badge."""
+    plus a Lehmann (H5)-compatible constraint checkbox and stability badges."""
 
     validity_changed = pyqtSignal(bool)
     value_changed = pyqtSignal()  # emitted whenever any cell changes
-    constraint_toggled = pyqtSignal()  # emitted when any checkbox is checked
+    constraint_toggled = pyqtSignal()  # emitted when the Lehmann checkbox is toggled
 
     # Checkbox colour palette  (text-color, checked-fill, border)
-    _CHK_STYLES = {
-        "A": (
-            "QCheckBox { color: #155399; font-weight: bold; font-size: 11px; }"
-            "QCheckBox::indicator:checked   { border: 2px solid #155399;"
-            "                                 background-color: #2980b9; }"
-            "QCheckBox::indicator:unchecked { border: 2px solid #155399; }"
-        ),
-        "B": (
-            "QCheckBox { color: #1a7a3a; font-weight: bold; font-size: 11px; }"
-            "QCheckBox::indicator:checked   { border: 2px solid #1a7a3a;"
-            "                                 background-color: #27ae60; }"
-            "QCheckBox::indicator:unchecked { border: 2px solid #1a7a3a; }"
-        ),
-        "SU": (
-            "QCheckBox { color: #6c3483; font-weight: bold; font-size: 11px; }"
-            "QCheckBox::indicator:checked   { border: 2px solid #6c3483;"
-            "                                 background-color: #8e44ad; }"
-            "QCheckBox::indicator:unchecked { border: 2px solid #6c3483; }"
-        ),
-        "C": (
-            "QCheckBox { color: #a04000; font-weight: bold; font-size: 11px; }"
-            "QCheckBox::indicator:checked   { border: 2px solid #a04000;"
-            "                                 background-color: #e67e22; }"
-            "QCheckBox::indicator:unchecked { border: 2px solid #a04000; }"
-        ),
-        "delta": (
-            "QCheckBox { color: #0e6655; font-weight: bold; font-size: 11px; }"
-            "QCheckBox::indicator:checked   { border: 2px solid #0e6655;"
-            "                                 background-color: #1abc9c; }"
-            "QCheckBox::indicator:unchecked { border: 2px solid #0e6655; }"
-        ),
-    }
+    _CHK_STYLE_LEHMANN = (
+        "QCheckBox { color: #155399; font-weight: bold; font-size: 11px; }"
+        "QCheckBox::indicator:checked   { border: 2px solid #155399;"
+        "                                 background-color: #2980b9; }"
+        "QCheckBox::indicator:unchecked { border: 2px solid #155399; }"
+    )
 
     def __init__(self, k: int, q: int, s: int, parent=None):
         super().__init__(parent)
@@ -123,36 +90,29 @@ class _StateTab(QWidget):
         self._s = s
         self._updating = False  # re-entrancy guard
 
-        self._saved_A: np.ndarray | None = None  # for H5 constraint on A
-        self._saved_B: np.ndarray | None = None  # for H5 constraint on B
-        self._saved_C: np.ndarray | None = None  # for H5 constraint on C
-        self._saved_SU: np.ndarray | None = None  # for H5 constraint on Σ_U
-        self._saved_Delta: np.ndarray | None = None  # for Δ = 0 constraint
+        # Saved A, B blocks of F(k) — restored when the constraint is unchecked
+        self._saved_A: np.ndarray | None = None
+        self._saved_B: np.ndarray | None = None
 
         # ── Main layout: checkbox row on top, matrix widgets below ──────
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        # -- Constraint checkbox row (mutually exclusive) + stability badge --
+        # -- Constraint checkbox row (single Lehmann box) + stability badges --
         chk_row = QHBoxLayout()
         chk_row.setSpacing(16)
 
-        self._constraint_A_check = QCheckBox(f"Constraint on A({k})")
-        self._constraint_B_check = QCheckBox(f"Constraint on B({k})")
-        self._constraint_C_check = QCheckBox(f"Constraint on C({k})")
-        self._constraint_SU_check = QCheckBox(f"Constraint on Σ_U({k})")
-        self._constraint_delta_check = QCheckBox("Δ = 0")
-
-        for key, chk in [
-            ("A", self._constraint_A_check),
-            ("B", self._constraint_B_check),
-            ("C", self._constraint_C_check),
-            ("SU", self._constraint_SU_check),
-            ("delta", self._constraint_delta_check),
-        ]:
-            chk.setStyleSheet(self._CHK_STYLES[key])
-            chk_row.addWidget(chk)
+        self._constraint_lehmann_check = QCheckBox(
+            f"Lehmann constraint on (A({k}), B({k}))"
+        )
+        self._constraint_lehmann_check.setToolTip(
+            "Force A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k).\n"
+            "These are the unique (A, B) compatible with the (H5) constraint\n"
+            "for any Σ_U; A and B blocks become read-only while checked."
+        )
+        self._constraint_lehmann_check.setStyleSheet(self._CHK_STYLE_LEHMANN)
+        chk_row.addWidget(self._constraint_lehmann_check)
 
         chk_row.addStretch()
         layout.addLayout(chk_row)
@@ -240,11 +200,7 @@ class _StateTab(QWidget):
         self._f_widget.value_changed.connect(self._on_value_changed)
         self._sigma_widget.value_changed.connect(self._on_value_changed)
 
-        self._constraint_A_check.toggled.connect(self._on_A_toggled)
-        self._constraint_B_check.toggled.connect(self._on_B_toggled)
-        self._constraint_C_check.toggled.connect(self._on_C_toggled)
-        self._constraint_SU_check.toggled.connect(self._on_SU_toggled)
-        self._constraint_delta_check.toggled.connect(self._on_delta_toggled)
+        self._constraint_lehmann_check.toggled.connect(self._on_lehmann_toggled)
 
         # Initialise the badges with the default matrix
         self._update_stability_badges()
@@ -296,379 +252,104 @@ class _StateTab(QWidget):
         )
 
     # ------------------------------------------------------------------
-    # Constraint state — public accessors (D3)
+    # Constraint state — public accessors
     # ------------------------------------------------------------------
 
-    def get_active_h5_constraint(self) -> str | None:
-        """Return the active H5 constraint name ("A", "B", "C", "SU") or None."""
-        if self._constraint_A_check.isChecked():
-            return "A"
-        if self._constraint_B_check.isChecked():
-            return "B"
-        if self._constraint_C_check.isChecked():
-            return "C"
-        if self._constraint_SU_check.isChecked():
-            return "SU"
-        return None
+    def is_lehmann_active(self) -> bool:
+        """Return True iff the Lehmann (A, B) constraint is currently active."""
+        return self._constraint_lehmann_check.isChecked()
 
-    def get_delta_active(self) -> bool:
-        """Return True if the Δ=0 constraint is currently active."""
-        return self._constraint_delta_check.isChecked()
+    def apply_constraint(self, lehmann: bool) -> None:
+        """Programmatically set the Lehmann constraint flag.
 
-    def apply_constraint(self, h5: str | None, delta: bool) -> None:
-        """Programmatically set the H5 constraint and Δ=0 flag (D3).
-
-        Mirrors the user clicking the appropriate checkboxes so that all
-        the recompute and constraint_toggled logic fires normally.
-
-        Parameters
-        ----------
-        h5    : "A", "B", "C", "SU", or None (no H5 constraint).
-        delta : whether the Δ=0 constraint should be active.
+        Mirrors the user clicking the checkbox so that all the recompute
+        and constraint_toggled logic fires normally.
         """
-        # 1. Δ=0 — independent of the H5 constraint
-        if self._constraint_delta_check.isChecked() != delta:
-            self._constraint_delta_check.setChecked(delta)
-        # 2. Uncheck all H5 checkboxes that should be off
-        _h5_map = {
-            "A": self._constraint_A_check,
-            "B": self._constraint_B_check,
-            "C": self._constraint_C_check,
-            "SU": self._constraint_SU_check,
-        }
-        for name, chk in _h5_map.items():
-            if name != h5 and chk.isChecked():
-                chk.setChecked(False)
-        # 3. Check the target (if any) — triggers _on_*_toggled → recompute
-        if h5 is not None and h5 in _h5_map:
-            if not _h5_map[h5].isChecked():
-                _h5_map[h5].setChecked(True)
+        if self._constraint_lehmann_check.isChecked() != lehmann:
+            self._constraint_lehmann_check.setChecked(lehmann)
 
     # ------------------------------------------------------------------
     # Constraint toggle handlers
     # ------------------------------------------------------------------
 
-    def _on_A_toggled(self, checked: bool) -> None:
+    def _on_lehmann_toggled(self, checked: bool) -> None:
         if checked:
-            self._uncheck_h5_others(self._constraint_A_check)
             F = self._f_widget.get_matrix()
             if F is not None:
-                self._saved_A = F[: self._q, : self._q].copy()
-            self._recompute_A()
+                q, s = self._q, self._s
+                self._saved_A = F[:q, :q].copy()
+                self._saved_B = F[:q, q:].copy()
+            self._recompute_lehmann()
             self.constraint_toggled.emit()
         else:
-            self._restore_A()
-
-    def _on_B_toggled(self, checked: bool) -> None:
-        if checked:
-            self._uncheck_h5_others(self._constraint_B_check)
-            F = self._f_widget.get_matrix()
-            if F is not None:
-                self._saved_B = F[: self._q, self._q :].copy()
-            self._recompute_B()
+            self._restore_lehmann()
             self.constraint_toggled.emit()
-        else:
-            self._restore_B()
-
-    def _on_C_toggled(self, checked: bool) -> None:
-        if checked:
-            self._uncheck_h5_others(self._constraint_C_check)
-            F = self._f_widget.get_matrix()
-            if F is not None:
-                self._saved_C = F[self._q :, : self._q].copy()
-            self._recompute_C()
-            self.constraint_toggled.emit()
-        else:
-            self._restore_C()
-
-    def _on_SU_toggled(self, checked: bool) -> None:
-        if checked:
-            self._uncheck_h5_others(self._constraint_SU_check)
-            Sw = self._sigma_widget.get_matrix()
-            if Sw is not None:
-                self._saved_SU = Sw[: self._q, : self._q].copy()
-            self._recompute_SU()
-            self.constraint_toggled.emit()
-        else:
-            self._restore_SU()
-
-    def _on_delta_toggled(self, checked: bool) -> None:
-        # Δ=0 is independent — does NOT uncheck {A, B, Σ_U}
-        if checked:
-            Sw = self._sigma_widget.get_matrix()
-            if Sw is not None:
-                self._saved_Delta = Sw[: self._q, self._q :].copy()
-            self._recompute_delta()
-            self.constraint_toggled.emit()
-        else:
-            self._restore_delta()
 
     # ------------------------------------------------------------------
-    # Recompute methods (fire on every value_changed)
+    # Recompute and restore methods
     # ------------------------------------------------------------------
 
     def _on_value_changed(self) -> None:
-        """Dispatch to the active constraint recomputation; always refresh badges."""
-        if self._constraint_A_check.isChecked():
-            self._recompute_A()
-        elif self._constraint_B_check.isChecked():
-            self._recompute_B()
-        elif self._constraint_C_check.isChecked():
-            self._recompute_C()
-        elif self._constraint_SU_check.isChecked():
-            self._recompute_SU()
-        # Δ = 0 locks the off-diagonal, so no re-projection needed on value_changed.
+        """Re-run the Lehmann projection on every value edit; refresh badges."""
+        if self._constraint_lehmann_check.isChecked():
+            self._recompute_lehmann()
         self._update_stability_badges()
 
-    def _recompute_A(self) -> None:
-        if not self._constraint_A_check.isChecked() or self._updating:
+    def _recompute_lehmann(self) -> None:
+        """Replace A(k), B(k) blocks of F(k) by the Lehmann closed form."""
+        if not self._constraint_lehmann_check.isChecked() or self._updating:
             return
         F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
         if F is None or Sw is None:
-            return
-
-        A_new = self._call_constraint(
-            compute_A_from_h5,
-            dict(
-                B=F[: self._q, self._q :],
-                C=F[self._q :, : self._q],
-                D=F[self._q :, self._q :],
-                SU=Sw[: self._q, : self._q],
-                Dt=Sw[: self._q, self._q :],
-                SV=Sw[self._q :, self._q :],
-            ),
-        )
-        if A_new is None:
-            self._f_widget.set_constraint_status("✗  A — singular system", _CONSTRAINT_ERR_STYLE)
-            return
-
-        q = self._q
-        new_F = F.copy()
-        new_F[:q, :q] = A_new
-        self._updating = True
-        self._f_widget.set_matrix(new_F)
-        self._f_widget.set_block_editable(0, q, 0, q, False)
-        self._updating = False
-        self._f_widget.set_constraint_status(
-            "✓  A satisfies constraint (4.8)", "color: #155399; font-size: 10px;"
-        )
-        self._update_stability_badges()
-
-    def _recompute_B(self) -> None:
-        if not self._constraint_B_check.isChecked() or self._updating:
-            return
-        F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
-        if F is None or Sw is None:
-            return
-
-        B_new = self._call_constraint(
-            compute_B_from_h5,
-            dict(
-                A=F[: self._q, : self._q],
-                C=F[self._q :, : self._q],
-                D=F[self._q :, self._q :],
-                SU=Sw[: self._q, : self._q],
-                Dt=Sw[: self._q, self._q :],
-                SV=Sw[self._q :, self._q :],
-            ),
-        )
-        if B_new is None:
-            self._f_widget.set_constraint_status("✗  B — singular system", _CONSTRAINT_ERR_STYLE)
             return
 
         q, s = self._q, self._s
+        try:
+            A_new, B_new = compute_AB_lehmann(
+                C=F[q:, :q],
+                D=F[q:, q:],
+                Dt=Sw[:q, q:],
+                SV=Sw[q:, q:],
+            )
+        except ValueError:
+            self._f_widget.set_constraint_status(
+                "✗  Lehmann — Σ_V singular", _CONSTRAINT_ERR_STYLE
+            )
+            return
+
         new_F = F.copy()
+        new_F[:q, :q] = A_new
         new_F[:q, q:] = B_new
         self._updating = True
         self._f_widget.set_matrix(new_F)
+        # Lock both A and B blocks (top-left q×q and top-right q×s)
+        self._f_widget.set_block_editable(0, q, 0, q, False)
         self._f_widget.set_block_editable(0, q, q, q + s, False)
         self._updating = False
         self._f_widget.set_constraint_status(
-            "✓  B satisfies constraint (4.8)", "color: #1a7a3a; font-size: 10px;"
+            "✓  A, B satisfy Lehmann (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)",
+            _CONSTRAINT_OK_STYLE,
         )
         self._update_stability_badges()
 
-    def _recompute_SU(self) -> None:
-        if not self._constraint_SU_check.isChecked() or self._updating:
-            return
-        F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
-        if F is None or Sw is None:
-            return
-
-        SU_new = self._call_constraint(
-            compute_SU_from_h5,
-            dict(
-                A=F[: self._q, : self._q],
-                B=F[: self._q, self._q :],
-                C=F[self._q :, : self._q],
-                D=F[self._q :, self._q :],
-                Dt=Sw[: self._q, self._q :],
-                SV=Sw[self._q :, self._q :],
-            ),
-        )
-        if SU_new is None:
-            self._sigma_widget.set_constraint_status(
-                "✗  Σ_U — singular system", _CONSTRAINT_ERR_STYLE
-            )
-            return
-
-        q = self._q
-        new_Sw = Sw.copy()
-        new_Sw[:q, :q] = SU_new
-        self._updating = True
-        self._sigma_widget.set_matrix(new_Sw)
-        self._sigma_widget.set_block_editable(0, q, 0, q, False)
-        self._updating = False
-        self._sigma_widget.set_constraint_status(
-            "✓  Σ_U satisfies constraint (4.8)", "color: #6c3483; font-size: 10px;"
-        )
-
-    def _recompute_C(self) -> None:
-        if not self._constraint_C_check.isChecked() or self._updating:
-            return
-        F, Sw = self._f_widget.get_matrix(), self._sigma_widget.get_matrix()
-        if F is None or Sw is None:
-            return
-
+    def _restore_lehmann(self) -> None:
+        """Unlock A and B blocks; restore their saved values."""
         q, s = self._q, self._s
-        # Use the current C block as warm start (preserves continuity during editing)
-        C_init = F[q:, :q].copy()
-
-        C_new = self._call_constraint(
-            compute_C_from_h5,
-            dict(
-                A=F[:q, :q],
-                B=F[:q, q:],
-                D=F[q:, q:],
-                SU=Sw[:q, :q],
-                Dt=Sw[:q, q:],
-                SV=Sw[q:, q:],
-                C_init=C_init,
-            ),
-        )
-        if C_new is None:
-            self._f_widget.set_constraint_status(
-                "✗  C — non-convergence / singular", _CONSTRAINT_ERR_STYLE
-            )
-            return
-
-        new_F = F.copy()
-        new_F[q:, :q] = C_new
-        self._updating = True
-        self._f_widget.set_matrix(new_F)
-        self._f_widget.set_block_editable(q, q + s, 0, q, False)
-        self._updating = False
-        self._f_widget.set_constraint_status(
-            "✓  C satisfies constraint (4.20) [iter]", "color: #a04000; font-size: 10px;"
-        )
-        self._update_stability_badges()
-
-    def _recompute_delta(self) -> None:
-        """Set Δ(k) = 0 and lock both off-diagonal blocks of Σ_W.
-
-        If an H5 constraint (A, B or Σ_U) is also active, it is re-evaluated
-        immediately so that it uses the updated Δ = 0.
-        """
-        if not self._constraint_delta_check.isChecked() or self._updating:
-            return
-        Sw = self._sigma_widget.get_matrix()
-        if Sw is None:
-            return
-
-        q, s = self._q, self._s
-        new_Sw = Sw.copy()
-        new_Sw[:q, q:] = 0.0  # Δ  = 0
-        new_Sw[q:, :q] = 0.0  # Δᵀ = 0
-        self._updating = True
-        self._sigma_widget.set_matrix(new_Sw)
-        # Lock both off-diagonal blocks (top-right and bottom-left)
-        self._sigma_widget.set_block_editable(0, q, q, q + s, False)
-        self._sigma_widget.set_block_editable(q, q + s, 0, q, False)
-        self._updating = False
-        self._sigma_widget.set_constraint_status("")
-        # Re-trigger the active H5 constraint so it uses Δ = 0
-        self._retrigger_h5()
-
-    # ------------------------------------------------------------------
-    # Restore methods (called when a checkbox is unchecked)
-    # ------------------------------------------------------------------
-
-    def _restore_A(self) -> None:
-        q = self._q
         self._f_widget.set_block_editable(0, q, 0, q, True)
+        self._f_widget.set_block_editable(0, q, q, q + s, True)
         self._f_widget.set_constraint_status("")
-        if self._saved_A is not None:
+        if self._saved_A is not None and self._saved_B is not None:
             F = self._f_widget.get_matrix()
             if F is not None:
                 restored = F.copy()
                 restored[:q, :q] = self._saved_A
-                self._updating = True
-                self._f_widget.set_matrix(restored)
-                self._updating = False
-            self._saved_A = None
-        self._update_stability_badges()
-
-    def _restore_B(self) -> None:
-        q, s = self._q, self._s
-        self._f_widget.set_block_editable(0, q, q, q + s, True)
-        self._f_widget.set_constraint_status("")
-        if self._saved_B is not None:
-            F = self._f_widget.get_matrix()
-            if F is not None:
-                restored = F.copy()
                 restored[:q, q:] = self._saved_B
                 self._updating = True
                 self._f_widget.set_matrix(restored)
                 self._updating = False
-            self._saved_B = None
-
-    def _restore_SU(self) -> None:
-        q = self._q
-        self._sigma_widget.set_block_editable(0, q, 0, q, True)
-        self._sigma_widget.set_constraint_status("")
-        if self._saved_SU is not None:
-            Sw = self._sigma_widget.get_matrix()
-            if Sw is not None:
-                restored = Sw.copy()
-                restored[:q, :q] = self._saved_SU
-                self._updating = True
-                self._sigma_widget.set_matrix(restored)
-                self._updating = False
-            self._saved_SU = None
-
-    def _restore_C(self) -> None:
-        q, s = self._q, self._s
-        self._f_widget.set_block_editable(q, q + s, 0, q, True)
-        self._f_widget.set_constraint_status("")
-        if self._saved_C is not None:
-            F = self._f_widget.get_matrix()
-            if F is not None:
-                restored = F.copy()
-                restored[q:, :q] = self._saved_C
-                self._updating = True
-                self._f_widget.set_matrix(restored)
-                self._updating = False
-            self._saved_C = None
+        self._saved_A = None
+        self._saved_B = None
         self._update_stability_badges()
-
-    def _restore_delta(self) -> None:
-        q, s = self._q, self._s
-        # Unlock both off-diagonal blocks
-        self._sigma_widget.set_block_editable(0, q, q, q + s, True)
-        self._sigma_widget.set_block_editable(q, q + s, 0, q, True)
-        self._sigma_widget.set_constraint_status("")
-        if self._saved_Delta is not None:
-            Sw = self._sigma_widget.get_matrix()
-            if Sw is not None:
-                restored = Sw.copy()
-                restored[:q, q:] = self._saved_Delta
-                restored[q:, :q] = self._saved_Delta.T
-                self._updating = True
-                self._sigma_widget.set_matrix(restored)
-                self._updating = False
-            self._saved_Delta = None
-        # Re-trigger the active H5 constraint so it uses the restored Δ
-        self._retrigger_h5()
 
     # ------------------------------------------------------------------
     # Stability badges  (read-only display, no correction)
@@ -751,42 +432,6 @@ class _StateTab(QWidget):
         self._update_stability_badges()
         self.constraint_toggled.emit()  # reset plots in main window
 
-    def _uncheck_h5_others(self, keep: QCheckBox) -> None:
-        """Silently uncheck the other H5 checkboxes ({A, B, C, Σ_U}) except *keep*.
-
-        Δ=0 is intentionally NOT touched — it can coexist with any H5 constraint.
-        """
-        for chk, restore in [
-            (self._constraint_A_check, self._restore_A),
-            (self._constraint_B_check, self._restore_B),
-            (self._constraint_C_check, self._restore_C),
-            (self._constraint_SU_check, self._restore_SU),
-        ]:
-            if chk is not keep and chk.isChecked():
-                chk.blockSignals(True)
-                chk.setChecked(False)
-                chk.blockSignals(False)
-                restore()
-
-    def _retrigger_h5(self) -> None:
-        """Re-evaluate the active H5 constraint (A, B, C or Σ_U), if any."""
-        if self._constraint_A_check.isChecked():
-            self._recompute_A()
-        elif self._constraint_B_check.isChecked():
-            self._recompute_B()
-        elif self._constraint_C_check.isChecked():
-            self._recompute_C()
-        elif self._constraint_SU_check.isChecked():
-            self._recompute_SU()
-
-    @staticmethod
-    def _call_constraint(fn, kwargs: dict) -> np.ndarray | None:
-        """Call a constraint function and return None on ValueError."""
-        try:
-            return fn(**kwargs)
-        except ValueError:
-            return None
-
     def _on_child_validity(self, _: bool) -> None:
         self.validity_changed.emit(self.is_valid())
 
@@ -843,8 +488,7 @@ class ParamPanel(QWidget):
             self._tabs.addTab(scroll, f"State {k}")
             self._state_tabs.append(tab)
 
-        # Corner widget: [🎲] and (K>1) [Apply H5 → all] in the tab-bar top-right corner.
-        # Randomize is moved here from each _StateTab's constraint row to reduce row width.
+        # Corner widget: [🎲] and (K>1) [Apply Lehmann → all] in the tab-bar top-right.
         corner = QWidget()
         c_lay = QHBoxLayout(corner)
         c_lay.setContentsMargins(0, 0, 4, 0)
@@ -861,16 +505,15 @@ class ParamPanel(QWidget):
         c_lay.addWidget(btn_rand_corner)
 
         if K > 1:
-            self._btn_apply_h5_all = QPushButton("Apply H5 → all")
-            self._btn_apply_h5_all.setFixedHeight(22)
-            self._btn_apply_h5_all.setToolTip(
-                "Copy the active H5 constraint (Constraint on A / B / C / Σ_U)\n"
-                "and the Δ=0 flag from the currently visible state tab to ALL\n"
-                "other states.  Each target tab recomputes its constrained block\n"
-                "from its own current parameter values."
+            self._btn_apply_lehmann_all = QPushButton("Apply Lehmann → all")
+            self._btn_apply_lehmann_all.setFixedHeight(22)
+            self._btn_apply_lehmann_all.setToolTip(
+                "Copy the Lehmann constraint state from the currently visible\n"
+                "state tab to ALL other states.  Each target tab recomputes\n"
+                "its (A, B) blocks from its own (C, D, Δ, Σ_V)."
             )
-            self._btn_apply_h5_all.clicked.connect(self._on_apply_h5_all)
-            c_lay.addWidget(self._btn_apply_h5_all)
+            self._btn_apply_lehmann_all.clicked.connect(self._on_apply_lehmann_all)
+            c_lay.addWidget(self._btn_apply_lehmann_all)
 
         self._tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
@@ -938,19 +581,16 @@ class ParamPanel(QWidget):
         return all(tab.is_valid() for tab in self._state_tabs)
 
     def reapply_active_constraints(self) -> None:
-        """Re-evaluate all active H5 and Δ=0 constraints on each state tab.
+        """Re-evaluate active Lehmann constraints on each state tab.
 
-        Call this after loading external parameter values (e.g. session restore)
-        to ensure that any checked constraint boxes are re-projected onto the
-        new matrix values.  Does **not** emit ``constraint_toggled``, so no
-        simulation reset is triggered.
+        Call this after loading external parameter values (e.g. session
+        restore) to ensure that any checked constraint boxes are re-projected
+        onto the new matrix values.  Does **not** emit ``constraint_toggled``,
+        so no simulation reset is triggered.
         """
         for tab in self._state_tabs:
-            if tab.get_delta_active():
-                # _recompute_delta already calls _retrigger_h5 internally
-                tab._recompute_delta()
-            else:
-                tab._retrigger_h5()
+            if tab.is_lehmann_active():
+                tab._recompute_lehmann()
 
     # ------------------------------------------------------------------
     # Internal
@@ -959,25 +599,23 @@ class ParamPanel(QWidget):
     def _on_tab_validity(self, _: bool) -> None:
         self.validity_changed.emit(self.is_valid())
 
-    def _on_apply_h5_all(self) -> None:
-        """Copy the active H5 + Δ=0 constraints from the current tab to all others (D3)."""
+    def _on_apply_lehmann_all(self) -> None:
+        """Copy the Lehmann constraint state from the current tab to all others."""
         src_k = self._tabs.currentIndex()
         if src_k < 0 or src_k >= self._K:
             return
         src = self._state_tabs[src_k]
-        h5 = src.get_active_h5_constraint()
-        delta = src.get_delta_active()
-        # If nothing is active in the source tab, let the user know and bail.
-        if h5 is None and not delta:
+        lehmann = src.is_lehmann_active()
+        if not lehmann:
             from PyQt6.QtWidgets import QMessageBox
 
             QMessageBox.information(
                 self,
-                "Apply H5 to all states",
-                "No H5 constraint or Δ=0 is active on the current tab.\n"
-                "Select a constraint first, then click this button.",
+                "Apply Lehmann to all states",
+                "The Lehmann constraint is not active on the current tab.\n"
+                "Check it first, then click this button.",
             )
             return
         for k, tab in enumerate(self._state_tabs):
             if k != src_k:
-                tab.apply_constraint(h5, delta)
+                tab.apply_constraint(lehmann)

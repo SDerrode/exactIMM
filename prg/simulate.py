@@ -39,7 +39,7 @@ from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
 from prg.models.base_gss_model import BaseGSSModel
 from prg.utils.exceptions import GSSError
-from prg.utils.h5_constraint import apply_h5_constraint
+from prg.utils.h5_constraint import apply_lehmann_constraint
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -218,8 +218,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--constraint",
         action="store_true",
-        help="Enforce the H5 constraint (eq. 4.8): recompute every B(k) "
-        "from A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k) before simulating.",
+        help="Enforce Lehmann's (H5)-compatible parametrisation: recompute "
+        "A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k) for every "
+        "regime before simulating.",
     )
     parser.add_argument(
         "-v",
@@ -283,13 +284,13 @@ def main() -> None:
 
     # --- Apply H5 constraint on B (optional) ---
     if args.constraint:
-        log.info("--constraint: applying H5 constraint to recompute B(k) …")
+        log.info("--constraint: applying Lehmann (H5) parametrisation to A(k), B(k) …")
         try:
-            params = apply_h5_constraint(params, logger=log)
+            params = apply_lehmann_constraint(params, logger=log)
         except ValueError as exc:
-            log.error("H5 constraint failed: %s", exc)
+            log.error("Lehmann constraint failed: %s", exc)
             sys.exit(1)
-        log.info("H5 constraint applied — B(k) updated for all %d regimes.", params.K)
+        log.info("Lehmann constraint applied — A(k), B(k) updated for all %d regimes.", params.K)
         if args.verbose >= 2:
             log.info("Updated parameters:")
             params.summary()

@@ -1623,11 +1623,10 @@ class GSSMainWindow(QMainWindow):
         self._load_settings()
         self._refresh_session_summary()
 
-        # When a preset is loaded at startup: activate B constraints on all states
-        # and ensure h5_exact is the active filter mode.
+        # When a preset is loaded at startup: ensure h5_exact is the active
+        # filter mode.  The Lehmann constraint stays unchecked by default so
+        # the user can opt in explicitly.
         if _preset_loaded:
-            for tab in self._param_panel._state_tabs:
-                tab.apply_constraint("B", tab.get_delta_active())
             idx_h5 = self._mode_combo.findData("h5_exact")
             if idx_h5 >= 0:
                 self._mode_combo.setCurrentIndex(idx_h5)

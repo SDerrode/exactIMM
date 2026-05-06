@@ -21,9 +21,10 @@ Parameters are estimated by **Expectation-Maximisation** (Baum-Welch):
   M-step   closed-form weighted updates of P, π₀, F(k), b(k), Σ_W(k)
            (weighted OLS with weights γ_{n+1}(k))
 
-By default the optional H5 projection on A / B / Σ_U (and Δ=0) is applied
-**only once** on the converged parameters at the end of EM — log-likelihood
-remains monotonically non-decreasing during EM iterations.
+By default the optional Lehmann (H5)-compatible projection on (A, B)
+(and Δ=0) is applied **only once** on the converged parameters at the end
+of EM — log-likelihood remains monotonically non-decreasing during EM
+iterations.
 
 With ``--constraint-each-iter`` the projection is applied at *every*
 M-step (Generalized-EM): the constraint is satisfied throughout the
@@ -48,8 +49,8 @@ Options
     csv                    Path to the (R,X,Y) or (X,Y) CSV.  If 'r' is
                            present it is *ignored*.
     -K, --K                Number of regimes (required)
-    --constraint {a,b,su}  H5 projection target (mutually exclusive)
-    --delta-zero           Force Δ(k)=0 before the H5 step
+    --constraint lehmann   Apply Lehmann's (H5)-compatible projection
+    --delta-zero           Force Δ(k)=0 before the projection
     --constraint-each-iter Apply the projection at every M-step (GEM mode);
                            otherwise it is applied only once at the end of EM
     --n-inits              Number of random restarts (default 10)
@@ -245,27 +246,16 @@ def _apply_constraints(
     SU = _nearest_spd(SU)
     SV = _nearest_spd(SV)
 
-    if constraint == "b":
-        from prg.utils.h5_constraint import compute_B_from_h5
+    if constraint == "lehmann":
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
         try:
-            B = compute_B_from_h5(A, C, D, SU, Dt, SV)
+            A, B = compute_AB_lehmann(C, D, Dt, SV)
         except ValueError as exc:
-            _log.warning("H5 (B) failed in %s: %s — keeping unconstrained B.", where, exc)
-    elif constraint == "a":
-        from prg.utils.h5_constraint import compute_A_from_h5
-
-        try:
-            A = compute_A_from_h5(B, C, D, SU, Dt, SV)
-        except ValueError as exc:
-            _log.warning("H5 (A) failed in %s: %s — keeping unconstrained A.", where, exc)
-    elif constraint == "su":
-        from prg.utils.h5_constraint import compute_SU_from_h5
-
-        try:
-            SU = _nearest_spd(compute_SU_from_h5(A, B, C, D, Dt, SV))
-        except ValueError as exc:
-            _log.warning("H5 (Σ_U) failed in %s: %s — keeping unconstrained Σ_U.", where, exc)
+            _log.warning(
+                "Lehmann projection failed in %s: %s — keeping unconstrained A, B.",
+                where, exc,
+            )
     return A, B, C, D, SU, Dt, SV
 
 
@@ -828,14 +818,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-K", "--K", type=int, required=True, metavar="K", help="Number of regimes.")
     p.add_argument(
         "--constraint",
-        choices=["a", "b", "su"],
+        choices=["lehmann"],
         default=None,
         metavar="TARGET",
-        help="H5 projection target.  By default applied once at "
-        "the end of EM; with --constraint-each-iter applied "
-        "at every M-step (GEM, log-lik may not be monotone).",
+        help="Lehmann (H5)-compatible projection: A = Δ Σ_V⁻¹ C, "
+        "B = Δ Σ_V⁻¹ D.  By default applied once at the end of EM; "
+        "with --constraint-each-iter applied at every M-step "
+        "(GEM, log-lik may not be monotone).",
     )
-    p.add_argument("--delta-zero", action="store_true", help="Force Δ(k)=0 before the H5 step.")
+    p.add_argument(
+        "--delta-zero", action="store_true",
+        help="Force Δ(k)=0 before the projection.",
+    )
     p.add_argument(
         "--constraint-each-iter",
         action="store_true",

@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-05-06
+
+### Added
+
+- **Lehmann's (H5)-compatible parametrisation** as the canonical
+  closed-form constraint on (A, B):
+
+      A(k) = Δ(k) Σ_V(k)⁻¹ C(k),
+      B(k) = Δ(k) Σ_V(k)⁻¹ D(k).
+
+  Derived by F. Lehmann (handwritten note, 6 May 2026) from the
+  requirement that (H5) holds *uniformly* in the joint covariance
+  Σ(r₁), this is the unique parametrisation that makes the K²
+  regime-pair equations of (H5) trivially satisfied.
+
+- ``prg.utils.h5_constraint.compute_AB_lehmann(C, D, Δ, Σ_V) → (A, B)``
+  — closed-form helper.
+- ``prg.utils.h5_constraint.apply_lehmann_constraint(params)`` —
+  return a new ``GSSParams`` with each regime's (A, B) replaced by the
+  Lehmann form.
+- ``scripts/verify_h5_compat.py`` — numerical verification of the
+  parametrisation across regime pairs.
+- 4 new pytest tests on Lehmann recovery and idempotency.
+
+### Changed
+
+- **GUI** ``ParamPanel``: the four mutually-exclusive H5 checkboxes
+  (Constraint on A / B / C / Σ_U) and the independent Δ=0 checkbox are
+  replaced by a **single** checkbox per regime, "Lehmann constraint on
+  (A(k), B(k))". When checked, both A and B blocks of F(k) are read-only
+  and recomputed from (C, D, Δ, Σ_V) on every edit. Unchecked by default
+  on every newly built / loaded tab; previous A and B values are
+  restored on toggle off.
+- **Learning CLI** (``supervised``, ``semi_supervised``):
+  ``--constraint {a,b,su}`` → ``--constraint lehmann``. The
+  ``constraint='a'/'b'/'su'`` Python API is replaced by
+  ``constraint='lehmann'``.
+- **Reference paper models** ``M1``, ``M2``, ``M3``: A and B are now
+  *both* computed from Lehmann (the previous hand-picked A values are
+  superseded). The free blocks are now ``(C, D, Σ_U, Σ_V, Δ)``.
+
+### Fixed
+
+- LHS of the (H5) algebraic constraint corrected from
+  ``Δᵀ A + Σ_V Bᵀ`` to ``Δᵀ Aᵀ + Σ_V Bᵀ`` in
+  ``prg/utils/h5_constraint.py``, ``prg/filter/gss_filter.py``,
+  ``prg/experiments/{models_paper,run_supervised}.py``,
+  ``tests/test_h5_constraint.py``, and the paper sources
+  (``paper/sections/04_constraint.tex``,
+  ``paper/appendix/{B_h5_derivation,C_projections}.tex``,
+  ``paper/sections/06_experiments.tex``). Internally inconsistent before
+  the fix: ``compute_A_from_h5`` already used the correct convention
+  while sister functions used the typo'd one — tests passed by
+  bug-with-bug round-trip self-consistency.
+- ``compute_SU_from_h5`` (since removed) used the non-exact
+  rearrangement ``M Z = P W`` valid only when M and P commute. The
+  pre-removal Lehmann-only refactor uses the equivalent exact form
+  ``W = M P⁻¹ Z`` when computing Σ_U analytically.
+
+### Removed
+
+- Per-matrix H5 projection helpers ``compute_A_from_h5``,
+  ``compute_B_from_h5``, ``compute_SU_from_h5``, ``compute_C_from_h5``,
+  and ``apply_h5_constraint`` from ``prg.utils.h5_constraint``.
+  The Lehmann parametrisation supersedes all four.
+- All four corresponding GUI checkboxes (A / B / C / Σ_U) and the
+  independent Δ=0 checkbox.
+
 ## [0.11.0] — 2026-05-04
 
 ### Changed

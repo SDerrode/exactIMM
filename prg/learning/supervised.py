@@ -6,8 +6,9 @@ Supervised estimation of a GSS model from fully-observed (R, X, Y) data.
 
 Given a CSV produced by ``prg.simulate`` (columns: n, r, x_0, …, x_{q-1},
 y_0, …, y_{s-1}), this module estimates all model parameters by ordinary
-least squares (OLS) per regime, then optionally enforces the H5 constraint
-post-hoc, and saves the result as a ready-to-use model file in ``prg/models/``.
+least squares (OLS) per regime, then optionally enforces Lehmann's
+(H5)-compatible parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D post-hoc,
+and saves the result as a ready-to-use model file in ``prg/models/``.
 
 Estimation approach
 -------------------
@@ -23,9 +24,10 @@ Step 1 — free OLS
 Step 2 — Δ = 0 (optional)
     Zero out the off-diagonal block Δ(k) of Σ_W(k).
 
-Step 3 — H5 projection (optional)
-    Recompute one of A, B, or Σ_U analytically from the other parameters
-    using the H5 constraint (eq. 4.8).
+Step 3 — Lehmann (H5)-compatible projection (optional)
+    Recompute A(k) and B(k) jointly via the closed-form Lehmann
+    parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D, which makes (H5)
+    hold uniformly in Σ(r₁) for every regime pair.
 
 The Markov transition matrix P is estimated by maximum-likelihood
 (transition frequency counts, then row-normalise).
@@ -37,8 +39,8 @@ Usage
 Options
 -------
     csv                    Path to the simulation CSV (required)
-    --constraint {a,b,su}  H5 constraint target (mutually exclusive)
-    --delta-zero           Force Δ(k)=0 before the H5 step
+    --constraint lehmann   Apply Lehmann's (H5)-compatible parametrisation
+    --delta-zero           Force Δ(k)=0 before the projection
     --output PATH          Output .py path (default: prg/models/<auto>.py)
     --model-name NAME      File/class base name (default: model_learned_K…)
     -v, --verbose          Print per-regime fit summaries
@@ -46,9 +48,9 @@ Options
 Examples
 --------
     python -m prg.learning.supervised data/simulated/sim.csv
-    python -m prg.learning.supervised data/simulated/sim.csv --constraint b -v
+    python -m prg.learning.supervised data/simulated/sim.csv --constraint lehmann -v
     python -m prg.learning.supervised data/simulated/sim.csv \\
-        --constraint su --delta-zero --output prg/models/my_model.py
+        --constraint lehmann --delta-zero --output prg/models/my_model.py
 """
 
 from __future__ import annotations
@@ -200,7 +202,7 @@ def _fit_regime(
 ]:
     """
     Estimate F(k), b(k), Σ_W(k) for one regime by OLS, then apply
-    optional Δ=0 and H5 post-processing.
+    optional Δ=0 and Lehmann post-processing.
 
     OLS model
     ---------
@@ -214,7 +216,8 @@ def _fit_regime(
     ---------------------
     1. If *delta_zero*: set Δ block of Σ_W to zero.
     2. Clamp Σ_U, Σ_V to nearest SPD (numerical safety).
-    3. If *constraint* ∈ {'a','b','su'}: apply H5 projection.
+    3. If *constraint* == 'lehmann': overwrite A, B with the closed form
+       A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
     """
     N_k, dim_z = Z_curr.shape
 
@@ -251,20 +254,11 @@ def _fit_regime(
     SU = _nearest_spd(SU)
     SV = _nearest_spd(SV)
 
-    # --- Step 3: H5 projection ---
-    if constraint == "b":
-        from prg.utils.h5_constraint import compute_B_from_h5
+    # --- Step 3: Lehmann (H5)-compatible projection on A, B ---
+    if constraint == "lehmann":
+        from prg.utils.h5_constraint import compute_AB_lehmann
 
-        B = compute_B_from_h5(A, C, D, SU, Dt, SV)
-    elif constraint == "a":
-        from prg.utils.h5_constraint import compute_A_from_h5
-
-        A = compute_A_from_h5(B, C, D, SU, Dt, SV)
-    elif constraint == "su":
-        from prg.utils.h5_constraint import compute_SU_from_h5
-
-        SU = compute_SU_from_h5(A, B, C, D, Dt, SV)
-        SU = _nearest_spd(SU)
+        A, B = compute_AB_lehmann(C, D, Dt, SV)
 
     return A, B, C, D, SU, Dt, SV, b_full
 
@@ -298,8 +292,9 @@ def fit_supervised(
         Observed-state sequence.
     K, q, s : int
         Model dimensions.
-    constraint : None | 'a' | 'b' | 'su'
-        Post-hoc H5 constraint target.  ``None`` means no constraint.
+    constraint : None | 'lehmann'
+        If ``'lehmann'``, apply A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D after OLS.
+        ``None`` means no constraint.
     delta_zero : bool
         Force Δ(k) = 0 (zero cross-covariance) for all regimes.
     verbose : bool
@@ -596,19 +591,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--constraint",
-        choices=["a", "b", "su"],
+        choices=["lehmann"],
         default=None,
         metavar="TARGET",
         help=(
-            "Enforce H5 constraint post-hoc: recompute A (a), B (b), "
-            "or Σ_U (su) from the other estimated parameters. "
-            "Options a / b / su are mutually exclusive."
+            "Enforce Lehmann's (H5)-compatible parametrisation post-hoc: "
+            "recompute A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k) "
+            "from the other estimated parameters."
         ),
     )
     parser.add_argument(
         "--delta-zero",
         action="store_true",
-        help="Force Δ(k) = 0 (zero cross-covariance block) before the H5 step.",
+        help="Force Δ(k) = 0 (zero cross-covariance block) before the projection.",
     )
     parser.add_argument(
         "--output",

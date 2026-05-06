@@ -653,7 +653,7 @@ If you use this code or the (H5) framework in your work, please cite:
   title        = {{On Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
   howpublished = {\url{https://github.com/SDerrode/exactIMM}},
-  note         = {Software v0.13.0, accompanying paper preprint},
+  note         = {Software v0.13.1, accompanying paper preprint},
 }
 ```
 

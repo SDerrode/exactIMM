@@ -34,7 +34,7 @@ keywords:
   - ENSO
   - signal processing
 license: AGPL-3.0
-version: "0.13.0"
+version: "0.13.1"
 date-released: "2026-05-06"
 preferred-citation:
   type: generic

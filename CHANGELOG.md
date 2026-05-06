@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-05-06
+
+### Added
+
+- **GUI** ``ParamPanel``: live (H5) Frobenius residual badge alongside
+  ρ(F), ρ(A), ρ(D) on each regime tab. Green ✓ when ‖F‖_F < 1e-6
+  (model is (H5)-compatible and the ``h5_exact`` filter mode is safe),
+  amber ⚠ otherwise, grey ? when M is singular. The threshold is kept
+  in sync with ``prg.filter.gss_filter.H5_TOL``.
+- 7 ``pytest-qt`` end-to-end tests for the AB-constraint UI in
+  ``tests/test_param_panel_gui.py`` (default state, toggle
+  on/off + restore, value-change recompute, badge color, propagation
+  via "Apply AB → all"). ``pytest-qt>=4.4`` added to ``[dev]``
+  extras.
+- ``tests/test_no_stale_refs.py`` lint guard: scans every git-tracked
+  text file and fails on references to pre-v0.13 API names, removed
+  CLI flags, or old paper equation labels. CHANGELOG entries that
+  legitimately mention historical names are whitelisted.
+- ``mypy>=1.10`` added to ``[dev]`` extras with a ``[tool.mypy]``
+  section enforcing strict typing on
+  ``prg/utils/h5_constraint.py`` (the central, mathematical module).
+- GitHub issue #5 tracking optional benchmark baselines
+  (Blom-Bar-Shalom IMM, GPB2, RBPF) instead of stale TODOs in the
+  ``e2_filter_comparison`` script.
+
+### Changed
+
+- **Wiki**: ``API-Overview.md`` now lists ``apply_AB_constraint``,
+  ``compute_AB``, ``compute_h5_residual`` (replacing
+  ``apply_h5_constraint`` and ``compute_B_from_h5``);
+  ``GUI-Guide.md`` describes the single AB-constraint checkbox plus
+  the live (H5) badge (replacing the four mutually-exclusive H5
+  checkboxes); ``Tutorial.md`` switches its supervised /
+  semi-supervised CLI examples from ``--constraint b`` to
+  ``--constraint ab``.
+- ``prg/utils/h5_constraint.py`` module docstring and the GUI
+  AB-checkbox tooltip now distinguish *sufficiency* of the AB
+  closed form (always true, by construction) from its *necessity*
+  (generic when ``K·s ≥ q+s``, can fail when ``K·s < q+s``).
+  ``compute_h5_residual`` is highlighted as the actual diagnostic
+  for (H5)-compatibility.
+- ``dof_h5(K, q, s)`` doc-test value corrected:
+  ``dof_h5(3, 1, 1)`` now displays the actual return value 29
+  (the docstring example was off by one).
+
+### Fixed
+
+- Stale ``eq. (4.4) / (4.8)`` references and obsolete projection-style
+  comments cleaned up across ``prg/filter/gss_filter.py``,
+  ``prg/experiments/{metrics,models_paper,run_supervised}.py``,
+  ``prg/gui/main_window.py``, ``prg/simulate.py``.
+- ``prg/experiments/metrics.py``: ``dof_h5`` now correctly counts
+  ``D(k)`` (s²) which was previously omitted from the per-regime
+  sum (long-standing bug independent of the AB refactor); under the
+  AB constraint, ``A`` and ``B`` both contribute zero free
+  parameters. Values for ``q == s`` are unchanged from v0.13.0;
+  values for ``q ≠ s`` differ.
+
+### Notes for the H5 / AB constraint analysis
+
+A new partial answer to "is AB necessary?" is documented in the
+internal note ``docs/wojciech/H5_isolation_difficulty.tex``: under
+the physical hypothesis ``Σ(r) ≻ 0`` (one positive-definite joint
+covariance per regime), the closed-form AB is **necessary** for (H5)
+generically when ``K·s ≥ q+s`` (over- or exactly-determined regime)
+and *only sufficient* when ``K·s < q+s`` (under-determined regime,
+``(q+s−Ks)·q``-dimensional family of non-AB (H5)-compatible
+solutions per regime). All paper experiments (§§6–7) lie in the
+generic regime where AB ≡ (H5).
+
 ## [0.13.0] — 2026-05-06
 
 ### Changed

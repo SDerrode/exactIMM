@@ -266,7 +266,7 @@ class GSSFilter:
                     stacklevel=3,
                 )
                 continue
-            Z = Dt.T @ A + SV @ B.T
+            Z = Dt.T @ A.T + SV @ B.T  # LHS of (H5): Δᵀ Aᵀ + Σ_V Bᵀ
             scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
             rel = float(np.linalg.norm(F, "fro")) / scale
             if rel > max_rel:
@@ -275,7 +275,7 @@ class GSSFilter:
         if max_rel > H5_TOL:
             warnings.warn(
                 f"mode='h5_exact' assumes (H5) — i.e. the algebraic constraint "
-                f"Δᵀ A + Σ_V Bᵀ = P M⁻¹ W (paper eq. 4.4) holds for every "
+                f"Δᵀ Aᵀ + Σ_V Bᵀ = P M⁻¹ W holds for every "
                 f"regime — but the model has max relative residual = "
                 f"{max_rel:.3g} (worst at k={worst_k}). The filter will be "
                 f"biased. Use mode='imm_general' for non-(H5) models, or "

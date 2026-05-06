@@ -43,7 +43,7 @@ _H5_ASSERT_TOL = 1e-8  # tighter than filter's H5_TOL=1e-6 for ground-truth mode
 def _check_h5(name: str, k: int, A, B, C, D, SU, Dt, SV) -> None:
     """Raise AssertionError if H5 residual is too large."""
     res = compute_h5_residual(A, B, C, D, SU, Dt, SV)
-    Z = Dt.T @ A + SV @ B.T
+    Z = Dt.T @ A.T + SV @ B.T  # LHS of (H5): Δᵀ Aᵀ + Σ_V Bᵀ
     scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
     rel = float(np.linalg.norm(res, "fro")) / scale
     assert rel < _H5_ASSERT_TOL, (

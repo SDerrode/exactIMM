@@ -2,12 +2,14 @@
 """
 prg/utils/h5_constraint.py
 ==========================
-Enforce the H5 constraint (eq. 4.8) on a GSSParams object.
+Enforce the H5 constraint on a GSSParams object.
 
-The constraint says that, given A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k),
+The constraint (eq. 16 of Article V2.docx, equivalently appendix B of
+the local paper, derived from `A Δ + B Σ_V = T M⁻¹ R` after transposing
+both sides) says that, given A(k), C(k), D(k), Σ_U(k), Δ(k), Σ_V(k),
 the block B(k) of the transition matrix F(k) is uniquely determined by:
 
-    B(k)ᵀ = L(k)⁻¹ · (P(k) M(k)⁻¹ (Q(k) A(k)ᵀ + Δ(k)ᵀ) − Δ(k)ᵀ A(k))
+    B(k)ᵀ = L(k)⁻¹ · (P(k) M(k)⁻¹ (Q(k) A(k)ᵀ + Δ(k)ᵀ) − Δ(k)ᵀ A(k)ᵀ)
 
 where (subscript k omitted):
     P = Δᵀ Cᵀ + Σ_V Dᵀ        (s × s)
@@ -16,10 +18,14 @@ where (subscript k omitted):
     M = Q Cᵀ + R Dᵀ + Σ_V     (s × s)   symmetric, > 0 if Σ_U, Σ_V > 0
     L = Σ_V − P M⁻¹ Pᵀ        (s × s)   Schur complement of M
 
+The full residual form of (H5) is:
+
+    Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ).
+
 Public API
 ----------
 apply_h5_constraint(params, *, logger=None) -> GSSParams
-    Return a **new** GSSParams whose B(k) blocks satisfy eq. (4.8).
+    Return a **new** GSSParams whose B(k) blocks satisfy the constraint.
     Raises ValueError if the system is singular for any k.
 """
 
@@ -58,11 +64,12 @@ def compute_h5_residual(
     SV: np.ndarray,  # (s, s)  Σ_V
 ) -> np.ndarray:
     """
-    Evaluate the (H5) algebraic constraint residual (paper eq. 4.4).
+    Evaluate the (H5) algebraic constraint residual.
 
-    The constraint is
+    The constraint (eq. 16 of Article V2.docx, see also paper appendix B
+    `eq:h5_first` after transposing both sides) is
 
-        Δᵀ A + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ)
+        Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ)
 
     with the auxiliary matrices
 
@@ -75,7 +82,7 @@ def compute_h5_residual(
     Returns
     -------
     F : ndarray of shape (s, q)
-        The residual ``F = Z − P M⁻¹ W`` with ``Z = Δᵀ A + Σ_V Bᵀ``.
+        The residual ``F = Z − P M⁻¹ W`` with ``Z = Δᵀ Aᵀ + Σ_V Bᵀ``.
         ``‖F‖ = 0`` ⇔ (H5) holds exactly.
 
     Raises
@@ -88,7 +95,7 @@ def compute_h5_residual(
     R = C @ Dt + D @ SV
     M = Q @ C.T + R @ D.T + SV
     W = Q @ A.T + R @ B.T + Dt.T
-    Z = Dt.T @ A + SV @ B.T
+    Z = Dt.T @ A.T + SV @ B.T
     X = np.linalg.solve(M, W)  # X = M⁻¹ W
     return Z - P @ X
 
@@ -136,7 +143,7 @@ def compute_B_from_h5(
         raise ValueError(f"M is singular: {exc}") from exc
 
     L = SV - PM_inv @ R  # Schur complement, s × s
-    rhs = PM_inv @ (Q @ A.T + Dt.T) - Dt.T @ A  # s × q
+    rhs = PM_inv @ (Q @ A.T + Dt.T) - Dt.T @ A.T  # s × q
 
     cond_L = np.linalg.cond(L)
     if cond_L > 1e12:
@@ -230,13 +237,23 @@ def compute_SU_from_h5(
     """
     Compute Σ_U (q × q) from the H5 constraint with A, B, C, D, Δ, Σ_V fixed.
 
-    Multiplying the constraint through by M eliminates M⁻¹ and yields
-    a linear equation in Σ_U:
-        C Σ_U E − (PC) Σ_U Aᵀ = RHS
-    where  E = CᵀZ,  Z = Σ_V Bᵀ + ΔᵀA,  PC = P C.
+    The constraint  Z = P M⁻¹ W  is equivalent (when P is invertible) to
+    the form  W = M P⁻¹ Z, which is *exact* and linear in Σ_U after
+    substituting M = M₀ + C Σ_U Cᵀ and W = W₀ + C Σ_U Aᵀ:
 
-    Vectorising with vec(XYZ) = (Zᵀ⊗X) vec(Y) gives the (qs × q²) system:
-        [(Eᵀ⊗C) − (A⊗PC)] vec(Σ_U) = vec(RHS)
+        C Σ_U (Aᵀ − Cᵀ P⁻¹ Z) = M₀ P⁻¹ Z − W₀,
+
+    where Z = Δᵀ Aᵀ + Σ_V Bᵀ (LHS of (H5)),
+          R  = C Δ + D Σ_V,
+          M₀ = (D Δᵀ) Cᵀ + R Dᵀ + Σ_V (Σ_U-independent part of M),
+          W₀ = (D Δᵀ) Aᵀ + R Bᵀ + Δᵀ (Σ_U-independent part of W).
+
+    Setting F := Aᵀ − Cᵀ P⁻¹ Z (q × q), the vectorised (qs × q²) system
+    reads
+        (Fᵀ ⊗ C) vec(Σ_U) = vec(M₀ P⁻¹ Z − W₀).
+
+    The solution is then symmetrised (Σ_U ← ½(Σ_U + Σ_Uᵀ)) and
+    Cholesky-checked for positive definiteness.
 
     Returns
     -------
@@ -245,21 +262,37 @@ def compute_SU_from_h5(
     Raises
     ------
     ValueError
-        If the system is rank-deficient or Σ_U is not positive definite.
+        If P is singular (e.g. D = 0 and Δ = 0), if the Kronecker system
+        is rank-deficient (e.g. F not full rank — possible when A, B, C, D,
+        Δ, Σ_V are themselves (H5)-compatible *for any* Σ_U via the Lehmann
+        parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D), or if the recovered
+        Σ_U is not positive definite.
     """
     P = Dt.T @ C.T + SV @ D.T  # s × s
     Q0 = D @ Dt.T  # s × q  (Q = C Σ_U + Q0)
     R = C @ Dt + D @ SV  # s × s
-    M0 = Q0 @ C.T + R @ D.T + SV  # s × s  (M = C Σ_U Cᵀ + M0)
+    M0 = Q0 @ C.T + R @ D.T + SV  # s × s  (M = M0 + C Σ_U Cᵀ)
 
-    Z = SV @ B.T + Dt.T @ A  # s × q
-    W = Q0 @ A.T + R @ B.T + Dt.T  # s × q
-    RHS = P @ W - M0 @ Z  # s × q
+    Z = Dt.T @ A.T + SV @ B.T  # s × q   (LHS of (H5))
+    W0 = Q0 @ A.T + R @ B.T + Dt.T  # s × q  (Σ_U-independent part of W)
 
-    E = C.T @ Z  # q × q
-    PC = P @ C  # s × q
-    KronMat = np.kron(E.T, C) - np.kron(A, PC)  # (qs × q²)
-    rhs_vec = RHS.ravel(order="F")  # (qs,)
+    cond_P = np.linalg.cond(P)
+    if cond_P > 1e12:
+        raise ValueError(
+            f"P is ill-conditioned (cond = {cond_P:.3e}); cannot reliably "
+            "solve for Σ_U via the W = M P⁻¹ Z form."
+        )
+
+    try:
+        P_inv_Z = np.linalg.solve(P, Z)  # s × q
+    except np.linalg.LinAlgError as exc:
+        raise ValueError(f"P is singular: {exc}") from exc
+
+    F = A.T - C.T @ P_inv_Z  # q × q
+    RHS = M0 @ P_inv_Z - W0  # s × q
+
+    KronMat = np.kron(F.T, C)  # (sq × q²)
+    rhs_vec = RHS.ravel(order="F")  # (sq,)
 
     SU_vec, _, rank, _ = np.linalg.lstsq(KronMat, rhs_vec, rcond=None)
 
@@ -267,7 +300,9 @@ def compute_SU_from_h5(
     if rank < q * q:
         raise ValueError(
             f"Kronecker system is rank-deficient (rank={rank} < {q * q}); "
-            "Σ_U is not uniquely determined."
+            "Σ_U is not uniquely determined (the model may already satisfy "
+            "the Lehmann parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D, in "
+            "which case (H5) holds for any Σ_U)."
         )
 
     SU = SU_vec.reshape(q, q, order="F")
@@ -298,22 +333,22 @@ def compute_C_from_h5(
     lambda_relax: float = 0.5,
 ) -> np.ndarray:
     """
-    Compute C (s × q) from the H5 constraint (eq. 4.20) by fixed-point iteration.
+    Compute C (s × q) from the H5 constraint by fixed-point iteration.
 
     Unlike A, B, and Σ_U — which give linear systems — the H5 constraint is
-    *quadratic* in C (eq. 4.20).  This function uses Scheme 2 (eq. 4.23/4.24):
-    at each iteration C is kept only in W = C K + W₀ while M̃ and P̃ are
-    frozen at the previous iterate, giving the linear system
+    *quadratic* in C through both M = QCᵀ + RDᵀ + Σ_V (with Q, R linear in C)
+    and W = CK + W₀ (linear in C). This function uses a frozen-Jacobi
+    iteration: at step (n), G̃ := P̃ M̃⁻¹ is frozen at the previous iterate,
+    and the constraint Z = G W = G(CK + W₀) becomes the linear system
 
-        P̃  C  K  =  M̃ Z − P̃ W₀
+        G̃ C K = T̃ ,    T̃ := Z − G̃ W₀
 
-    solved by lstsq and then relaxed:
+    solved by lstsq, then relaxed:
 
-        C^(k+1)  ←  (1 − λ) C̃  +  λ C_lstsq
+        C^(n+1) ← (1 − λ) C̃ + λ C_lstsq
 
     Convergence is monitored on the full non-linearised residual
-
-        F(C) = M(C) Z − P(C) W(C)
+    F(C) = Z − P(C) M(C)⁻¹ W(C) (which is the actual H5 constraint).
 
     Initialising at C_init = 0 selects the branch closest to the CGOMSM
     solution (C = 0 corresponds to hypothesis H4).
@@ -346,7 +381,7 @@ def compute_C_from_h5(
     C = np.zeros((s, q)) if C_init is None else np.array(C_init, dtype=float)
 
     # Quantities constant in C
-    Z = Dt.T @ A + SV @ B.T  # s × q  (= lhs of H5)
+    Z = Dt.T @ A.T + SV @ B.T  # s × q  (= lhs of H5: Δᵀ Aᵀ + Σ_V Bᵀ)
     K = SU @ A.T + Dt @ B.T  # q × q
     W0 = D @ Dt.T @ A.T + D @ SV @ B.T + Dt.T  # s × q  (= W at C=0)
     Z_norm = max(float(np.linalg.norm(Z, "fro")), 1.0)

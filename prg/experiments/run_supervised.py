@@ -128,7 +128,7 @@ def _max_h5_residual(est: dict) -> float:
             F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
         except np.linalg.LinAlgError:
             return float("nan")
-        Z = Dt.T @ A + SV @ B.T
+        Z = Dt.T @ A.T + SV @ B.T  # LHS of (H5): Δᵀ Aᵀ + Σ_V Bᵀ
         scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
         rel = float(np.linalg.norm(F, "fro")) / scale
         max_rel = max(max_rel, rel)

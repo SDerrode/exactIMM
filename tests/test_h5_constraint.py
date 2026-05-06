@@ -24,8 +24,11 @@ from prg.classes.GSSParams import GSSParams
 from prg.models.base_gss_model import BaseGSSModel
 from prg.utils.h5_constraint import (
     apply_h5_constraint,
+    compute_A_from_h5,
     compute_B_from_h5,
     compute_C_from_h5,
+    compute_SU_from_h5,
+    compute_h5_residual,
 )
 
 # ---------------------------------------------------------------------------
@@ -35,10 +38,14 @@ from prg.utils.h5_constraint import (
 
 def _check_constraint(A, C, D, SU, Dt, SV, B, atol=1e-10):
     """
-    Verify the H5 constraint (eq. 4.4):
+    Verify the H5 algebraic constraint:
 
-        Δᵀ A + Σ_V Bᵀ = (Δᵀ Cᵀ + Σ_V Dᵀ) M⁻¹ ((C Σ_U + D Δᵀ) Aᵀ
-                          + (C Δ + D Σ_V) Bᵀ + Δᵀ)
+        Δᵀ Aᵀ + Σ_V Bᵀ = (Δᵀ Cᵀ + Σ_V Dᵀ) M⁻¹ ((C Σ_U + D Δᵀ) Aᵀ
+                           + (C Δ + D Σ_V) Bᵀ + Δᵀ)
+
+    (eq. 16 of Article V2.docx, equivalently appendix B of the local
+    paper, derived from `A Δ + B Σ_V = T M⁻¹ R` after transposing both
+    sides).
 
     Returns True when the equation holds up to *atol*.
     """
@@ -48,7 +55,7 @@ def _check_constraint(A, C, D, SU, Dt, SV, B, atol=1e-10):
     M = Q @ C.T + R @ D.T + SV  # s × s
 
     M_inv = np.linalg.inv(M)
-    lhs = Dt.T @ A + SV @ B.T  # s × q
+    lhs = Dt.T @ A.T + SV @ B.T  # s × q
     rhs = P @ M_inv @ (Q @ A.T + R @ B.T + Dt.T)  # s × q
 
     return np.allclose(lhs, rhs, atol=atol)
@@ -168,6 +175,66 @@ def test_compute_B_idempotent(rng):
 
 
 # ---------------------------------------------------------------------------
+# Tests for compute_A_from_h5
+# ---------------------------------------------------------------------------
+
+
+def test_compute_A_recovers_truth(rng):
+    """compute_A_from_h5(B*, ...) must recover A_true when B* is itself
+    derived from compute_B_from_h5(A_true, ...)."""
+    q, s = 2, 3
+    A_true, C, D, SU, Dt, SV = _random_inputs(q, s, rng)
+    B = compute_B_from_h5(A_true, C, D, SU, Dt, SV)
+    A_back = compute_A_from_h5(B, C, D, SU, Dt, SV)
+    assert np.linalg.norm(A_back - A_true, "fro") < 1e-9, (
+        f"compute_A_from_h5 did not recover A_true: "
+        f"||A_back - A_true|| = {np.linalg.norm(A_back - A_true):.3e}"
+    )
+
+
+def test_compute_A_satisfies_constraint(rng):
+    """A returned by compute_A_from_h5 must satisfy the H5 constraint."""
+    q, s = 2, 3
+    A_true, C, D, SU, Dt, SV = _random_inputs(q, s, rng)
+    B = compute_B_from_h5(A_true, C, D, SU, Dt, SV)
+    A = compute_A_from_h5(B, C, D, SU, Dt, SV)
+    assert _check_constraint(A, C, D, SU, Dt, SV, B, atol=1e-10), (
+        "H5 constraint not satisfied by compute_A_from_h5 output"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests for compute_SU_from_h5
+# ---------------------------------------------------------------------------
+
+
+def test_compute_SU_recovers_truth(rng):
+    """compute_SU_from_h5(A, B*, C, D, Δ, Σ_V) must recover Σ_U_true when B*
+    is itself derived from compute_B_from_h5(A, C, D, SU_true, Δ, Σ_V)."""
+    q, s = 2, 3
+    A, C, D, SU_true, Dt, SV = _random_inputs(q, s, rng)
+    B = compute_B_from_h5(A, C, D, SU_true, Dt, SV)
+    SU_back = compute_SU_from_h5(A, B, C, D, Dt, SV)
+    assert np.linalg.norm(SU_back - SU_true, "fro") < 1e-9, (
+        f"compute_SU_from_h5 did not recover Σ_U_true: "
+        f"||SU_back - SU_true|| = {np.linalg.norm(SU_back - SU_true):.3e}"
+    )
+
+
+def test_compute_SU_satisfies_constraint(rng):
+    """Σ_U returned by compute_SU_from_h5 must satisfy the H5 constraint
+    (residual evaluated by compute_h5_residual)."""
+    q, s = 2, 3
+    A, C, D, SU_true, Dt, SV = _random_inputs(q, s, rng)
+    B = compute_B_from_h5(A, C, D, SU_true, Dt, SV)
+    SU = compute_SU_from_h5(A, B, C, D, Dt, SV)
+    res = compute_h5_residual(A, B, C, D, SU, Dt, SV)
+    assert np.linalg.norm(res, "fro") < 1e-9, (
+        f"H5 residual = {np.linalg.norm(res, 'fro'):.3e} > 1e-9"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Tests for apply_h5_constraint
 # ---------------------------------------------------------------------------
 
@@ -262,12 +329,12 @@ def test_apply_h5_constraint_preserves_b_bias(params_K2_q1_s1):
 
 
 def _residual_h5(A, C, D, SU, Dt, SV, B):
-    """Full residual F(C) = Z − P M⁻¹ W  (H5 constraint in residual form)."""
+    """Full residual F(C) = Z − P M⁻¹ W with Z = Δᵀ Aᵀ + Σ_V Bᵀ."""
     P = Dt.T @ C.T + SV @ D.T
     Q = C @ SU + D @ Dt.T
     R = C @ Dt + D @ SV
     M = Q @ C.T + R @ D.T + SV
-    Z = Dt.T @ A + SV @ B.T
+    Z = Dt.T @ A.T + SV @ B.T
     W = Q @ A.T + R @ B.T + Dt.T
     X = np.linalg.solve(M, W)  # M⁻¹ W
     return Z - P @ X

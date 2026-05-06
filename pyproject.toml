@@ -26,6 +26,7 @@ gui = [
 dev = [
     "pytest>=8.0",
     "pytest-cov",
+    "pytest-qt>=4.4",
     "ruff>=0.6",
 ]
 paper = [

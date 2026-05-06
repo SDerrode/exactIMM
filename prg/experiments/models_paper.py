@@ -10,9 +10,10 @@ M1  K=2, q=1, s=1  — canonical scalar case (Table §6.1)
 M2  K=2, q=2, s=2  — multivariate cross-coupled case (Table 1 in §6.1)
 M3  K=3, q=1, s=1  — three-regime scalar case (§6.1)
 
-All models satisfy (H5) exactly: B(k) is computed from A, C, D, Σ_U, Δ, Σ_V
-via the closed-form projection eq. (4.8).  An assertion at module import time
-verifies the H5 residual < 1e-8 for every regime.
+All models satisfy (H5) exactly: A(k) and B(k) are computed from
+C, D, Δ, Σ_V via Lehmann's closed-form parametrisation
+A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.  An assertion at module construction
+time verifies the H5 residual < 1e-8 for every regime.
 
 Usage
 -----

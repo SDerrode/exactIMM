@@ -282,7 +282,7 @@ def main() -> None:
     if args.verbose >= 2:
         params.summary()
 
-    # --- Apply H5 constraint on B (optional) ---
+    # --- Apply Lehmann (H5) parametrisation to A, B (optional) ---
     if args.constraint:
         log.info("--constraint: applying Lehmann (H5) parametrisation to A(k), B(k) …")
         try:

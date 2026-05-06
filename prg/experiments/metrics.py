@@ -10,7 +10,7 @@ that the Monte-Carlo runner can call them from any parallelisation backend.
 
 Functions
 ---------
-dof_h5                — free-parameter count  d_{H5}(K, q, s)  (eq. 6.1)
+dof_h5                — free-parameter count d_{H5}(K, q, s) under Lehmann
 compute_rmse          — root mean squared filtering error (scalar)
 compute_nees          — average normalised estimation error squared (ANEES)
 compute_ljung_box     — Ljung–Box test p-value for innovation whiteness
@@ -39,24 +39,27 @@ __all__ = [
 
 def dof_h5(K: int, q: int, s: int) -> int:
     """
-    Number of free parameters of an H5-constrained GSS(K, q, s) model.
+    Number of free parameters of an (H5)-compatible GSS(K, q, s) model
+    under Lehmann's closed-form parametrisation.
 
-    Under (H5) the matrix B(k) is uniquely determined by the other six
-    parameter blocks (A, C, D, Σ_U, Δ, Σ_V) via eq. (4.8), so it
-    contributes *zero* free parameters.  The count per regime is
+    Under (H5) Lehmann (Note manuscrite, 6 May 2026) showed that A(k)
+    and B(k) are *both* determined by (C, D, Δ, Σ_V) via
 
-        q² + qs            — A(k)  (q×q) and  C(k)  (s×q)
-        (q+s)(q+s+1)/2     — Σ_W(k)  (symmetric (q+s)×(q+s))
-        (q+s)              — drift bias  b(k)
+        A(k) = Δ(k) Σ_V(k)⁻¹ C(k),
+        B(k) = Δ(k) Σ_V(k)⁻¹ D(k),
+
+    so they contribute *zero* free parameters. The count per regime is
+
+        qs + s²            — C(k) (s×q) and D(k) (s×s)
+        (q+s)(q+s+1)/2     — Σ_W(k) (symmetric (q+s)×(q+s))
+        (q+s)              — drift bias b(k)
 
     summed over K regimes, plus K(K-1) for the off-diagonal entries of
     the transition matrix P (rows sum to 1) and K-1 for the initial
     distribution π_0 (sums to 1), giving
 
-        d_{H5}(K, q, s) = K [ q² + qs + (q+s)(q+s+1)/2 + (q+s) ]
-                         + K² - 1
-
-    (eq. 6.1 of the paper).
+        d_{H5}(K, q, s) = K [ qs + s² + (q+s)(q+s+1)/2 + (q+s) ]
+                         + K² - 1.
 
     Parameters
     ----------
@@ -72,10 +75,10 @@ def dof_h5(K: int, q: int, s: int) -> int:
     >>> dof_h5(2, 1, 1)
     17
     >>> dof_h5(3, 1, 1)
-    30
+    29
     """
     dim_z = q + s
-    per_regime = q**2 + q * s + dim_z * (dim_z + 1) // 2 + dim_z
+    per_regime = q * s + s**2 + dim_z * (dim_z + 1) // 2 + dim_z
     return K * per_regime + K**2 - 1
 
 

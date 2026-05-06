@@ -75,6 +75,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All four corresponding GUI checkboxes (A / B / C / Σ_U) and the
   independent Δ=0 checkbox.
 
+### Migrating from v0.11.x
+
+| Old (v0.11)                                         | New (v0.12)                                       |
+| --------------------------------------------------- | ------------------------------------------------- |
+| ``apply_h5_constraint(params)``                     | ``apply_lehmann_constraint(params)``              |
+| ``compute_B_from_h5(A, C, D, SU, Dt, SV)``          | ``_, B = compute_AB_lehmann(C, D, Dt, SV)``       |
+| ``compute_A_from_h5(B, C, D, SU, Dt, SV)``          | ``A, _ = compute_AB_lehmann(C, D, Dt, SV)``       |
+| ``compute_SU_from_h5(A, B, C, D, Dt, SV)``          | (no longer applicable — Σ_U is fully free)        |
+| ``compute_C_from_h5(A, B, D, SU, Dt, SV)``          | (no longer applicable — C is fully free)          |
+| ``--constraint a`` / ``b`` / ``su`` (CLI)           | ``--constraint lehmann``                          |
+| ``constraint='a'/'b'/'su'`` (Python)                | ``constraint='lehmann'``                          |
+| GUI checkboxes "Constraint on A / B / C / Σ_U"      | Single GUI checkbox "Lehmann constraint on (A, B)"|
+| GUI checkbox "Δ = 0"                                | Edit the off-diagonal block of Σ_W manually       |
+
+**Behavioural notes:**
+
+- The GUI checkbox is **always unchecked** on a freshly built or loaded
+  tab — users must opt in explicitly.
+- Reference paper models ``M1``, ``M2``, ``M3`` now compute ``A`` from
+  Lehmann; the previous hand-picked ``A`` values are superseded.
+  Numerical Monte-Carlo results may shift accordingly.
+- ``dof_h5(K, q, s)`` (free-parameter count) was corrected: under
+  Lehmann both ``A`` and ``B`` contribute zero free parameters; ``D``
+  (previously omitted by mistake) now contributes ``s²``. Values for
+  ``q == s`` are unchanged; values for ``q ≠ s`` differ from v0.11.
+
 ## [0.11.0] — 2026-05-04
 
 ### Changed

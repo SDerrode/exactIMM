@@ -1330,10 +1330,11 @@ class GSSMainWindow(QMainWindow):
             "               Works for any GSS model, with or without (H5)\n"
             "               (matches exactIMM ≤ v0.9.0).\n"
             "Exact IMM    — stationary pre-computed moments. Exact when (H5)\n"
-            "               holds: the algebraic constraint of paper eq. (4.4)\n"
-            "               linking A, B, C, D, Σ_U, Σ_V, Δ. Emits a warning\n"
-            "               when the residual exceeds the tolerance. Use\n"
-            "               'Apply (H5)' to enforce it (recomputes B(k))."
+            "               holds: the algebraic constraint\n"
+            "               Δᵀ Aᵀ + Σ_V Bᵀ = P M⁻¹ W linking the 7 blocks.\n"
+            "               Emits a warning when the residual exceeds the\n"
+            "               tolerance. Tick the per-regime Lehmann checkbox\n"
+            "               to enforce it (sets A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)."
         )
         mode_row.addWidget(self._mode_combo)
         mode_row.addStretch()
@@ -2415,7 +2416,7 @@ class GSSMainWindow(QMainWindow):
             for k in range(K):
                 self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu_list[k], b_list[k])
 
-            # Re-apply any active H5 / Δ=0 constraints to the newly loaded
+            # Re-apply any active Lehmann constraint to the newly loaded
             # parameter values.  The ParamPanel signals are still blocked here,
             # so constraint_toggled cannot propagate to _on_reset.
             self._param_panel.reapply_active_constraints()

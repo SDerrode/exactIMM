@@ -22,6 +22,37 @@ with $F(k) = \begin{bmatrix}A_k & B_k \\ C_k & D_k\end{bmatrix}$ and $W_{n+1}\mi
 
 The central objective is to compute $\mathbb{E}[X_n \mid Y_{1:n}]$ efficiently (fast optimal filter).
 
+The (H5) structural assumption translates into an algebraic constraint
+between the seven block matrices $(A, B, C, D, \Sigma_U, \Sigma_V, \Delta)$
+of each regime. Since **v0.12.0** the constraint is enforced by
+**Lehmann's closed-form parametrisation** (note manuscrite, May 2026):
+
+$$
+A(k) = \Delta(k)\,\Sigma_V(k)^{-1}\,C(k),
+\qquad
+B(k) = \Delta(k)\,\Sigma_V(k)^{-1}\,D(k).
+$$
+
+This is the unique parametrisation of $(A, B)$ compatible with (H5)
+*uniformly* in the joint covariance $\Sigma(r_1)$, making the $K^2$
+regime-pair equations of (H5) trivially satisfied. The free blocks per
+regime become $(C, D, \Sigma_U, \Sigma_V, \Delta)$.
+
+```python
+from prg.utils.h5_constraint import compute_AB_lehmann, apply_lehmann_constraint
+
+# Single regime: closed-form helper
+A, B = compute_AB_lehmann(C, D, Delta, Sigma_V)
+
+# All regimes at once: project an existing GSSParams onto the (H5) manifold
+constrained_params = apply_lehmann_constraint(params)
+```
+
+In the GUI, a single "Lehmann constraint on (A(k), B(k))" checkbox per
+regime locks both blocks simultaneously. See the
+[CHANGELOG](CHANGELOG.md) entry for v0.12.0 for details and a v0.11→v0.12
+migration table.
+
 ---
 
 ## Project structure
@@ -61,7 +92,7 @@ exactIMM/
 │   ├── baselines/
 │   ├── figures/
 │   └── e{1,2,3}_*.py
-├── tests/                      # 204 pytest tests
+├── tests/                      # 201 pytest tests
 ├── data/
 │   ├── simulated/              # Generated CSV files (gitignored)
 │   └── real/                   # Real datasets: ENSO (NOAA SST), SP500/VIX

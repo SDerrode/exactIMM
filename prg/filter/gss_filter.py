@@ -29,17 +29,16 @@ Modes
                  moments of regime k;
       Step (IV)  combination using π_{n+1}(k).
 
-    This mode is mathematically exact under (H5), which is the algebraic
-    constraint of paper eq. (4.4)
+    This mode is mathematically exact under (H5), the algebraic constraint
 
-        Δ(k)ᵀ A(k) + Σ_V(k) B(k)ᵀ = P(k) M(k)⁻¹ W(k)
+        Δ(k)ᵀ A(k)ᵀ + Σ_V(k) B(k)ᵀ = P(k) M(k)⁻¹ W(k),
 
     tying together all 7 parameter matrices (A, B, C, D, Σ_U, Σ_V, Δ) of
-    each regime. (H5) is **not** equivalent to B(k) = 0 — given the other
-    six matrices, B(k) is uniquely determined by eq. (4.8); see
-    :mod:`prg.utils.h5_constraint`. When (H5) is violated a
-    ``RuntimeWarning`` is emitted at construction (relative residual
-    above ``H5_TOL``).
+    each regime. (H5) is **not** equivalent to B(k) = 0 — A(k) and B(k)
+    are determined together from (C, D, Δ, Σ_V) by Lehmann's closed form
+    A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D; see :mod:`prg.utils.h5_constraint`.
+    When (H5) is violated a ``RuntimeWarning`` is emitted at construction
+    (relative residual above ``H5_TOL``).
 
 ``mode="imm_general"`` — IMM-style recursion, no (H5) required
     The full F(k) = [[A_k, B_k], [C_k, D_k]] is used. Per-regime moments
@@ -229,10 +228,10 @@ class GSSFilter:
     def _check_h5(self) -> None:
         """Emit a RuntimeWarning if (H5) is violated.
 
-        (H5) is the algebraic constraint  Δᵀ A + Σ_V Bᵀ = P M⁻¹ W  of
-        paper eq. (4.4), tying together all 7 parameter matrices of each
-        regime. It is **not** equivalent to B(k) = 0. We evaluate the
-        relative Frobenius residual
+        (H5) is the algebraic constraint  Δᵀ Aᵀ + Σ_V Bᵀ = P M⁻¹ W
+        tying together all 7 parameter matrices of each regime. It is
+        **not** equivalent to B(k) = 0. We evaluate the relative
+        Frobenius residual
 
             r(k) = ‖Z(k) − P(k) M(k)⁻¹ W(k)‖_F / max(‖Z(k)‖_F, 1)
 

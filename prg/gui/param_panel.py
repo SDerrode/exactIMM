@@ -113,8 +113,10 @@ class _StateTab(QWidget):
         )
         self._constraint_AB_check.setToolTip(
             "Force A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k).\n"
-            "These are the unique (A, B) compatible with the (H5) constraint\n"
-            "for any Σ_U; A and B blocks become read-only while checked."
+            "This closed form is sufficient for (H5); when checked, the A and\n"
+            "B blocks of F(k) become read-only and are recomputed live as you\n"
+            "edit C, D, Δ or Σ_V. Other (H5)-compatible (A, B) may exist when\n"
+            "K·s < q+s; the live (H5) badge is the source of truth."
         )
         self._constraint_AB_check.setStyleSheet(self._CHK_STYLE_AB)
         chk_row.addWidget(self._constraint_AB_check)

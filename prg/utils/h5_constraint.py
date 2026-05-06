@@ -10,15 +10,24 @@ The (H5) algebraic constraint, derived from the Markovianity of (R, Y)
     Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ),
 
 with P = Δᵀ Cᵀ + Σ_V Dᵀ, Q = C Σ_U + D Δᵀ, R = C Δ + D Σ_V,
-M = Q Cᵀ + R Dᵀ + Σ_V. Requiring this to hold *uniformly* in the
-joint covariance Σ(r₁) = [[Σ_U, Δ], [Δᵀ, Σ_V]] collapses A and B
-onto the closed form
+M = Q Cᵀ + R Dᵀ + Σ_V. The closed form
 
-    A = Δ Σ_V⁻¹ C,        B = Δ Σ_V⁻¹ D.
+    A = Δ Σ_V⁻¹ C,        B = Δ Σ_V⁻¹ D
 
-This is the *only* parametrisation compatible with (H5) for arbitrary
-Σ(r₁); the K² regime-pair equations of (H5) are then trivially
-satisfied. (C, D, Σ_U, Σ_V, Δ) are free.
+is **sufficient** for (H5): a model with these blocks satisfies the
+K² regime-pair equations of (H5) by construction, for any choice of
+(C, D, Σ_U, Σ_V, Δ).
+
+Necessity is more subtle. Under the physical hypothesis that the K
+regime-noise covariances Σ(r) = [[Σ_U,r, Δ_r]; [Δᵀ_r, Σ_V,r]] are
+all positive definite, an elimination argument shows that AB is also
+**necessary** — i.e., the unique (H5)-compatible parametrisation —
+generically when K·s ≥ q + s. In the sub-determined regime
+K·s < q + s, (H5)-compatible models exist that are not of the AB
+form: AB is one specific point in a (q+s−Ks)·q-dimensional affine
+space of solutions per regime. Most practical configurations
+(K=2 or 3, q=s) fall in the over- or exactly-determined regime
+where AB ≡ (H5).
 
 Public API
 ----------
@@ -28,7 +37,9 @@ apply_AB_constraint(params, *, logger=None) -> GSSParams
     Return a new GSSParams with each regime's (A_k, B_k) replaced by
     the closed form.
 compute_h5_residual(A, B, C, D, SU, Dt, SV) -> ndarray (s, q)
-    Frobenius-norm-zero ⇔ (H5) holds.
+    Frobenius-norm-zero ⇔ (H5) holds. This is the source of truth
+    for (H5)-compatibility, regardless of whether (A, B) takes the
+    AB form.
 """
 
 from __future__ import annotations

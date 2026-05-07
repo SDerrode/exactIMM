@@ -363,19 +363,17 @@ def make_fig_supervised_rmse(
     out = fig_dir / "fig_supervised_rmse.pdf"
 
     # Projection display order and colours
-    # Note: tau=A is excluded — numerically unstable for M1 (near-singular G matrix)
     PROJ_STYLES = {
         "none": dict(color="#999999", ls="--", marker="x", label="Free OLS"),
-        "b": dict(color="#1f77b4", ls="-", marker="o", label=r"$\tau=B$"),
-        "su": dict(color="#2ca02c", ls="-.", marker="s", label=r"$\tau=\Sigma_U$"),
+        "ab": dict(color="#1f77b4", ls="-", marker="o", label="AB constraint"),
     }
 
     N_vals = sorted(df_sup["N"].unique())
 
     fig, ax = plt.subplots(figsize=(4.5, 3.2))
 
-    # Oracle curve (same for all projections — use mean of 'b' oracle as representative)
-    sub_b = df_sup[df_sup["projection"] == "b"]
+    # Oracle curve (same for all projections — use mean of 'ab' oracle as representative)
+    sub_b = df_sup[df_sup["projection"] == "ab"]
     ora_means, ora_sems, xs = [], [], []
     for N in N_vals:
         g = sub_b[sub_b["N"] == N]["rmse_oracle"].dropna()
@@ -454,10 +452,8 @@ def make_tab_supervised(
     out = fig_dir / "tab_supervised_M1.tex"
 
     PROJ_LABELS = {
-        "none": "None",
-        "b": r"$\tau=B$",
-        "a": r"$\tau=A^\dagger$",  # dagger: near-singular G for M1
-        "su": r"$\tau=\Sigma_U$",
+        "none": "Free OLS",
+        "ab": "AB constraint",
     }
 
     data_lines = []
@@ -488,10 +484,8 @@ def make_tab_supervised(
         r" $\|\hat F_k - F_k\|_F / \|F_k\|_F$ (mean, averaged over"
         r" the two regimes $k=1,2$), for $N \in \{200, 500, 2000\}$,"
         r" and median H5 residual at $N=2\,000$."
-        r" $^\dagger$~Projection $\tau=A$ solves for $A$ from the H5"
-        r" constraint; the denominator matrix $G = PM^{-1}Q - \Delta^T$"
-        r" is near-singular for M1, causing numerical instability in a"
-        r" significant fraction of runs."
+        r" The AB constraint reduces the H5 residual to machine precision"
+        r" by construction."
     )
     lbl = "tab:supervised_M1"
 
@@ -508,7 +502,7 @@ def make_tab_supervised(
             r"{Rel.\ error $\|\hat F - F\|_F/\|F\|_F$} & H5 resid. \\"
         ),
         r"    \cmidrule(lr){2-" + str(cmidrule_end) + "}",
-        r"    Projection & " + col_N_hdrs + r" & ($N=2\,000$) \\",
+        r"    Setting & " + col_N_hdrs + r" & ($N=2\,000$) \\",
         r"    \midrule",
         data_block,
         r"    \bottomrule",
@@ -587,7 +581,7 @@ def make_fig_em_convergence(
     ax.set_xlabel("EM iteration", fontsize=10)
     ax.set_ylabel(r"$\log p(Z_{1:N})$", fontsize=10)
     ax.set_title(
-        rf"M1, $N={N_plot}$ — EM convergence (PH vs GEM, $\tau=B$)",
+        rf"M1, $N={N_plot}$ — EM convergence (PH vs GEM, AB constraint)",
         fontsize=9,
     )
     ax.legend(fontsize=9, framealpha=0.85)
@@ -644,8 +638,7 @@ def make_tab_em_basin(
         r"Semi-supervised EM on M1: basin selection rate (fraction"
         r" of MC runs reaching the best LL basin with $n_{\mathrm{init}}=5$"
         r" restarts) and mean number of EM iterations used (budget: 50)."
-        r" PH = post-hoc projection; GEM = constraint at every M-step."
-        r" 30 MC runs."
+        r" PH = post-hoc AB projection; GEM = AB constraint at every M-step."
     )
     lbl = "tab:em_basin"
 
@@ -762,7 +755,7 @@ def make_tab_em_restarts(
 
     cap = (
         r"EM basin selection rate on M1 ($N = 2\,000$,"
-        r" post-hoc projection $\tau=B$, 30 MC runs):"
+        r" post-hoc AB constraint):"
         r" fraction of MC runs where at least one of the first"
         r" $n_{\mathrm{init}}$ restarts lands in the best"
         r" log-likelihood basin."

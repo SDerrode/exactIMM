@@ -8,12 +8,12 @@ Monte-Carlo evaluation of the semi-supervised Baum-Welch EM estimator
 Two EM variants are compared
 ------------------------------
 PH  (post-hoc projection, default)
-    Standard Baum-Welch EM; the H5 constraint (τ=B) is enforced once
+    Standard Baum-Welch EM; the AB constraint is enforced once
     as a post-hoc projection on the converged parameters of the best run.
     Log-likelihood is monotonically non-decreasing during EM.
 
 GEM (Generalized EM)
-    H5 constraint (τ=B) is applied at *every* M-step.  Log-likelihood
+    AB constraint is applied at *every* M-step.  Log-likelihood
     monotonicity is no longer guaranteed, but the constraint is satisfied
     throughout optimisation.
 
@@ -231,7 +231,7 @@ def run_em_trial(
                     xs,
                     ys,
                     K,
-                    constraint="b",  # τ=B for both PH and GEM
+                    constraint="ab",  # AB constraint for both PH and GEM
                     delta_zero=False,
                     constraint_each_iter=each_iter,
                     n_inits=n_inits,

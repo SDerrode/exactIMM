@@ -167,7 +167,7 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
         for c in ("rel_err_F", "rel_err_b", "h5_residual", "rmse_estimated", "rmse_oracle"):
             df_sup[c] = pd.to_numeric(df_sup[c], errors="coerce")
 
-        for proj in ("none", "b", "a", "su"):
+        for proj in ("none", "ab"):
             sub = df_sup[df_sup["projection"] == proj]
             for N in (200, 500, 1000, 2000):
                 g = sub[sub["N"] == N]

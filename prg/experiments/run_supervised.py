@@ -10,14 +10,14 @@ For each N_train ∈ {200, 500, 1000, 2000} × seed ∈ range(100):
 
   1. Simulate N_train steps from the true M1 model; the full
      (r_n, x_n, y_n) sequence is observed.
-  2. Apply :func:`prg.learning.supervised.fit_supervised` with four
-     H5 projection choices τ ∈ {None, 'b', 'a', 'su'}.
-  3. For each projection:
+  2. Apply :func:`prg.learning.supervised.fit_supervised` with and
+     without the AB constraint, i.e. constraint ∈ {None, 'ab'}.
+  3. For each setting:
        - relative Frobenius error on the full F matrix and on b
          (averaged over regimes)
        - H5 residual (max over regimes of the relative residual
          ‖Δᵀ A + Σ_V Bᵀ − P M⁻¹ W‖_F / max(‖Z‖_F, 1))
-  4. For each projection: build estimated GSSParams → run h5_exact
+  4. For each setting: build estimated GSSParams → run h5_exact
      filter on the simulated observations → compute RMSE.
   5. Also compute the oracle filter RMSE (true parameters).
 
@@ -60,7 +60,7 @@ logger = logging.getLogger("exactIMM.experiments.supervised")
 DEFAULT_MODEL = "M1"  # only M1 for §6.3
 DEFAULT_N_LIST = (200, 500, 1_000, 2_000)
 DEFAULT_N_RUNS = 100
-DEFAULT_PROJS = (None, "b", "a", "su")  # τ ∈ {none, B, A, Σ_U}
+DEFAULT_PROJS = (None, "ab")  # constraint ∈ {none, AB}
 DEFAULT_OUT_DIR = pathlib.Path("data") / "experiments"
 
 # ---------------------------------------------------------------------------
@@ -518,9 +518,9 @@ def _parse_args(argv=None):
     parser.add_argument(
         "--projections",
         nargs="+",
-        default=["none", "b", "a", "su"],
-        choices=["none", "b", "a", "su"],
-        help="H5 projection choices (none = free OLS).",
+        default=["none", "ab"],
+        choices=["none", "ab"],
+        help="Constraint choices (none = free OLS; ab = (H5)-compatible AB).",
     )
     parser.add_argument("--n-runs", type=int, default=DEFAULT_N_RUNS)
     parser.add_argument("--output-dir", default=str(DEFAULT_OUT_DIR))

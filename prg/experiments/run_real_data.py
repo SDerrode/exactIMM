@@ -21,8 +21,8 @@ Experiments
 -----------
     E1  Empirical (H5) test       (Fisher H0:B(k)=0, K=3 regimes)
     E2  Filter comparison         (h5_exact vs imm_general vs Kalman_K=1)
-    E3  Semi-supervised EM        (V0 unconstrained, V1 post-hoc B,
-                                   V2 post-hoc A, V3 GEM B)
+    E3  Semi-supervised EM        (V0 unconstrained, V1 post-hoc AB,
+                                   V2 GEM AB)
 
 Outputs
 -------
@@ -188,7 +188,7 @@ def run_e2(data, K=3):
     xs_te, ys_te = data["xs"][n_tr:], data["ys"][n_tr:]
 
     fit_raw = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint=None)
-    fit_h5 = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint="b")
+    fit_h5 = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint="ab")
     p_raw = params_from_dict(fit_raw)
     p_h5 = params_from_dict(fit_h5)
 
@@ -222,9 +222,8 @@ def run_e2(data, K=3):
 # ---------------------------------------------------------------------------
 EM_VARIANTS = [
     ("V0_unconstrained", dict(constraint=None, constraint_each_iter=False)),
-    ("V1_posthoc_B", dict(constraint="b", constraint_each_iter=False)),
-    ("V2_posthoc_A", dict(constraint="a", constraint_each_iter=False)),
-    ("V3_GEM_B", dict(constraint="b", constraint_each_iter=True)),
+    ("V1_posthoc_AB", dict(constraint="ab", constraint_each_iter=False)),
+    ("V2_GEM_AB", dict(constraint="ab", constraint_each_iter=True)),
 ]
 
 
@@ -367,8 +366,8 @@ def emit_e1_tex(res, path):
 def emit_e2_tex(res, path):
     label = {
         "h5_exact_h5fit": "H5-exact (H5 fit)",
-        "imm_general_olsfit": "IMM-general (OLS fit)",
-        "imm_general_h5fit": "IMM-general (H5 fit)",
+        "imm_general_olsfit": "IMM-approx (OLS fit)",
+        "imm_general_h5fit": "IMM-approx (H5 fit)",
         "kalman_k1": "Kalman $K=1$",
     }
     rows = []
@@ -382,8 +381,8 @@ def emit_e2_tex(res, path):
         r"Filter comparison on the ENSO test period"
         r" (2011-01 to 2026-02, 182 months)."
         r" Parameters $\boldsymbol{\theta}$ are fit by supervised OLS"
-        r" on the training period; the H5-fit projects on $\tau=B$, the"
-        r" OLS-fit is unconstrained. $\log\hat L$ is the joint test"
+        r" on the training period; the H5-fit applies the AB constraint,"
+        r" the OLS-fit is unconstrained. $\log\hat L$ is the joint test"
         r" log-likelihood, NLL/obs $= -\log\hat L / N_{\rm test}$;"
         r" MSE is computed on $X$ (Niño~1+2)."
     )
@@ -400,17 +399,16 @@ def emit_e2_tex(res, path):
 def emit_e3_tex(res, path):
     label = {
         "V0_unconstrained": "V0 unconstrained",
-        "V1_posthoc_B": r"V1 post-hoc $\tau=B$",
-        "V2_posthoc_A": r"V2 post-hoc $\tau=A^\dagger$",
-        "V3_GEM_B": r"V3 GEM $\tau=B$",
+        "V1_posthoc_AB": r"V1 post-hoc AB",
+        "V2_GEM_AB": r"V2 GEM AB",
     }
     rows = []
     for v in res["variants"]:
         nll = v["test_NLL_per_obs"]
         mse = v["test_MSE"]
         if not np.isfinite(nll) or abs(nll) > 100 or mse > 100:
-            mse_str = r"\text{---}$^\dagger$"
-            nll_str = r"\text{---}$^\dagger$"
+            mse_str = r"\text{---}"
+            nll_str = r"\text{---}"
         else:
             mse_str = f"{mse:.4f}"
             nll_str = f"{nll:+.4f}"
@@ -423,12 +421,12 @@ def emit_e3_tex(res, path):
         r"Semi-supervised EM variants on ENSO"
         r" ($K=3$, $n_{\mathrm{init}}=5$, $I_{\max}=50$)."
         r" Train log-lik is on the joint $(X,Y)$ training period;"
-        r" test metrics use the IMM-general filter on EM-fitted"
+        r" test metrics use the IMM-approx filter on EM-fitted"
         r" parameters. Acc and ARI are computed on the ground-truth"
         r" ONI regime after optimal regime-permutation alignment."
-        r" $^\dagger$:~$\tau=A^\dagger$ projection numerically unstable"
-        r" ($G=PM^{-1}Q-\Delta^T$ ill-conditioned), as documented"
-        r" already in the simulation study (Table~\ref{tab:supervised_M1})."
+        r" V1 applies the AB constraint of"
+        r" Sec.~\ref{ssec:AB_constraint} once on the converged parameters;"
+        r" V2 applies it at every M-step (Generalized EM)."
     )
     _write_table(
         path,

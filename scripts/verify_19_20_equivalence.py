@@ -68,14 +68,20 @@ from __future__ import annotations
 import argparse
 import importlib
 import sys
+from pathlib import Path
 
 import numpy as np
 
-from prg.classes.FMatrix import FMatrix
-from prg.classes.GSSParams import GSSParams
-from prg.classes.GSSSimulator import GSSSimulator
-from prg.classes.NoiseCovariance import GSSNoiseCovariance
-from prg.utils.h5_constraint import apply_AB_constraint, compute_AB
+# Project root on sys.path so we can import prg.* regardless of CWD.
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from prg.classes.FMatrix import FMatrix  # noqa: E402
+from prg.classes.GSSParams import GSSParams  # noqa: E402
+from prg.classes.GSSSimulator import GSSSimulator  # noqa: E402
+from prg.classes.NoiseCovariance import GSSNoiseCovariance  # noqa: E402
+from prg.utils.h5_constraint import apply_AB_constraint, compute_AB  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

@@ -13,9 +13,9 @@ under the (H5)-compatible AB constraint
 
     A(r) = Δ(r) Σ_V(r)⁻¹ C(r),       B(r) = Δ(r) Σ_V(r)⁻¹ D(r).
 
-Question (F. Lehmann, mail d'avril 2026)
-----------------------------------------
-Sous la contrainte AB, F. Lehmann a démontré par récurrence que
+Question
+--------
+Sous la contrainte AB, on peut démontrer par récurrence que
 
     E [X_{n+1} | r_{n+1}, y_{n+1}]    = Δ(r_{n+1}) Σ_V(r_{n+1})⁻¹ y_{n+1}
     Var[X_{n+1} | r_{n+1}, y_{n+1}]  = Σ_U(r_{n+1}) − Δ(r_{n+1}) Σ_V(r_{n+1})⁻¹ Δ(r_{n+1})ᵀ

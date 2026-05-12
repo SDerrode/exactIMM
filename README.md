@@ -105,12 +105,12 @@ exactIMM/
 
 ## Installation
 
-Python 3.14 is required.  
-**Use a project virtual environment** — the system-wide homebrew installation of numpy does not load correctly on this platform.
+Python **3.14** is required (declared in `pyproject.toml`).  
+**Use a project virtual environment** — the system-wide Homebrew installation of NumPy does not load correctly on this platform.
 
 ```bash
-# Create and activate the venv
-python3 -m venv .venv
+# Create and activate the venv (must point to Python 3.14)
+python3.14 -m venv .venv
 source .venv/bin/activate
 
 # Core + dev dependencies
@@ -121,6 +121,40 @@ pip install -e ".[gui]"
 ```
 
 > The `.venv/` directory is excluded from version control (see `.gitignore`).
+
+### Troubleshooting: `Package 'exactimm' requires a different Python`
+
+If `pip install` fails with
+
+```
+ERROR: Package 'exactimm' requires a different Python: 3.11.15 not in '>=3.14'
+```
+
+it means `pip` is bound to a Python interpreter older than 3.14 (typical
+on macOS where Homebrew installs `pip` for `python@3.11`). Check with:
+
+```bash
+pip --version
+# pip 26.x from /opt/homebrew/lib/python3.11/site-packages/pip (python 3.11)  ← wrong
+```
+
+Fix it with **one** of the following:
+
+```bash
+# (a) Activate the project venv first — cleanest for development
+source .venv/bin/activate && pip install -e ".[dev]"
+
+# (b) Use the venv's pip explicitly, no activation needed
+./.venv/bin/pip install -e ".[dev]"
+
+# (c) Bypass the global pip shim and use python 3.14 directly
+python3.14 -m pip install -e ".[dev]"
+
+# (d) Use the version-suffixed pip
+pip3.14 install -e ".[dev]"
+```
+
+After running any of these, `pip --version` from within the venv should report `(python 3.14)`.
 
 ---
 
@@ -390,8 +424,9 @@ For each EM iteration:
    - $\hat\pi_0(k) = \gamma_0(k)$
    - $\hat F(k), \hat b(k)$ by **weighted OLS** with weights $\gamma_{n+1}(k)$
    - $\hat\Sigma_W(k)$ = weighted MLE of residual covariance
-   - Optional H5 projection on $A$, $B$, or $\Sigma_U$ (only with
-     `--constraint-each-iter`; otherwise projected once after EM)
+   - Optional AB projection ($A = \Delta \Sigma_V^{-1} C$,
+     $B = \Delta \Sigma_V^{-1} D$) — applied only when
+     `--constraint-each-iter` is set; otherwise applied once after EM
 3. **Convergence** — stop when $|\Delta \log L| < \mathrm{tol}$.
 4. **Post-hoc projection** — if `--constraint` is set without
    `--constraint-each-iter`, the H5 projection (and $\Delta = 0$) is
@@ -424,7 +459,7 @@ from prg.learning.semi_supervised import fit_semi_supervised
 
 params, info = fit_semi_supervised(
     xs, ys, K=2,
-    constraint=None,            # 'a' | 'b' | 'su' | None
+    constraint=None,            # 'ab' (AB constraint) | None
     delta_zero=False,
     constraint_each_iter=False, # True → GEM; False (default) → post-hoc
     n_inits=10,

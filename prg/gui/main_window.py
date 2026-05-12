@@ -1259,7 +1259,10 @@ class GSSMainWindow(QMainWindow):
         self._param_panel.validity_changed.connect(self._on_validity_changed)
         self._param_panel.value_changed.connect(self._refresh_filter_button_drift_indicator)
         self._param_panel.constraint_toggled.connect(self._on_reset)
-        left_layout.addWidget(self._param_panel)  # no stretch: natural height
+        # Stretch=1 so the State-k tabs grow with the window: with the natural
+        # height alone, larger (q, s) configurations (e.g. M2 with q=s=2)
+        # triggered an internal scrollbar that made the tab content hard to use.
+        left_layout.addWidget(self._param_panel, stretch=1)
 
         # Transition matrix P
         p_section = QHBoxLayout()
@@ -1361,7 +1364,9 @@ class GSSMainWindow(QMainWindow):
         self._mode_combo.currentIndexChanged.connect(lambda _: _sync_joseph_enabled())
         _sync_joseph_enabled()
 
-        left_layout.addStretch()  # pushes buttons to the bottom of the panel
+        # No final stretch: the param-panel above already absorbs the extra
+        # vertical space (stretch=1), and we want the buttons to sit just below
+        # the control widgets rather than be pushed to the bottom of the window.
 
         # Buttons — grille 2×2
         #   [Simulate]        [Filter]

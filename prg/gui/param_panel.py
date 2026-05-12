@@ -532,6 +532,14 @@ class ParamPanel(QWidget):
         layout.addWidget(info)
 
         self._tabs = QTabWidget()
+        # Reserve enough vertical room for one full _StateTab content (checkbox
+        # row + matrix widgets + status labels) so the State-k tabs are always
+        # usable without scrolling, even on small windows. The natural height
+        # of a _StateTab scales roughly with (q+s); 26 px per cell, plus
+        # ~140 px of constant overhead (checkbox row, badges, margins).
+        n = q + s
+        min_tab_h = 26 * n + 140  # ≈ 192 for n=2, ≈ 244 for n=4
+        self._tabs.setMinimumHeight(min_tab_h)
         layout.addWidget(self._tabs)
 
         self._state_tabs: list[_StateTab] = []

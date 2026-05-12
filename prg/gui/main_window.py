@@ -63,6 +63,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QSplitter,
@@ -1516,8 +1517,6 @@ class GSSMainWindow(QMainWindow):
         # Per-component labels (created dynamically in _on_filter_finished)
         self._mse_comp_labels: list[QLabel] = []
 
-        left_layout.addWidget(self._mse_frame)
-
         # ── Innovation diagnostics (Ljung-Box + Jarque-Bera) ─────────
         self._innov_frame = QFrame()
         self._innov_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -1573,7 +1572,53 @@ class GSSMainWindow(QMainWindow):
         innov_grid.setColumnStretch(2, 1)
         innov_layout.addLayout(innov_grid)
 
-        left_layout.addWidget(self._innov_frame)
+        # Wrap both result panels in a scrollable container with a capped
+        # maximum height: once a filter run produces output, the Filter quality
+        # and Innovation diagnostics frames can be tall (especially for q,s>1),
+        # and would otherwise eat into the ParamPanel above. The scroll area
+        # keeps all content reachable without compressing the parameter tabs.
+        results_box = QWidget()
+        results_layout = QVBoxLayout(results_box)
+        results_layout.setContentsMargins(0, 0, 0, 0)
+        results_layout.setSpacing(6)
+        results_layout.addWidget(self._mse_frame)
+        results_layout.addWidget(self._innov_frame)
+
+        self._results_scroll = QScrollArea()
+        self._results_scroll.setWidget(results_box)
+        self._results_scroll.setWidgetResizable(True)
+        self._results_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._results_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._results_scroll.setMaximumHeight(220)
+        # Hidden until the first filter run produces something to display
+        self._results_scroll.setVisible(False)
+        left_layout.addWidget(self._results_scroll)
+
+        # Re-wire the inner frames' setVisible so the surrounding scroll area
+        # follows automatically: any caller still doing
+        # ``self._mse_frame.setVisible(...)`` or ``self._innov_frame.setVisible(...)``
+        # transparently keeps ``self._results_scroll`` in sync. We track the
+        # intended visibility ourselves because ``QWidget.isVisible()`` returns
+        # False when any ancestor is hidden, which would defeat the heuristic.
+        self._mse_visible = False
+        self._innov_visible = False
+
+        def _wrap_setVisible(frame: QFrame, attr: str) -> None:
+            original = frame.setVisible
+
+            def patched(visible: bool, *, _orig=original, _self=self, _attr=attr) -> None:
+                _orig(visible)
+                setattr(_self, _attr, bool(visible))
+                _self._results_scroll.setVisible(
+                    _self._mse_visible or _self._innov_visible
+                )
+
+            frame.setVisible = patched  # type: ignore[method-assign]
+
+        _wrap_setVisible(self._mse_frame, "_mse_visible")
+        _wrap_setVisible(self._innov_frame, "_innov_visible")
 
         self._status_bar = QLabel("")
         self._status_bar.setWordWrap(True)

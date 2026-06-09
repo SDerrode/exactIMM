@@ -20,7 +20,9 @@ jobs:
           python-version: "3.14"
 
       - name: Install ruff
-        run: pip install ruff
+        # Pinned so `ruff format --check` stays reproducible across runs
+        # (a newer ruff can change formatting and break the check spuriously).
+        run: pip install ruff==0.15.12
 
       - name: Lint (ruff check)
         run: ruff check .

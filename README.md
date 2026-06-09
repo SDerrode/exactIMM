@@ -122,6 +122,22 @@ pip install -e ".[gui]"
 
 > The `.venv/` directory is excluded from version control (see `.gitignore`).
 
+### Recommended: use the `Makefile`
+
+A `Makefile` wraps the canonical workflow and **always invokes the venv
+interpreter explicitly** (`.venv/bin/python`), which avoids the silent
+"wrong interpreter" failures described below:
+
+```bash
+make venv      # create .venv with python3.14
+make install   # editable install + dev deps
+make test      # run the 209-test suite
+make check     # lint + typecheck + tests (CI parity)
+make help      # list all targets
+```
+
+Override the bootstrap interpreter if needed: `make venv PYTHON_SYS=/path/to/python3.14`.
+
 ### Troubleshooting: `Package 'exactimm' requires a different Python`
 
 If `pip install` fails with

@@ -21,7 +21,6 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
-import pytest
 
 from prg.gui.param_panel import ParamPanel
 from prg.utils.h5_constraint import compute_AB, compute_h5_residual

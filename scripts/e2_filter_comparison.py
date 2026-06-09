@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/e2_filter_comparison.py
 ===============================
@@ -42,6 +41,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from baselines.kalman_single import SingleKalmanFilter  # noqa: E402
 from labels import (  # noqa: E402
     TRAIN_END,
     get_label,
@@ -50,9 +50,9 @@ from labels import (  # noqa: E402
     train_test_split,
 )
 from params_utils import params_from_dict  # noqa: E402
+
 from prg.filter.gss_filter import GSSFilter  # noqa: E402
 from prg.learning.supervised import fit_supervised  # noqa: E402
-from baselines.kalman_single import SingleKalmanFilter  # noqa: E402
 
 
 @dataclass

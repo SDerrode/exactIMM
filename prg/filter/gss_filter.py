@@ -105,6 +105,9 @@ FILTER_MODES = ("h5_exact", "imm_general")
 # practical floor for float64 matrix arithmetic.
 H5_TOL = 1e-6
 
+# log(2π), used by the fast Gaussian log-pdf (mirrors scipy's _LOG_2PI).
+_LOG_2PI = float(np.log(2.0 * np.pi))
+
 logger = logging.getLogger("exactIMM.filter")
 
 
@@ -441,6 +444,11 @@ class GSSFilter:
         self._mu_Y_jk: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         self._M_t: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         self._Gamma: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
+        # Pre-factorised Γ(j,k) for the fast per-step Gaussian log-pdf.
+        # These are time-invariant under (H5), so factorising them once here
+        # avoids an eigen-decomposition on every (j,k) at every step.
+        self._Gamma_prec: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
+        self._Gamma_lognorm: list[list[float]] = [[0.0] * K for _ in range(K)]
         for k in range(K):
             F = p.f_matrix.F(k)
             b_Y = p.b(k)[q:]
@@ -454,6 +462,9 @@ class GSSFilter:
                 self._mu_Y_jk[j][k] = mu_Y_jk
                 self._M_t[j][k] = M_t
                 self._Gamma[j][k] = Gamma
+                prec, log_norm = _precompute_gaussian_logpdf(Gamma)
+                self._Gamma_prec[j][k] = prec
+                self._Gamma_lognorm[j][k] = log_norm
 
     # ------------------------------------------------------------------
     # State management
@@ -611,16 +622,17 @@ class GSSFilter:
                     continue
                 # Pair-conditional predictive mean (eq. y_pred_jk)
                 mean_jk = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_prev - self._mu_Y[j])
-                Gamma = self._Gamma[j][k]
 
                 # Accumulate marginal predicted observation
                 y_pred_acc += w * mean_jk
 
-                log_lik_c = multivariate_normal.logpdf(
-                    y_new.ravel(),
-                    mean=mean_jk.ravel(),
-                    cov=Gamma,
-                    allow_singular=True,
+                # Fast log N(y_new; mean_jk, Γ(j,k)) using the pre-factorised
+                # Γ(j,k) (identical to multivariate_normal.logpdf, no per-step
+                # factorisation).
+                log_lik_c = _fast_logpdf(
+                    (y_new - mean_jk).ravel(),
+                    self._Gamma_prec[j][k],
+                    self._Gamma_lognorm[j][k],
                 )
                 log_terms.append(np.log(w) + log_lik_c)
 
@@ -1033,6 +1045,64 @@ def _safe_solve(A: np.ndarray, B: np.ndarray) -> np.ndarray:
 def _sym(M: np.ndarray) -> np.ndarray:
     """Symmetrise a square matrix to counteract floating-point drift."""
     return 0.5 * (M + M.T)
+
+
+def _precompute_gaussian_logpdf(cov: np.ndarray) -> tuple[np.ndarray, float]:
+    """
+    Pre-factorise a covariance for fast, repeated Gaussian log-density.
+
+    Returns ``(prec, log_norm)`` such that, for a deviation
+    ``dev = (x − mean).ravel()``,
+
+        log N(x; mean, cov) = log_norm − 0.5 · ‖prec @ dev‖².
+
+    This is mathematically identical to
+    :func:`scipy.stats.multivariate_normal.logpdf` with
+    ``allow_singular=True``, but the expensive factorisation of *cov* is
+    done **once** here instead of on every call. The hot per-step loop
+    then only needs one small matrix–vector product (see
+    :func:`_fast_logpdf`), which removes the O(N·K²) eigen-decompositions
+    that ``multivariate_normal.logpdf`` would otherwise perform.
+
+    The common path uses the Cholesky factor (``cov`` is positive definite
+    here: every Γ(j,k) is PSD-floored at construction). If Cholesky fails
+    on a (near-)singular covariance, it falls back to an eigen-decomposition
+    pseudo-inverse with the same tolerance scipy uses for
+    ``allow_singular=True`` — so degenerate models keep the previous
+    behaviour.
+    """
+    s = cov.shape[0]
+    try:
+        L = np.linalg.cholesky(cov)  # cov = L Lᵀ, lower-triangular
+        prec = np.linalg.inv(L)  # ‖prec @ dev‖² = devᵀ cov⁻¹ dev
+        log_det = 2.0 * float(np.sum(np.log(np.diag(L))))
+        log_norm = -0.5 * (s * _LOG_2PI + log_det)
+        return prec, log_norm
+    except np.linalg.LinAlgError:
+        # Pseudo-inverse fallback mirroring scipy's allow_singular=True.
+        vals, vecs = np.linalg.eigh(_sym(cov))
+        eps = 1e6 * np.finfo(np.float64).eps * max(float(vals.max()), 0.0)
+        keep = vals > eps
+        d = vals[keep]
+        # prec = (vecs[:, keep] / sqrt(d))ᵀ  ⇒  ‖prec @ dev‖² = Mahalanobis.
+        prec = (vecs[:, keep] / np.sqrt(d)).T
+        log_norm = -0.5 * (int(keep.sum()) * _LOG_2PI + float(np.sum(np.log(d))))
+        return prec, log_norm
+
+
+def _fast_logpdf(dev: np.ndarray, prec: np.ndarray, log_norm: float) -> float:
+    """
+    Gaussian log-density from a pre-factorised covariance.
+
+    Parameters
+    ----------
+    dev : ndarray (s,)
+        Centred observation ``(x − mean).ravel()``.
+    prec, log_norm
+        Output of :func:`_precompute_gaussian_logpdf` for the covariance.
+    """
+    z = prec @ dev
+    return log_norm - 0.5 * float(z @ z)
 
 
 def _psd_floor(M: np.ndarray, eps: float = 1e-9) -> np.ndarray:

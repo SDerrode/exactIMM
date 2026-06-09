@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/baselines/hamilton_msar.py
 ==================================
@@ -30,7 +29,6 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
-import pandas as pd
 from statsmodels.tsa.regime_switching.markov_autoregression import (
     MarkovAutoregression,
 )
@@ -48,7 +46,7 @@ class HamiltonMSAR:
         self._train_mean = 0.0
 
     def fit(self, x_train: np.ndarray, max_iter: int = 500,
-            seed: int = 42) -> "HamiltonMSAR":
+            seed: int = 42) -> HamiltonMSAR:
         x_train = np.asarray(x_train).ravel()
         self._train_mean = float(x_train.mean())
         mod = MarkovAutoregression(

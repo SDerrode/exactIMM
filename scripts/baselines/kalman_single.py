@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/baselines/kalman_single.py
 ==================================
@@ -90,7 +89,7 @@ class SingleKalmanFilter:
 
     # ------------------------------------------------------------------
     @classmethod
-    def from_regressed(cls, xs: np.ndarray, ys: np.ndarray) -> "SingleKalmanFilter":
+    def from_regressed(cls, xs: np.ndarray, ys: np.ndarray) -> SingleKalmanFilter:
         """
         Least-squares fit of F = [[A,B],[C,D]], b = [b_X; b_Y], Σ_W on
         the full training series, then build a single-Kalman baseline.

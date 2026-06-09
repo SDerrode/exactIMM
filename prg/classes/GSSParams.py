@@ -15,6 +15,8 @@ construction time so that downstream code can assume correctness.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 from prg.classes.FMatrix import FMatrix
@@ -249,6 +251,9 @@ class GSSParams:
     # Stationary distribution
     # ------------------------------------------------------------------
 
+    # Tolerance for "eigenvalue ≈ 1" and sign-consistency checks below.
+    _STATIONARY_TOL = 1e-8
+
     @staticmethod
     def _compute_stationary(P: np.ndarray) -> np.ndarray:
         """
@@ -257,17 +262,69 @@ class GSSParams:
         pi is the left eigenvector of P for eigenvalue 1, i.e. the
         right eigenvector of P.T for eigenvalue 1.
 
+        A *unique* stationary distribution exists only when the eigenvalue 1
+        is simple (irreducible chain).  This method emits a ``RuntimeWarning``
+        when that assumption looks violated, so that a silently-arbitrary
+        choice cannot propagate unnoticed into filtering results:
+
+        * **non-unique** — several eigenvalues cluster at 1 (reducible chain);
+        * **mixed signs** — the selected eigenvector has both signs (taking
+          ``|·|`` would mask a non-distribution vector);
+        * **degenerate** — the eigenvector sums to ~0 (fallback: uniform).
+
         Returns
         -------
         ndarray of shape (K,), non-negative, summing to 1.
         """
+        K = P.shape[0]
         eigenvalues, eigenvectors = np.linalg.eig(P.T)
-        # Find the eigenvector for eigenvalue closest to 1
-        idx = int(np.argmin(np.abs(eigenvalues - 1.0)))
+
+        dist_to_one = np.abs(eigenvalues - 1.0)
+        idx = int(np.argmin(dist_to_one))
+
+        # Guard 1 — uniqueness: a simple eigenvalue 1 ⇔ unique stationary law.
+        n_near_one = int(np.sum(dist_to_one < GSSParams._STATIONARY_TOL))
+        if n_near_one > 1:
+            warnings.warn(
+                f"Transition matrix P has {n_near_one} eigenvalues ≈ 1: the "
+                f"Markov chain is reducible and its stationary distribution is "
+                f"not unique. Returning one admissible distribution; "
+                f"downstream results may depend on this arbitrary choice.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
         pi = eigenvectors[:, idx].real
-        pi = np.abs(pi)  # ensure non-negative (eigenvector sign is arbitrary)
-        pi /= pi.sum()  # normalise
-        return pi
+
+        # Guard 2 — sign consistency: a genuine stationary eigenvector has a
+        # single sign; mixed signs mean |·| below would hide an invalid vector.
+        scale = float(np.max(np.abs(pi)))
+        if scale > 0.0:
+            tol = GSSParams._STATIONARY_TOL * scale
+            if np.any(pi > tol) and np.any(pi < -tol):
+                warnings.warn(
+                    "Stationary-distribution eigenvector has mixed signs; "
+                    "the |·|-and-renormalise result may not be a valid "
+                    "stationary distribution of P. Check that P is a proper, "
+                    "irreducible row-stochastic transition matrix.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
+        pi = np.abs(pi)  # eigenvector sign is arbitrary
+        total = float(pi.sum())
+
+        # Guard 3 — degenerate normalisation.
+        if total <= 0.0 or not np.isfinite(total):
+            warnings.warn(
+                "Stationary-distribution eigenvector summed to a non-positive "
+                "value; falling back to the uniform distribution.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return np.full(K, 1.0 / K)
+
+        return pi / total
 
     def stationary_distribution(self) -> np.ndarray:
         """

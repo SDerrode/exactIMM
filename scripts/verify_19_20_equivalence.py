@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/verify_19_20_equivalence.py
 ====================================
@@ -451,7 +450,7 @@ def main() -> int:
         for trial in range(args.n_draws):
             verbose_trial = args.verbose and (trial == 0)
             if verbose_trial:
-                print(f"--- Trial 0 ---")
+                print("--- Trial 0 ---")
             params = make_random_AB_params(
                 args.K, args.q, args.s, rng,
                 ab_constraint=not args.no_constraint,
@@ -498,7 +497,7 @@ def main() -> int:
             print(f"OK  : without the AB constraint, methods (a) and (b) "
                   f"differ by {dM.min():.2e} … {dM.max():.2e} "
                   f"(> tol = {args.tol:.0e}).")
-            print(f"      → The closed-form (b) requires (H5) AB to hold.")
+            print("      → The closed-form (b) requires (H5) AB to hold.")
             return 0
         print(f"WARN: without AB, min ‖M_a − M_b‖_F = {dM.min():.3e}  "
               f"(expected > {args.tol:.0e}).")
@@ -509,9 +508,9 @@ def main() -> int:
     if pass_M and pass_G:
         print(f"OK  : methods (a) and (b) agree to within {args.tol:.0e} for "
               f"every trial.")
-        print(f"      → Under the AB constraint, the moments (19)-(20) can be")
-        print(f"        computed directly from (Δ, Σ_U, Σ_V) without the "
-              f"recursion (16)-(17).")
+        print("      → Under the AB constraint, the moments (19)-(20) can be")
+        print("        computed directly from (Δ, Σ_U, Σ_V) without the "
+              "recursion (16)-(17).")
         return 0
     print(f"FAIL: max ‖M_a − M_b‖_F = {dM.max():.3e}  (tol = {args.tol:.0e})")
     print(f"      max ‖Γ_a − Γ_b‖_F = {dG.max():.3e}  (tol = {args.tol:.0e})")

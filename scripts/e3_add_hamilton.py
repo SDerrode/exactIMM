@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/e3_add_hamilton.py
 ==========================
@@ -31,6 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from baselines.hamilton_msar import HamiltonMSAR  # noqa: E402
 from labels import (  # noqa: E402
     TRAIN_END,
     get_label,
@@ -38,7 +38,6 @@ from labels import (  # noqa: E402
     standardize_with_train_stats,
     train_test_split,
 )
-from baselines.hamilton_msar import HamiltonMSAR  # noqa: E402
 
 
 def _best_perm_accuracy(r_hat: np.ndarray, r_true: np.ndarray, K: int) -> tuple[float, np.ndarray]:
@@ -76,7 +75,7 @@ def main() -> int:
     r_L2_te = L2_all.loc[L2_all.index > TRAIN_END].to_numpy()
 
     # ---- Hamilton MS-AR fit + predict ----
-    print("[hamilton] fitting MS-AR(K={}, AR=1) on train...".format(args.K), flush=True)
+    print(f"[hamilton] fitting MS-AR(K={args.K}, AR=1) on train...", flush=True)
     t0 = time.perf_counter()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

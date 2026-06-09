@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/verify_h5_compat.py
 ============================
@@ -172,7 +171,7 @@ def main() -> int:
 
     rng = np.random.default_rng(args.seed)
 
-    print(f"Verification of AB constraint: A(r) = Δ Σ_V⁻¹ C, B(r) = Δ Σ_V⁻¹ D")
+    print("Verification of AB constraint: A(r) = Δ Σ_V⁻¹ C, B(r) = Δ Σ_V⁻¹ D")
     print(f"Setup: K={args.K}, q={args.q}, s={args.s}, "
           f"n_draws={args.n_draws}, seed={args.seed}")
     print()
@@ -206,10 +205,10 @@ def main() -> int:
     print()
 
     if args.show_pair_table:
-        print(f"Residual table for draw 0 — AB constraint (max should be 0):")
+        print("Residual table for draw 0 — AB constraint (max should be 0):")
         print(_format_table(first_norms_c))
         print()
-        print(f"Residual table for draw 0 — random A, B (max should be Ω(1)):")
+        print("Residual table for draw 0 — random A, B (max should be Ω(1)):")
         print(_format_table(first_norms_rand))
         print()
 
@@ -220,8 +219,8 @@ def main() -> int:
     if pass_c and pass_rand:
         print(f"OK  : AB constraint gives ‖F‖ < {args.tol:.0e} for every (r_1, r_2) "
               f"and every draw.")
-        print(f"OK  : random A, B yields strictly positive residuals "
-              f"(negative control sane).")
+        print("OK  : random A, B yields strictly positive residuals "
+              "(negative control sane).")
         return 0
     else:
         print(f"FAIL: (c).max  = {max_res_c.max():.3e}  (tol={args.tol:.0e})")

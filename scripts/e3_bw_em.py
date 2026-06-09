@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/e3_bw_em.py
 ===================
@@ -59,9 +58,9 @@ from labels import (  # noqa: E402
     train_test_split,
 )
 from params_utils import params_from_dict  # noqa: E402
+
 from prg.filter.gss_filter import GSSFilter  # noqa: E402
 from prg.learning.semi_supervised import fit_semi_supervised  # noqa: E402
-
 
 VARIANTS = {
     "V0_unconstr": dict(constraint=None, constraint_each_iter=False),

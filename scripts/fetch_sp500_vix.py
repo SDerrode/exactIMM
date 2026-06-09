@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/fetch_sp500_vix.py
 ==========================
@@ -70,7 +69,7 @@ def fetch_sp500(start: str, end: str) -> pd.DataFrame:
 
 def fetch_vix(start: str, end: str) -> pd.DataFrame:
     """Download VIXCLS series from FRED (CSV endpoint, no API key)."""
-    print(f"[vix] downloading VIXCLS from FRED ...", flush=True)
+    print("[vix] downloading VIXCLS from FRED ...", flush=True)
     resp = requests.get(FRED_URL, timeout=30)
     resp.raise_for_status()
     df = pd.read_csv(io.StringIO(resp.text))

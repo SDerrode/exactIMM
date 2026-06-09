@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/e1_supervised_h5.py
 ===========================
@@ -144,7 +143,7 @@ def _fmt_p(p: float) -> str:
     if np.isnan(p):
         return "n/a"
     if p < 1e-4:
-        return rf"$<\!10^{{-4}}$"
+        return r"$<\!10^{-4}$"
     return f"{p:.3g}"
 
 

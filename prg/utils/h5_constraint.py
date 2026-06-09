@@ -106,8 +106,8 @@ def compute_h5_residual(
 # Closed-form AB constraint
 # ---------------------------------------------------------------------------
 def compute_AB(
-    C: np.ndarray,   # (s, q)
-    D: np.ndarray,   # (s, s)
+    C: np.ndarray,  # (s, q)
+    D: np.ndarray,  # (s, s)
     Dt: np.ndarray,  # (q, s)  Δ
     SV: np.ndarray,  # (s, s)  Σ_V (symmetric ≻ 0)
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -138,8 +138,7 @@ def compute_AB(
     cond_SV = np.linalg.cond(SV)
     if cond_SV > 1e12:
         raise ValueError(
-            f"Σ_V is ill-conditioned (cond = {cond_SV:.3e}); "
-            "cannot reliably solve A = Δ Σ_V⁻¹ C."
+            f"Σ_V is ill-conditioned (cond = {cond_SV:.3e}); cannot reliably solve A = Δ Σ_V⁻¹ C."
         )
     try:
         SV_inv_C = np.linalg.solve(SV, C)  # Σ_V⁻¹ C  (s × q)
@@ -203,9 +202,7 @@ def apply_AB_constraint(
         try:
             A_new, B_new = compute_AB(C_k, D_k, Dt_k, SV_k)
         except ValueError as exc:
-            raise ValueError(
-                f"AB constraint cannot be applied for regime k={k}: {exc}"
-            ) from exc
+            raise ValueError(f"AB constraint cannot be applied for regime k={k}: {exc}") from exc
 
         A_old = params.f_matrix.A(k)
         B_old = params.f_matrix.B(k)
@@ -221,12 +218,19 @@ def apply_AB_constraint(
         D_list.append(D_k)
 
     new_f_matrix = FMatrix(
-        K=K, q=q, s=s,
-        A_list=A_list, B_list=B_list, C_list=C_list, D_list=D_list,
+        K=K,
+        q=q,
+        s=s,
+        A_list=A_list,
+        B_list=B_list,
+        C_list=C_list,
+        D_list=D_list,
     )
 
     return _GSSParams(
-        K=K, q=q, s=s,
+        K=K,
+        q=q,
+        s=s,
         P=params.P,
         f_matrix=new_f_matrix,
         noise_cov=params.noise_cov,

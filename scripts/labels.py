@@ -50,9 +50,7 @@ def train_test_split(
     return train, test
 
 
-def build_label_L1(
-    df: pd.DataFrame, train: pd.DataFrame, column: str = "log_vix"
-) -> pd.Series:
+def build_label_L1(df: pd.DataFrame, train: pd.DataFrame, column: str = "log_vix") -> pd.Series:
     """L1: VIX-median threshold learned on the *training* period."""
     threshold = train[column].median()
     labels = (df[column] > threshold).astype(np.int8)
@@ -99,9 +97,7 @@ def standardize_with_train_stats(
 LabelKind = Literal["L1", "L2"]
 
 
-def get_label(
-    df: pd.DataFrame, train: pd.DataFrame, kind: LabelKind
-) -> pd.Series:
+def get_label(df: pd.DataFrame, train: pd.DataFrame, kind: LabelKind) -> pd.Series:
     if kind == "L1":
         return build_label_L1(df, train)
     if kind == "L2":

@@ -150,12 +150,8 @@ class TestApplyABConstraint:
     def test_preserves_C_D(self, params_K2_q1_s1):
         constrained = apply_AB_constraint(params_K2_q1_s1)
         for k in range(constrained.K):
-            np.testing.assert_array_equal(
-                constrained.f_matrix.C(k), params_K2_q1_s1.f_matrix.C(k)
-            )
-            np.testing.assert_array_equal(
-                constrained.f_matrix.D(k), params_K2_q1_s1.f_matrix.D(k)
-            )
+            np.testing.assert_array_equal(constrained.f_matrix.C(k), params_K2_q1_s1.f_matrix.C(k))
+            np.testing.assert_array_equal(constrained.f_matrix.D(k), params_K2_q1_s1.f_matrix.D(k))
 
     def test_preserves_noise_cov(self, params_K2_q1_s1):
         constrained = apply_AB_constraint(params_K2_q1_s1)
@@ -173,21 +169,15 @@ class TestApplyABConstraint:
     def test_preserves_bias(self, params_K2_q1_s1):
         constrained = apply_AB_constraint(params_K2_q1_s1)
         for k in range(constrained.K):
-            np.testing.assert_array_equal(
-                constrained.b(k), params_K2_q1_s1.b(k)
-            )
+            np.testing.assert_array_equal(constrained.b(k), params_K2_q1_s1.b(k))
 
     def test_idempotent(self, params_K2_q1_s1):
         """Applying twice yields the same A, B."""
         first = apply_AB_constraint(params_K2_q1_s1)
         second = apply_AB_constraint(first)
         for k in range(first.K):
-            np.testing.assert_allclose(
-                first.f_matrix.A(k), second.f_matrix.A(k), atol=1e-12
-            )
-            np.testing.assert_allclose(
-                first.f_matrix.B(k), second.f_matrix.B(k), atol=1e-12
-            )
+            np.testing.assert_allclose(first.f_matrix.A(k), second.f_matrix.A(k), atol=1e-12)
+            np.testing.assert_allclose(first.f_matrix.B(k), second.f_matrix.B(k), atol=1e-12)
 
 
 # ---------------------------------------------------------------------------

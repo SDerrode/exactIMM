@@ -29,25 +29,38 @@ import pytest
 # Each entry: (regex, human-readable description, replacement hint)
 _FORBIDDEN_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     # Removed v0.11 → v0.12 helpers
-    (re.compile(r"\bcompute_A_from_h5\b"),  "compute_A_from_h5",  "use compute_AB"),
-    (re.compile(r"\bcompute_B_from_h5\b"),  "compute_B_from_h5",  "use compute_AB"),
-    (re.compile(r"\bcompute_SU_from_h5\b"), "compute_SU_from_h5", "removed; Σ_U is fully free under the AB constraint"),
-    (re.compile(r"\bcompute_C_from_h5\b"),  "compute_C_from_h5",  "removed; C is fully free under the AB constraint"),
+    (re.compile(r"\bcompute_A_from_h5\b"), "compute_A_from_h5", "use compute_AB"),
+    (re.compile(r"\bcompute_B_from_h5\b"), "compute_B_from_h5", "use compute_AB"),
+    (
+        re.compile(r"\bcompute_SU_from_h5\b"),
+        "compute_SU_from_h5",
+        "removed; Σ_U is fully free under the AB constraint",
+    ),
+    (
+        re.compile(r"\bcompute_C_from_h5\b"),
+        "compute_C_from_h5",
+        "removed; C is fully free under the AB constraint",
+    ),
     (re.compile(r"\bapply_h5_constraint\b"), "apply_h5_constraint", "use apply_AB_constraint"),
-
     # Removed v0.12 → v0.13 (Lehmann naming)
-    (re.compile(r"\bcompute_AB_lehmann\b"),  "compute_AB_lehmann",  "use compute_AB"),
-    (re.compile(r"\bapply_lehmann_constraint\b"), "apply_lehmann_constraint", "use apply_AB_constraint"),
-
+    (re.compile(r"\bcompute_AB_lehmann\b"), "compute_AB_lehmann", "use compute_AB"),
+    (
+        re.compile(r"\bapply_lehmann_constraint\b"),
+        "apply_lehmann_constraint",
+        "use apply_AB_constraint",
+    ),
     # Old CLI flag values for --constraint
-    (re.compile(r"--constraint\s+(?:[abc]|su|lehmann)\b"),
-     "--constraint {a,b,c,su,lehmann}", "use --constraint ab"),
-
+    (
+        re.compile(r"--constraint\s+(?:[abc]|su|lehmann)\b"),
+        "--constraint {a,b,c,su,lehmann}",
+        "use --constraint ab",
+    ),
     # Old paper equation numbers (re-organised by the AB rewrite)
-    (re.compile(r"\beq\.\s*\(4\.(?:4|8|20)\)"),
-     "eq. (4.4) / (4.8) / (4.20)",
-     "the constraint is eq:H5_compact + eq:AB"),
-
+    (
+        re.compile(r"\beq\.\s*\(4\.(?:4|8|20)\)"),
+        "eq. (4.4) / (4.8) / (4.20)",
+        "the constraint is eq:H5_compact + eq:AB",
+    ),
     # Personal-name attribution outside the math note
     (re.compile(r"\bLehmann\b"), "Lehmann", "drop or refer to 'AB constraint'"),
 ]
@@ -55,8 +68,8 @@ _FORBIDDEN_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
 # Files where matches are acceptable (historical / external docs).
 # Paths are repo-relative and matched as substrings.
 _WHITELIST: tuple[str, ...] = (
-    "tests/test_no_stale_refs.py",   # this test
-    "CHANGELOG.md",                  # historical v0.12.0 entry
+    "tests/test_no_stale_refs.py",  # this test
+    "CHANGELOG.md",  # historical v0.12.0 entry
 )
 
 
@@ -70,9 +83,7 @@ def _repo_root() -> Path:
 def _tracked_files() -> list[Path]:
     """List of repository files tracked by git, repo-relative."""
     root = _repo_root()
-    out = subprocess.check_output(
-        ["git", "-C", str(root), "ls-files"], text=True
-    )
+    out = subprocess.check_output(["git", "-C", str(root), "ls-files"], text=True)
     paths: list[Path] = []
     for line in out.splitlines():
         line = line.strip()
@@ -83,8 +94,20 @@ def _tracked_files() -> list[Path]:
             continue
         # Skip binary-ish extensions; the regex matches require text input.
         if p.suffix.lower() in {
-            ".pdf", ".png", ".jpg", ".jpeg", ".csv", ".docx", ".xlsx",
-            ".log", ".aux", ".pyc", ".pickle", ".npz", ".npy", ".bin",
+            ".pdf",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".csv",
+            ".docx",
+            ".xlsx",
+            ".log",
+            ".aux",
+            ".pyc",
+            ".pickle",
+            ".npz",
+            ".npy",
+            ".bin",
         }:
             continue
         paths.append(p)
@@ -108,7 +131,7 @@ def test_no_stale_api_references():
             continue
         try:
             text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
+        except UnicodeDecodeError, OSError:
             continue  # not a text file we can lint
         for line_no, line in enumerate(text.splitlines(), start=1):
             for pattern, name, hint in _FORBIDDEN_PATTERNS:
@@ -117,7 +140,6 @@ def test_no_stale_api_references():
     if offences:
         msg = (
             "Stale references to pre-v0.13 API found in tracked sources.\n"
-            "Update or whitelist them in tests/test_no_stale_refs.py.\n\n"
-            + "\n".join(offences)
+            "Update or whitelist them in tests/test_no_stale_refs.py.\n\n" + "\n".join(offences)
         )
         pytest.fail(msg)

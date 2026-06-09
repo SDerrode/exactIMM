@@ -151,10 +151,7 @@ def main() -> None:
     args = parser.parse_args()
 
     df = load_data(args.csv)
-    print(
-        f"[figure1] loaded {len(df)} rows, "
-        f"{df.index.min().date()} .. {df.index.max().date()}"
-    )
+    print(f"[figure1] loaded {len(df)} rows, {df.index.min().date()} .. {df.index.max().date()}")
     make_figure(df, args.out)
 
 

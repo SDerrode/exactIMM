@@ -108,9 +108,7 @@ class _StateTab(QWidget):
         chk_row = QHBoxLayout()
         chk_row.setSpacing(16)
 
-        self._constraint_AB_check = QCheckBox(
-            f"AB constraint on (A({k}), B({k}))"
-        )
+        self._constraint_AB_check = QCheckBox(f"AB constraint on (A({k}), B({k}))")
         self._constraint_AB_check.setToolTip(
             "Force A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k).\n"
             "This closed form is sufficient for (H5); when checked, the A and\n"
@@ -411,7 +409,7 @@ class _StateTab(QWidget):
                 SV=Sw[q:, q:],
             )
             res_norm = float(np.linalg.norm(res, "fro"))
-        except (np.linalg.LinAlgError, ValueError):
+        except np.linalg.LinAlgError, ValueError:
             self._h5_badge.setText("(H5) = ?")
             self._h5_badge.setStyleSheet(_GREY)
             return

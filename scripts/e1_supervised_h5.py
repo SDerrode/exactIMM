@@ -99,9 +99,7 @@ def fisher_test_B_zero(
 # ---------------------------------------------------------------------------
 # Run supervised OLS (unconstrained + projected on B) on one label set
 # ---------------------------------------------------------------------------
-def run_one_label(
-    train: pd.DataFrame, labels_train: np.ndarray, K: int
-) -> dict:
+def run_one_label(train: pd.DataFrame, labels_train: np.ndarray, K: int) -> dict:
     xs = train[["log_return"]].to_numpy()
     ys = train[["log_vix"]].to_numpy()
     rs = labels_train.astype(int)
@@ -119,15 +117,17 @@ def run_one_label(
         B_norm = float(np.linalg.norm(B_raw, ord="fro"))
         F_stat, p_val, df = fisher_test_B_zero(xs, ys, rs, k)
         n_k = int(np.sum(rs[1:] == k))
-        per_regime.append({
-            "k": k,
-            "n_transitions": n_k,
-            "B_entry": float(B_raw.ravel()[0]),
-            "B_fro": B_norm,
-            "F_stat": F_stat,
-            "p_value": p_val,
-            "df_residual": df,
-        })
+        per_regime.append(
+            {
+                "k": k,
+                "n_transitions": n_k,
+                "B_entry": float(B_raw.ravel()[0]),
+                "B_fro": B_norm,
+                "F_stat": F_stat,
+                "p_value": p_val,
+                "df_residual": df,
+            }
+        )
     return {
         "K": K,
         "n_train": int(len(rs)),
@@ -186,9 +186,7 @@ def main() -> int:
     train, test = train_test_split(df, TRAIN_END)
 
     # ---- standardize with train-only stats (same convention as paper) ----
-    df_std, stats = standardize_with_train_stats(
-        df, train, cols=("log_return", "log_vix")
-    )
+    df_std, stats = standardize_with_train_stats(df, train, cols=("log_return", "log_vix"))
     train_std = df_std.loc[df_std.index <= TRAIN_END]
 
     # ---- labels ----
@@ -211,10 +209,8 @@ def main() -> int:
         json.dumps(
             {
                 "standardization": {
-                    "log_return": {"mean": stats["log_return"][0],
-                                   "std": stats["log_return"][1]},
-                    "log_vix":    {"mean": stats["log_vix"][0],
-                                   "std": stats["log_vix"][1]},
+                    "log_return": {"mean": stats["log_return"][0], "std": stats["log_return"][1]},
+                    "log_vix": {"mean": stats["log_vix"][0], "std": stats["log_vix"][1]},
                 },
                 "train_end": str(TRAIN_END.date()),
                 "K": args.K,

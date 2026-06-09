@@ -39,13 +39,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT       = Path(__file__).resolve().parent.parent
-DATA_DIR   = ROOT / "data" / "real"
-NOAA_BASE  = "https://psl.noaa.gov/data/correlation"
+ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT / "data" / "real"
+NOAA_BASE = "https://psl.noaa.gov/data/correlation"
 FILES = {
     "nino34.txt": f"{NOAA_BASE}/nina34.anom.data",
     "nino12.txt": f"{NOAA_BASE}/nina1.anom.data",
-    "oni.txt":    f"{NOAA_BASE}/oni.data",
+    "oni.txt": f"{NOAA_BASE}/oni.data",
 }
 
 
@@ -94,17 +94,17 @@ def to_monthly(df: pd.DataFrame, name: str) -> pd.Series:
 
 
 def build_csv() -> Path:
-    s34  = to_monthly(parse_psl(DATA_DIR / "nino34.txt"), "nino34")
-    s12  = to_monthly(parse_psl(DATA_DIR / "nino12.txt"), "nino12")
-    soni = to_monthly(parse_psl(DATA_DIR / "oni.txt"),   "oni")
+    s34 = to_monthly(parse_psl(DATA_DIR / "nino34.txt"), "nino34")
+    s12 = to_monthly(parse_psl(DATA_DIR / "nino12.txt"), "nino12")
+    soni = to_monthly(parse_psl(DATA_DIR / "oni.txt"), "oni")
 
     df = pd.concat([s34, s12, soni], axis=1).dropna()
     df.index.name = "date"
 
     # K=3 regime label from ONI thresholds (NOAA convention)
-    df["regime"] = 1                                  # neutral
-    df.loc[df["oni"] < -0.5, "regime"] = 0           # La Niña
-    df.loc[df["oni"] >  0.5, "regime"] = 2           # El Niño
+    df["regime"] = 1  # neutral
+    df.loc[df["oni"] < -0.5, "regime"] = 0  # La Niña
+    df.loc[df["oni"] > 0.5, "regime"] = 2  # El Niño
 
     target = DATA_DIR / "enso_sst.csv"
     df.to_csv(target)
@@ -112,10 +112,12 @@ def build_csv() -> Path:
     print(f"\n  built {target} ({len(df)} rows)")
     print(f"  range: {df.index[0].strftime('%Y-%m')} → {df.index[-1].strftime('%Y-%m')}")
     counts = df["regime"].value_counts().sort_index().to_dict()
-    print(f"  regimes: La Niña={counts.get(0, 0)}  "
-          f"Neutral={counts.get(1, 0)}  El Niño={counts.get(2, 0)}")
+    print(
+        f"  regimes: La Niña={counts.get(0, 0)}  "
+        f"Neutral={counts.get(1, 0)}  El Niño={counts.get(2, 0)}"
+    )
     n_trans = int((df["regime"].diff().abs() > 0).sum())
-    print(f"  transitions: {n_trans}  (avg run length ≈ {len(df)/max(n_trans,1):.1f} months)")
+    print(f"  transitions: {n_trans}  (avg run length ≈ {len(df) / max(n_trans, 1):.1f} months)")
     return target
 
 
@@ -124,10 +126,12 @@ def main() -> int:
         description=__doc__.splitlines()[3],
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--no-download", action="store_true",
-                    help="Use only local files; fail if any is missing.")
-    ap.add_argument("--force-download", action="store_true",
-                    help="Re-download even if local files exist.")
+    ap.add_argument(
+        "--no-download", action="store_true", help="Use only local files; fail if any is missing."
+    )
+    ap.add_argument(
+        "--force-download", action="store_true", help="Re-download even if local files exist."
+    )
     args = ap.parse_args()
 
     if not args.no_download:

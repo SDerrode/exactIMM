@@ -520,9 +520,7 @@ class GSSMainWindow(QMainWindow):
         self._results_scroll.setWidget(results_box)
         self._results_scroll.setWidgetResizable(True)
         self._results_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._results_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        self._results_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._results_scroll.setMaximumHeight(220)
         # Hidden until the first filter run produces something to display
         self._results_scroll.setVisible(False)
@@ -543,9 +541,7 @@ class GSSMainWindow(QMainWindow):
             def patched(visible: bool, *, _orig=original, _self=self, _attr=attr) -> None:
                 _orig(visible)
                 setattr(_self, _attr, bool(visible))
-                _self._results_scroll.setVisible(
-                    _self._mse_visible or _self._innov_visible
-                )
+                _self._results_scroll.setVisible(_self._mse_visible or _self._innov_visible)
 
             frame.setVisible = patched  # type: ignore[method-assign]
 

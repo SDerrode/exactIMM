@@ -57,19 +57,24 @@ from prg.learning.supervised import fit_supervised  # noqa: E402
 
 @dataclass
 class FilterScore:
-    name:       str
-    N:          int
-    log_lik:    float
-    mse_x:      float
+    name: str
+    N: int
+    log_lik: float
+    mse_x: float
     nll_per_obs: float
-    time_s:     float
+    time_s: float
 
 
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
-def run_filter(name: str, filt, xs_test: np.ndarray, ys_test: np.ndarray,
-               trace_store: dict[str, np.ndarray] | None = None) -> FilterScore:
+def run_filter(
+    name: str,
+    filt,
+    xs_test: np.ndarray,
+    ys_test: np.ndarray,
+    trace_store: dict[str, np.ndarray] | None = None,
+) -> FilterScore:
     t0 = time.perf_counter()
     ll_total = 0.0
     sse = 0.0
@@ -86,7 +91,8 @@ def run_filter(name: str, filt, xs_test: np.ndarray, ys_test: np.ndarray,
     if trace_store is not None:
         trace_store[f"{name}_x_hat"] = x_hat
     return FilterScore(
-        name=name, N=N,
+        name=name,
+        N=N,
         log_lik=ll_total,
         mse_x=sse / N,
         nll_per_obs=-ll_total / N,
@@ -132,10 +138,12 @@ def main() -> int:
     df = load_dataset(args.csv)
     train, _test = train_test_split(df, TRAIN_END)
     df_std, stats = standardize_with_train_stats(
-        df, train, cols=("log_return", "log_vix"),
+        df,
+        train,
+        cols=("log_return", "log_vix"),
     )
     train_std = df_std.loc[df_std.index <= TRAIN_END]
-    test_std  = df_std.loc[df_std.index >  TRAIN_END]
+    test_std = df_std.loc[df_std.index > TRAIN_END]
 
     xs_tr = train_std[["log_return"]].to_numpy()
     ys_tr = train_std[["log_vix"]].to_numpy()
@@ -148,8 +156,7 @@ def main() -> int:
     # ---- fit GSS params (supervised) ----
     fit = fit_supervised(rs_tr, xs_tr, ys_tr, K=args.K, q=1, s=1, constraint=None)
     params = params_from_dict(fit)
-    print(f"[e2] params fitted, K={params.K}, "
-          f"pi_inf={params.stationary_distribution().round(3)}")
+    print(f"[e2] params fitted, K={params.K}, pi_inf={params.stationary_distribution().round(3)}")
 
     # ---- build filter bank ----
     traces: dict[str, np.ndarray] = {}
@@ -175,35 +182,40 @@ def main() -> int:
     print(hdr)
     print("-" * len(hdr))
     for s in scores:
-        print(f"{s.name:<15s} {s.log_lik:>10.1f} {s.nll_per_obs:>+10.4f} "
-              f"{s.mse_x:>8.4f} {s.time_s:>6.2f}")
+        print(
+            f"{s.name:<15s} {s.log_lik:>10.1f} {s.nll_per_obs:>+10.4f} "
+            f"{s.mse_x:>8.4f} {s.time_s:>6.2f}"
+        )
 
     # ---- persist ----
     (args.out_dir / "table2.json").write_text(
-        json.dumps({
-            "label": args.label,
-            "K": args.K,
-            "n_train": int(xs_tr.shape[0]),
-            "n_test":  int(xs_te.shape[0]),
-            "standardization": {
-                "log_return": {"mean": stats["log_return"][0],
-                               "std":  stats["log_return"][1]},
-                "log_vix":    {"mean": stats["log_vix"][0],
-                               "std":  stats["log_vix"][1]},
+        json.dumps(
+            {
+                "label": args.label,
+                "K": args.K,
+                "n_train": int(xs_tr.shape[0]),
+                "n_test": int(xs_te.shape[0]),
+                "standardization": {
+                    "log_return": {"mean": stats["log_return"][0], "std": stats["log_return"][1]},
+                    "log_vix": {"mean": stats["log_vix"][0], "std": stats["log_vix"][1]},
+                },
+                "scores": [s.__dict__ for s in scores],
             },
-            "scores": [s.__dict__ for s in scores],
-        }, indent=2),
+            indent=2,
+        ),
         encoding="utf-8",
     )
     emit_tex_table(scores, args.out_dir / "table2.tex")
 
     # ---- traces CSV ----
-    trace_df = pd.DataFrame({
-        "date":      test_std.index,
-        "x_true":    xs_te[:, 0],
-        "y_obs":     ys_te[:, 0],
-        **traces,
-    })
+    trace_df = pd.DataFrame(
+        {
+            "date": test_std.index,
+            "x_true": xs_te[:, 0],
+            "y_obs": ys_te[:, 0],
+            **traces,
+        }
+    )
     trace_df.to_csv(args.out_dir / "trace.csv", index=False)
     print(f"\n[e2] wrote {args.out_dir / 'table2.json'}")
     print(f"[e2] wrote {args.out_dir / 'table2.tex'}")

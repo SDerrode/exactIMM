@@ -26,7 +26,7 @@ __all__ = ["SingleKalmanFilter"]
 
 @dataclasses.dataclass
 class _KalmanStepResult:
-    E_x:     np.ndarray   # (q, 1)
+    E_x: np.ndarray  # (q, 1)
     log_lik: float
 
 
@@ -56,17 +56,24 @@ class SingleKalmanFilter:
 
     def __init__(
         self,
-        A: np.ndarray, B: np.ndarray,
-        C: np.ndarray, D: np.ndarray,
-        Sigma_U: np.ndarray, Delta: np.ndarray, Sigma_V: np.ndarray,
-        b_X: np.ndarray, b_Y: np.ndarray,
-        mu_x0: np.ndarray, Sigma_x0: np.ndarray,
-        mu_y0: np.ndarray, Sigma_y0: np.ndarray,
+        A: np.ndarray,
+        B: np.ndarray,
+        C: np.ndarray,
+        D: np.ndarray,
+        Sigma_U: np.ndarray,
+        Delta: np.ndarray,
+        Sigma_V: np.ndarray,
+        b_X: np.ndarray,
+        b_Y: np.ndarray,
+        mu_x0: np.ndarray,
+        Sigma_x0: np.ndarray,
+        mu_y0: np.ndarray,
+        Sigma_y0: np.ndarray,
         Sigma_xy0: np.ndarray,
     ) -> None:
         self.A, self.B, self.C, self.D = map(np.asarray, (A, B, C, D))
         self.Sigma_U = np.asarray(Sigma_U)
-        self.Delta   = np.asarray(Delta)
+        self.Delta = np.asarray(Delta)
         self.Sigma_V = np.asarray(Sigma_V)
         self.b_X = np.asarray(b_X).reshape(-1, 1)
         self.b_Y = np.asarray(b_Y).reshape(-1, 1)
@@ -76,15 +83,15 @@ class SingleKalmanFilter:
         # Priors for n=1 treated consistently with GSSFilter: condition
         # (X_1, Y_1) ~ N([μ_x0; μ_y0], [[Σ_x0, Σ_xy0], [Σ_xy0^T, Σ_y0]])
         # on Y_1 = y_1 to get μ_{1|1}, P_{1|1}.
-        self._mu_x0   = np.asarray(mu_x0).reshape(-1, 1)
-        self._Sx0     = np.asarray(Sigma_x0)
-        self._mu_y0   = np.asarray(mu_y0).reshape(-1, 1)
-        self._Sy0     = np.asarray(Sigma_y0)
-        self._Sxy0    = np.asarray(Sigma_xy0)
+        self._mu_x0 = np.asarray(mu_x0).reshape(-1, 1)
+        self._Sx0 = np.asarray(Sigma_x0)
+        self._mu_y0 = np.asarray(mu_y0).reshape(-1, 1)
+        self._Sy0 = np.asarray(Sigma_y0)
+        self._Sxy0 = np.asarray(Sigma_xy0)
 
-        self._n  = 0
-        self._mu = None      # (q,1) X_{n|n}
-        self._P  = None      # (q,q) Var(X_n | y_{1:n})
+        self._n = 0
+        self._mu = None  # (q,1) X_{n|n}
+        self._P = None  # (q,q) Var(X_n | y_{1:n})
         self._y_prev = None  # (s,1)
 
     # ------------------------------------------------------------------
@@ -101,18 +108,18 @@ class SingleKalmanFilter:
         if ys.ndim == 1:
             ys = ys[:, None]
         Z = np.hstack([xs, ys])
-        Zc = Z[:-1]       # (N-1, q+s) = Z_n
-        Zn = Z[1:]        # Z_{n+1}
-        N  = Zc.shape[0]
-        q  = xs.shape[1]
-        s  = ys.shape[1]
+        Zc = Z[:-1]  # (N-1, q+s) = Z_n
+        Zn = Z[1:]  # Z_{n+1}
+        N = Zc.shape[0]
+        q = xs.shape[1]
+        s = ys.shape[1]
 
         # Full-model design: [Z_n; 1]  (adds column of ones for intercept)
         X_design = np.hstack([Zc, np.ones((N, 1))])
         # OLS: Zn = X_design @ Θ   → Θ has shape (dim_z+1, dim_z)
         theta, *_ = np.linalg.lstsq(X_design, Zn, rcond=None)
-        F  = theta[:q + s, :].T          # (dim_z, dim_z)
-        b  = theta[q + s:, :].T          # (dim_z, 1)
+        F = theta[: q + s, :].T  # (dim_z, dim_z)
+        b = theta[q + s :, :].T  # (dim_z, 1)
         resid = Zn - X_design @ theta
         Sigma_W = (resid.T @ resid) / max(N - (q + s + 1), 1)
 
@@ -121,35 +128,43 @@ class SingleKalmanFilter:
         C = F[q:, :q]
         D = F[q:, q:]
         Sigma_U = Sigma_W[:q, :q]
-        Delta   = Sigma_W[:q, q:]
+        Delta = Sigma_W[:q, q:]
         Sigma_V = Sigma_W[q:, q:]
-        b_X     = b[:q].reshape(q, 1)
-        b_Y     = b[q:].reshape(s, 1)
+        b_X = b[:q].reshape(q, 1)
+        b_Y = b[q:].reshape(s, 1)
 
         # Priors from sample moments of Z
-        mu_z    = Z.mean(axis=0).reshape(-1, 1)
+        mu_z = Z.mean(axis=0).reshape(-1, 1)
         Sigma_z = np.cov(Z, rowvar=False)
         Sigma_z = np.atleast_2d(Sigma_z)
-        mu_x0    = mu_z[:q]
-        mu_y0    = mu_z[q:]
+        mu_x0 = mu_z[:q]
+        mu_y0 = mu_z[q:]
         Sigma_x0 = Sigma_z[:q, :q]
         Sigma_y0 = Sigma_z[q:, q:]
         Sigma_xy0 = Sigma_z[:q, q:]
 
         return cls(
-            A=A, B=B, C=C, D=D,
-            Sigma_U=Sigma_U, Delta=Delta, Sigma_V=Sigma_V,
-            b_X=b_X, b_Y=b_Y,
-            mu_x0=mu_x0, Sigma_x0=Sigma_x0,
-            mu_y0=mu_y0, Sigma_y0=Sigma_y0,
+            A=A,
+            B=B,
+            C=C,
+            D=D,
+            Sigma_U=Sigma_U,
+            Delta=Delta,
+            Sigma_V=Sigma_V,
+            b_X=b_X,
+            b_Y=b_Y,
+            mu_x0=mu_x0,
+            Sigma_x0=Sigma_x0,
+            mu_y0=mu_y0,
+            Sigma_y0=Sigma_y0,
             Sigma_xy0=Sigma_xy0,
         )
 
     # ------------------------------------------------------------------
     def reset(self) -> None:
-        self._n  = 0
+        self._n = 0
         self._mu = None
-        self._P  = None
+        self._P = None
         self._y_prev = None
 
     # ------------------------------------------------------------------
@@ -161,7 +176,7 @@ class SingleKalmanFilter:
             # --- Initial step: condition prior on Y_1 = y ---
             Sy_inv = np.linalg.inv(self._Sy0)
             mu_x1 = self._mu_x0 + self._Sxy0 @ Sy_inv @ (y - self._mu_y0)
-            P_x1  = self._Sx0 - self._Sxy0 @ Sy_inv @ self._Sxy0.T
+            P_x1 = self._Sx0 - self._Sxy0 @ Sy_inv @ self._Sxy0.T
             # log p(y_1) = N(μ_y0, Σ_y0)
             diff = y - self._mu_y0
             sign, logdet = np.linalg.slogdet(self._Sy0)
@@ -186,8 +201,8 @@ class SingleKalmanFilter:
         Sy_inv = np.linalg.inv(P_yy)
         innov = y - mu_y_pred
         mu_x_new = mu_x_pred + P_xy @ Sy_inv @ innov
-        P_new    = P_xx - P_xy @ Sy_inv @ P_xy.T
-        P_new    = 0.5 * (P_new + P_new.T)
+        P_new = P_xx - P_xy @ Sy_inv @ P_xy.T
+        P_new = 0.5 * (P_new + P_new.T)
 
         # --- Incremental log-likelihood log p(y_{n+1} | y_{1:n}) ---
         sign, logdet = np.linalg.slogdet(P_yy)

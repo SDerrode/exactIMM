@@ -42,6 +42,7 @@ from labels import (  # noqa: E402
 
 def _best_perm_accuracy(r_hat: np.ndarray, r_true: np.ndarray, K: int) -> tuple[float, np.ndarray]:
     from itertools import permutations
+
     best_acc, best_perm = -1.0, None
     for perm in permutations(range(K)):
         perm_arr = np.array(perm, dtype=int)
@@ -64,7 +65,7 @@ def main() -> int:
     train, _ = train_test_split(df, TRAIN_END)
     df_std, _ = standardize_with_train_stats(df, train, cols=("log_return", "log_vix"))
     train_std = df_std.loc[df_std.index <= TRAIN_END]
-    test_std  = df_std.loc[df_std.index >  TRAIN_END]
+    test_std = df_std.loc[df_std.index > TRAIN_END]
 
     x_tr = train_std["log_return"].to_numpy()
     x_te = test_std["log_return"].to_numpy()
@@ -89,23 +90,25 @@ def main() -> int:
     ari_L2 = float(adjusted_rand_score(r_L2_te, r_hat))
 
     ham_entry = {
-        "name":              "Hamilton_MSAR",
-        "train_log_lik":     float("nan"),   # NB: on X only, not comparable
-        "test_log_lik":      float(scores["log_lik_test"]),
-        "test_nll_per_obs":  float(scores["nll_per_obs"]),
-        "test_mse_x":        float(scores["mse_x"]),
-        "accuracy_L1":       acc_L1,
-        "accuracy_L2":       acc_L2,
-        "ari_L1":            ari_L1,
-        "ari_L2":            ari_L2,
+        "name": "Hamilton_MSAR",
+        "train_log_lik": float("nan"),  # NB: on X only, not comparable
+        "test_log_lik": float(scores["log_lik_test"]),
+        "test_nll_per_obs": float(scores["nll_per_obs"]),
+        "test_mse_x": float(scores["mse_x"]),
+        "accuracy_L1": acc_L1,
+        "accuracy_L2": acc_L2,
+        "ari_L1": ari_L1,
+        "ari_L2": ari_L2,
         "all_train_log_liks": [],
-        "n_iter":            -1,
-        "converged":         True,
-        "time_s":            dt,
+        "n_iter": -1,
+        "converged": True,
+        "time_s": dt,
     }
-    print(f"[hamilton] MSE={scores['mse_x']:.4f}  acc(L1)={acc_L1:.3f}  "
-          f"acc(L2)={acc_L2:.3f}  ARI(L1)={ari_L1:+.3f}  ARI(L2)={ari_L2:+.3f}  "
-          f"time {dt:.1f}s")
+    print(
+        f"[hamilton] MSE={scores['mse_x']:.4f}  acc(L1)={acc_L1:.3f}  "
+        f"acc(L2)={acc_L2:.3f}  ARI(L1)={ari_L1:+.3f}  ARI(L2)={ari_L2:+.3f}  "
+        f"time {dt:.1f}s"
+    )
 
     # ---- update table3.json ----
     data = json.loads(args.table.read_text(encoding="utf-8"))
@@ -138,7 +141,8 @@ def main() -> int:
         )
     lines += [r"\bottomrule", r"\end{tabular}"]
     (args.table.parent / "table3.tex").write_text(
-        "\n".join(lines) + "\n", encoding="utf-8",
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
     )
     print(f"[hamilton] updated {args.table}")
     print(f"[hamilton] rewrote {args.table.parent / 'table3.tex'}")

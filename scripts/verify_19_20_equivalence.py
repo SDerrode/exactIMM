@@ -108,7 +108,11 @@ def _stabilise(M: np.ndarray, max_rho: float = 0.85) -> np.ndarray:
 
 
 def make_random_AB_params(
-    K: int, q: int, s: int, rng: np.random.Generator, ab_constraint: bool = True,
+    K: int,
+    q: int,
+    s: int,
+    rng: np.random.Generator,
+    ab_constraint: bool = True,
 ) -> GSSParams:
     """
     Build a random GSSParams with zero biases.
@@ -152,23 +156,32 @@ def make_random_AB_params(
             D = _stabilise(D)
             A = _stabilise(rng.standard_normal((q, q)) * 0.4)
             B = rng.standard_normal((q, s)) * 0.4
-        A_list.append(A); B_list.append(B); C_list.append(C); D_list.append(D)
-        SU_list.append(SU); Dt_list.append(Dt); SV_list.append(SV)
+        A_list.append(A)
+        B_list.append(B)
+        C_list.append(C)
+        D_list.append(D)
+        SU_list.append(SU)
+        Dt_list.append(Dt)
+        SV_list.append(SV)
         mu0.append(np.zeros((q + s, 1)))
         S0.append(np.eye(q + s) * 0.5)
 
-    f_matrix = FMatrix(K=K, q=q, s=s,
-                       A_list=A_list, B_list=B_list,
-                       C_list=C_list, D_list=D_list)
-    noise_cov = GSSNoiseCovariance(K=K, q=q, s=s,
-                                   Sigma_U_list=SU_list,
-                                   Delta_list=Dt_list,
-                                   Sigma_V_list=SV_list)
-    return GSSParams(K=K, q=q, s=s, P=P,
-                     f_matrix=f_matrix, noise_cov=noise_cov,
-                     pi0=None,
-                     mu_z0_list=mu0, Sigma_z0_list=S0,
-                     b_list=None)  # zero biases
+    f_matrix = FMatrix(K=K, q=q, s=s, A_list=A_list, B_list=B_list, C_list=C_list, D_list=D_list)
+    noise_cov = GSSNoiseCovariance(
+        K=K, q=q, s=s, Sigma_U_list=SU_list, Delta_list=Dt_list, Sigma_V_list=SV_list
+    )
+    return GSSParams(
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=f_matrix,
+        noise_cov=noise_cov,
+        pi0=None,
+        mu_z0_list=mu0,
+        Sigma_z0_list=S0,
+        b_list=None,
+    )  # zero biases
 
 
 def load_named_model(name: str) -> GSSParams:
@@ -180,6 +193,7 @@ def load_named_model(name: str) -> GSSParams:
     module = importlib.import_module(f"prg.models.{name}")
     # Pick the first BaseGSSModel subclass found in the module
     from prg.models.base_gss_model import BaseGSSModel
+
     model_cls = None
     for attr_name in dir(module):
         obj = getattr(module, attr_name)
@@ -193,8 +207,12 @@ def load_named_model(name: str) -> GSSParams:
     # Rebuild with zero biases (so that paper's formulas (21)-(22) apply
     # without a bias-correction term)
     return GSSParams(
-        K=params.K, q=params.q, s=params.s, P=params.P,
-        f_matrix=params.f_matrix, noise_cov=params.noise_cov,
+        K=params.K,
+        q=params.q,
+        s=params.s,
+        P=params.P,
+        f_matrix=params.f_matrix,
+        noise_cov=params.noise_cov,
         pi0=params.pi0,
         mu_z0_list=[params.mu_z0(k) for k in range(params.K)],
         Sigma_z0_list=[params.Sigma_z0(k) for k in range(params.K)],
@@ -231,16 +249,13 @@ def stationary_second_moments(
     K = params.K
     pi_inf = params.stationary_distribution()
     # p_rev[j, k] = p(r_n = j | r_{n+1} = k)
-    joint = pi_inf[:, None] * params.P                       # (K, K)
-    marg = joint.sum(axis=0)                                 # = π_∞
+    joint = pi_inf[:, None] * params.P  # (K, K)
+    marg = joint.sum(axis=0)  # = π_∞
     safe = np.where(marg > 0.0, marg, 1.0)
     p_rev = joint / safe[None, :]
 
     # Initial value: Σ_z0(k) + μ_z0 μ_z0^T (uncentred), or identity if zero.
-    Pi = [
-        params.Sigma_z0(k) + params.mu_z0(k) @ params.mu_z0(k).T
-        for k in range(K)
-    ]
+    Pi = [params.Sigma_z0(k) + params.mu_z0(k) @ params.mu_z0(k).T for k in range(K)]
 
     diff = np.inf
     for it in range(1, max_iter + 1):
@@ -344,8 +359,7 @@ def compare_one_model(
     mu = [params.mu_z0(k).copy() for k in range(K)]
     for _ in range(1000):
         mu_new = [
-            params.f_matrix.F(k) @ sum(p_rev[j, k] * mu[j] for j in range(K))
-            for k in range(K)
+            params.f_matrix.F(k) @ sum(p_rev[j, k] * mu[j] for j in range(K)) for k in range(K)
         ]
         if max(float(np.abs(mu_new[k] - mu[k]).max()) for k in range(K)) < 1e-15:
             mu = mu_new
@@ -354,13 +368,10 @@ def compare_one_model(
     max_mu = max(float(np.abs(mu[k]).max()) for k in range(K))
 
     if verbose:
-        print(f"  Recursion (17): converged in {n_iter} iter "
-              f"(final Δ = {final_diff:.2e})")
-        print(f"  Stationary mean ‖μ_Z(k)‖∞      = {max_mu:.2e}  "
-              f"(expected 0 with zero biases)")
+        print(f"  Recursion (17): converged in {n_iter} iter (final Δ = {final_diff:.2e})")
+        print(f"  Stationary mean ‖μ_Z(k)‖∞      = {max_mu:.2e}  (expected 0 with zero biases)")
         for k in range(K):
-            print(f"    k={k}  ‖M_a − M_b‖_F = {dM[k]:.3e}   "
-                  f"‖Γ_a − Γ_b‖_F = {dG[k]:.3e}")
+            print(f"    k={k}  ‖M_a − M_b‖_F = {dM[k]:.3e}   ‖Γ_a − Γ_b‖_F = {dG[k]:.3e}")
 
     out = {
         "max_dM": max(dM),
@@ -385,9 +396,11 @@ def compare_one_model(
         out["max_diff_Ex_traj"] = max_diff_Ex
         out["max_diff_Var_traj"] = max_diff_Var
         if verbose:
-            print(f"  Trajectory (N={N_traj}): "
-                  f"max |E_a − E_b|∞ = {max_diff_Ex:.3e}, "
-                  f"max |Γ_a − Γ_b|∞ = {max_diff_Var:.3e}")
+            print(
+                f"  Trajectory (N={N_traj}): "
+                f"max |E_a − E_b|∞ = {max_diff_Ex:.3e}, "
+                f"max |Γ_a − Γ_b|∞ = {max_diff_Var:.3e}"
+            )
 
     return out
 
@@ -398,33 +411,52 @@ def compare_one_model(
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Verify equivalence of methods (a) and (b) for "
-                    "computing the (H5) conditional moments (19)-(20) "
-                    "under the AB constraint.",
+        "computing the (H5) conditional moments (19)-(20) "
+        "under the AB constraint.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("-K", type=int, default=3, help="Regimes (default 3).")
     ap.add_argument("-q", type=int, default=2, help="Dim of X (default 2).")
     ap.add_argument("-s", type=int, default=2, help="Dim of Y (default 2).")
-    ap.add_argument("-n", "--n-draws", type=int, default=20,
-                    help="Independent random AB-constrained models "
-                         "(default 20). Ignored if --model is set.")
-    ap.add_argument("--model", type=str, default=None,
-                    help="Name of a model in prg/models/ (e.g. "
-                         "'model_gss_K2_q2_s2'). Biases are reset to zero "
-                         "and the AB constraint is applied before testing.")
-    ap.add_argument("-N", "--n-traj", type=int, default=0,
-                    help="Simulate N steps and compare E[X|r,y] on actual y "
-                         "values (0 → skip, default 0).")
+    ap.add_argument(
+        "-n",
+        "--n-draws",
+        type=int,
+        default=20,
+        help="Independent random AB-constrained models (default 20). Ignored if --model is set.",
+    )
+    ap.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Name of a model in prg/models/ (e.g. "
+        "'model_gss_K2_q2_s2'). Biases are reset to zero "
+        "and the AB constraint is applied before testing.",
+    )
+    ap.add_argument(
+        "-N",
+        "--n-traj",
+        type=int,
+        default=0,
+        help="Simulate N steps and compare E[X|r,y] on actual y values (0 → skip, default 0).",
+    )
     ap.add_argument("--seed", type=int, default=0, help="RNG seed (default 0).")
-    ap.add_argument("--tol", type=float, default=1e-9,
-                    help="Pass tolerance on max ‖M_a−M_b‖_F and ‖Γ_a−Γ_b‖_F "
-                         "(default 1e-9).")
-    ap.add_argument("-v", "--verbose", action="store_true",
-                    help="Print per-trial and per-regime details.")
-    ap.add_argument("--no-constraint", action="store_true",
-                    help="Negative control: draw A, B independently of "
-                         "(C, D, Δ, Σ_V). Method (b) should then DIFFER "
-                         "from method (a) by Ω(1).")
+    ap.add_argument(
+        "--tol",
+        type=float,
+        default=1e-9,
+        help="Pass tolerance on max ‖M_a−M_b‖_F and ‖Γ_a−Γ_b‖_F (default 1e-9).",
+    )
+    ap.add_argument(
+        "-v", "--verbose", action="store_true", help="Print per-trial and per-regime details."
+    )
+    ap.add_argument(
+        "--no-constraint",
+        action="store_true",
+        help="Negative control: draw A, B independently of "
+        "(C, D, Δ, Σ_V). Method (b) should then DIFFER "
+        "from method (a) by Ω(1).",
+    )
     args = ap.parse_args()
 
     print("=" * 72)
@@ -435,30 +467,38 @@ def main() -> int:
     rng = np.random.default_rng(args.seed)
 
     if args.model is not None:
-        print(f"Loading model: prg.models.{args.model}  "
-              f"(biases zeroed, AB constraint applied)\n")
+        print(f"Loading model: prg.models.{args.model}  (biases zeroed, AB constraint applied)\n")
         params = load_named_model(args.model)
         params.summary() if args.verbose else None
-        results = [compare_one_model(params, N_traj=args.n_traj,
-                                     seed=args.seed, verbose=True)]
+        results = [compare_one_model(params, N_traj=args.n_traj, seed=args.seed, verbose=True)]
     else:
-        constraint_str = ("AB constraint" if not args.no_constraint
-                          else "NO constraint  [negative control]")
-        print(f"Random models — K={args.K}, q={args.q}, s={args.s}, "
-              f"n_draws={args.n_draws}, seed={args.seed}  ({constraint_str})\n")
+        constraint_str = (
+            "AB constraint" if not args.no_constraint else "NO constraint  [negative control]"
+        )
+        print(
+            f"Random models — K={args.K}, q={args.q}, s={args.s}, "
+            f"n_draws={args.n_draws}, seed={args.seed}  ({constraint_str})\n"
+        )
         results = []
         for trial in range(args.n_draws):
             verbose_trial = args.verbose and (trial == 0)
             if verbose_trial:
                 print("--- Trial 0 ---")
             params = make_random_AB_params(
-                args.K, args.q, args.s, rng,
+                args.K,
+                args.q,
+                args.s,
+                rng,
                 ab_constraint=not args.no_constraint,
             )
-            results.append(compare_one_model(
-                params, N_traj=args.n_traj, seed=args.seed + trial,
-                verbose=verbose_trial,
-            ))
+            results.append(
+                compare_one_model(
+                    params,
+                    N_traj=args.n_traj,
+                    seed=args.seed + trial,
+                    verbose=verbose_trial,
+                )
+            )
             if verbose_trial:
                 print()
 
@@ -470,23 +510,35 @@ def main() -> int:
 
     print(f"\n{'Quantity':<48} {'min':>10} {'median':>10} {'max':>10}")
     print("-" * 80)
-    print(f"{'‖M_a − M_b‖_F  (regression coeff, eq. 21)':<48} "
-          f"{dM.min():10.3e} {np.median(dM):10.3e} {dM.max():10.3e}")
-    print(f"{'‖Γ_a − Γ_b‖_F  (cond. covariance, eq. 22)':<48} "
-          f"{dG.min():10.3e} {np.median(dG):10.3e} {dG.max():10.3e}")
-    print(f"{'‖μ_Z(k)‖∞  (zero-bias stationary mean)':<48} "
-          f"{mu.min():10.3e} {np.median(mu):10.3e} {mu.max():10.3e}")
-    print(f"{'recursion (17) iterations to fixed point':<48} "
-          f"{int(n_iter.min()):>10d} {int(np.median(n_iter)):>10d} "
-          f"{int(n_iter.max()):>10d}")
+    print(
+        f"{'‖M_a − M_b‖_F  (regression coeff, eq. 21)':<48} "
+        f"{dM.min():10.3e} {np.median(dM):10.3e} {dM.max():10.3e}"
+    )
+    print(
+        f"{'‖Γ_a − Γ_b‖_F  (cond. covariance, eq. 22)':<48} "
+        f"{dG.min():10.3e} {np.median(dG):10.3e} {dG.max():10.3e}"
+    )
+    print(
+        f"{'‖μ_Z(k)‖∞  (zero-bias stationary mean)':<48} "
+        f"{mu.min():10.3e} {np.median(mu):10.3e} {mu.max():10.3e}"
+    )
+    print(
+        f"{'recursion (17) iterations to fixed point':<48} "
+        f"{int(n_iter.min()):>10d} {int(np.median(n_iter)):>10d} "
+        f"{int(n_iter.max()):>10d}"
+    )
 
     if args.n_traj > 0:
         dE = np.array([r["max_diff_Ex_traj"] for r in results])
         dV = np.array([r["max_diff_Var_traj"] for r in results])
-        print(f"{'|E_a[X|r,y] − E_b[X|r,y]|∞   (sim trajectory)':<48} "
-              f"{dE.min():10.3e} {np.median(dE):10.3e} {dE.max():10.3e}")
-        print(f"{'|Γ_a − Γ_b|∞                  (sim trajectory)':<48} "
-              f"{dV.min():10.3e} {np.median(dV):10.3e} {dV.max():10.3e}")
+        print(
+            f"{'|E_a[X|r,y] − E_b[X|r,y]|∞   (sim trajectory)':<48} "
+            f"{dE.min():10.3e} {np.median(dE):10.3e} {dE.max():10.3e}"
+        )
+        print(
+            f"{'|Γ_a − Γ_b|∞                  (sim trajectory)':<48} "
+            f"{dV.min():10.3e} {np.median(dV):10.3e} {dV.max():10.3e}"
+        )
 
     print()
 
@@ -494,23 +546,22 @@ def main() -> int:
         # Negative control: expect Ω(1) disagreement.
         pass_neg = dM.min() > args.tol
         if pass_neg:
-            print(f"OK  : without the AB constraint, methods (a) and (b) "
-                  f"differ by {dM.min():.2e} … {dM.max():.2e} "
-                  f"(> tol = {args.tol:.0e}).")
+            print(
+                f"OK  : without the AB constraint, methods (a) and (b) "
+                f"differ by {dM.min():.2e} … {dM.max():.2e} "
+                f"(> tol = {args.tol:.0e})."
+            )
             print("      → The closed-form (b) requires (H5) AB to hold.")
             return 0
-        print(f"WARN: without AB, min ‖M_a − M_b‖_F = {dM.min():.3e}  "
-              f"(expected > {args.tol:.0e}).")
+        print(f"WARN: without AB, min ‖M_a − M_b‖_F = {dM.min():.3e}  (expected > {args.tol:.0e}).")
         return 1
 
     pass_M = dM.max() < args.tol
     pass_G = dG.max() < args.tol
     if pass_M and pass_G:
-        print(f"OK  : methods (a) and (b) agree to within {args.tol:.0e} for "
-              f"every trial.")
+        print(f"OK  : methods (a) and (b) agree to within {args.tol:.0e} for every trial.")
         print("      → Under the AB constraint, the moments (19)-(20) can be")
-        print("        computed directly from (Δ, Σ_U, Σ_V) without the "
-              "recursion (16)-(17).")
+        print("        computed directly from (Δ, Σ_U, Σ_V) without the recursion (16)-(17).")
         return 0
     print(f"FAIL: max ‖M_a − M_b‖_F = {dM.max():.3e}  (tol = {args.tol:.0e})")
     print(f"      max ‖Γ_a − Γ_b‖_F = {dG.max():.3e}  (tol = {args.tol:.0e})")

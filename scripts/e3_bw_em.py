@@ -66,25 +66,25 @@ VARIANTS = {
     "V0_unconstr": dict(constraint=None, constraint_each_iter=False),
     "V1_posthoc_B": dict(constraint="b", constraint_each_iter=False),
     "V2_posthoc_A": dict(constraint="a", constraint_each_iter=False),
-    "V3_GEM_B":    dict(constraint="b", constraint_each_iter=True),
+    "V3_GEM_B": dict(constraint="b", constraint_each_iter=True),
 }
 
 
 @dataclass
 class VariantResult:
-    name:              str
-    train_log_lik:     float
-    test_log_lik:      float
-    test_nll_per_obs:  float
-    test_mse_x:        float
-    accuracy_L1:       float
-    accuracy_L2:       float
-    ari_L1:            float
-    ari_L2:            float
+    name: str
+    train_log_lik: float
+    test_log_lik: float
+    test_nll_per_obs: float
+    test_mse_x: float
+    accuracy_L1: float
+    accuracy_L2: float
+    ari_L1: float
+    ari_L2: float
     all_train_log_liks: list[float] = field(default_factory=list)
-    n_iter:            int   = 0
-    converged:         bool  = False
-    time_s:            float = 0.0
+    n_iter: int = 0
+    converged: bool = False
+    time_s: float = 0.0
 
 
 def _best_regime_alignment(r_hat: np.ndarray, r_true: np.ndarray, K: int) -> np.ndarray:
@@ -93,6 +93,7 @@ def _best_regime_alignment(r_hat: np.ndarray, r_true: np.ndarray, K: int) -> np.
     ``permutation[r_hat]`` against ``r_true``. Brute force over K! (OK for K≤4).
     """
     from itertools import permutations
+
     best_perm = None
     best_acc = -1.0
     for perm in permutations(range(K)):
@@ -104,8 +105,9 @@ def _best_regime_alignment(r_hat: np.ndarray, r_true: np.ndarray, K: int) -> np.
     return best_perm
 
 
-def run_filter_on_test(params_dict: dict, xs_te: np.ndarray, ys_te: np.ndarray,
-                       trace: dict | None = None) -> tuple[float, float, np.ndarray, np.ndarray]:
+def run_filter_on_test(
+    params_dict: dict, xs_te: np.ndarray, ys_te: np.ndarray, trace: dict | None = None
+) -> tuple[float, float, np.ndarray, np.ndarray]:
     """Evaluate a fitted params dict on the test set via imm_general."""
     params = params_from_dict(params_dict)
     filt = GSSFilter(params, mode="imm_general")
@@ -144,10 +146,12 @@ def main() -> int:
     df = load_dataset(args.csv)
     train, _ = train_test_split(df, TRAIN_END)
     df_std, stats = standardize_with_train_stats(
-        df, train, cols=("log_return", "log_vix"),
+        df,
+        train,
+        cols=("log_return", "log_vix"),
     )
     train_std = df_std.loc[df_std.index <= TRAIN_END]
-    test_std  = df_std.loc[df_std.index >  TRAIN_END]
+    test_std = df_std.loc[df_std.index > TRAIN_END]
 
     xs_tr = train_std[["log_return"]].to_numpy()
     ys_tr = train_std[["log_vix"]].to_numpy()
@@ -167,23 +171,32 @@ def main() -> int:
 
     for vname in args.variants:
         cfg = VARIANTS[vname]
-        print(f"\n=== {vname}  (n_inits={args.n_inits})  "
-              f"constraint={cfg['constraint']!r}  "
-              f"each_iter={cfg['constraint_each_iter']}")
+        print(
+            f"\n=== {vname}  (n_inits={args.n_inits})  "
+            f"constraint={cfg['constraint']!r}  "
+            f"each_iter={cfg['constraint_each_iter']}"
+        )
         t0 = time.perf_counter()
         params, info = fit_semi_supervised(
-            xs_tr, ys_tr, K=args.K,
+            xs_tr,
+            ys_tr,
+            K=args.K,
             constraint=cfg["constraint"],
             constraint_each_iter=cfg["constraint_each_iter"],
-            n_inits=args.n_inits, max_iter=args.max_iter,
-            seed=args.seed, verbose=False,
+            n_inits=args.n_inits,
+            max_iter=args.max_iter,
+            seed=args.seed,
+            verbose=False,
         )
         dt = time.perf_counter() - t0
 
         # test evaluation
         trace: dict = {}
         test_ll, test_mse, pi_n, x_hat = run_filter_on_test(
-            params, xs_te, ys_te, trace=trace,
+            params,
+            xs_te,
+            ys_te,
+            trace=trace,
         )
         r_hat_test = np.argmax(pi_n, axis=1)
         perm_L1 = _best_regime_alignment(r_hat_test, r_true_L1_test, args.K)
@@ -210,32 +223,36 @@ def main() -> int:
         em_histories[vname] = [float(x) for x in info["log_lik_history"]]
         pi_traces[vname] = pi_n
 
-        print(f"  train logL = {res.train_log_lik:+.1f}   "
-              f"test logL = {res.test_log_lik:+.1f}   "
-              f"MSE = {res.test_mse_x:.4f}   "
-              f"acc(L1)= {res.accuracy_L1:.3f}   "
-              f"ari(L2)= {res.ari_L2:+.3f}   "
-              f"time {dt:.1f}s")
+        print(
+            f"  train logL = {res.train_log_lik:+.1f}   "
+            f"test logL = {res.test_log_lik:+.1f}   "
+            f"MSE = {res.test_mse_x:.4f}   "
+            f"acc(L1)= {res.accuracy_L1:.3f}   "
+            f"ari(L2)= {res.ari_L2:+.3f}   "
+            f"time {dt:.1f}s"
+        )
 
     # ---- persist ----
     (args.out_dir / "table3.json").write_text(
-        json.dumps({
-            "K": args.K,
-            "n_inits": args.n_inits,
-            "n_train": int(xs_tr.shape[0]),
-            "n_test":  int(xs_te.shape[0]),
-            "standardization": {
-                "log_return": {"mean": stats["log_return"][0],
-                               "std":  stats["log_return"][1]},
-                "log_vix":    {"mean": stats["log_vix"][0],
-                               "std":  stats["log_vix"][1]},
+        json.dumps(
+            {
+                "K": args.K,
+                "n_inits": args.n_inits,
+                "n_train": int(xs_tr.shape[0]),
+                "n_test": int(xs_te.shape[0]),
+                "standardization": {
+                    "log_return": {"mean": stats["log_return"][0], "std": stats["log_return"][1]},
+                    "log_vix": {"mean": stats["log_vix"][0], "std": stats["log_vix"][1]},
+                },
+                "variants": [r.__dict__ for r in results],
             },
-            "variants": [r.__dict__ for r in results],
-        }, indent=2),
+            indent=2,
+        ),
         encoding="utf-8",
     )
     (args.out_dir / "em_history.json").write_text(
-        json.dumps(em_histories, indent=2), encoding="utf-8",
+        json.dumps(em_histories, indent=2),
+        encoding="utf-8",
     )
 
     # LaTeX table
@@ -255,22 +272,22 @@ def main() -> int:
         )
     lines += [r"\bottomrule", r"\end{tabular}"]
     (args.out_dir / "table3.tex").write_text(
-        "\n".join(lines) + "\n", encoding="utf-8",
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
     )
 
     # regime trace CSV for the best variant (highest train log-lik)
     best = max(results, key=lambda r: r.train_log_lik)
-    trace_df = pd.DataFrame({
-        "date":    test_std.index,
-        "x_true":  xs_te[:, 0],
-        "y_obs":   ys_te[:, 0],
-        "r_L1":    r_true_L1_test,
-        "r_L2":    r_true_L2_test,
-        **{
-            f"{vname}_pi1": pi_traces[vname][:, 1]
-            for vname in pi_traces
-        },
-    })
+    trace_df = pd.DataFrame(
+        {
+            "date": test_std.index,
+            "x_true": xs_te[:, 0],
+            "y_obs": ys_te[:, 0],
+            "r_L1": r_true_L1_test,
+            "r_L2": r_true_L2_test,
+            **{f"{vname}_pi1": pi_traces[vname][:, 1] for vname in pi_traces},
+        }
+    )
     trace_df.to_csv(args.out_dir / "regime_trace.csv", index=False)
 
     print(f"\n[e3] best variant by train-logL: {best.name} ({best.train_log_lik:+.1f})")

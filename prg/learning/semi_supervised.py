@@ -254,7 +254,8 @@ def _apply_constraints(
         except ValueError as exc:
             _log.warning(
                 "AB projection failed in %s: %s — keeping unconstrained A, B.",
-                where, exc,
+                where,
+                exc,
             )
     return A, B, C, D, SU, Dt, SV
 
@@ -827,7 +828,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "(GEM, log-lik may not be monotone).",
     )
     p.add_argument(
-        "--delta-zero", action="store_true",
+        "--delta-zero",
+        action="store_true",
         help="Force Δ(k)=0 before the projection.",
     )
     p.add_argument(

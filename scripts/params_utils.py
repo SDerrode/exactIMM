@@ -33,28 +33,45 @@ def params_from_dict(d: dict[str, Any]) -> GSSParams:
         pi0, b_list
     """
     required = (
-        "K", "q", "s", "P",
-        "A_list", "B_list", "C_list", "D_list",
-        "Sigma_U_list", "Delta_list", "Sigma_V_list",
-        "mu_z0_list", "Sigma_z0_list",
+        "K",
+        "q",
+        "s",
+        "P",
+        "A_list",
+        "B_list",
+        "C_list",
+        "D_list",
+        "Sigma_U_list",
+        "Delta_list",
+        "Sigma_V_list",
+        "mu_z0_list",
+        "Sigma_z0_list",
     )
     missing = [k for k in required if k not in d]
     if missing:
         raise KeyError(f"Dict is missing keys: {missing}")
 
     f_matrix = FMatrix(
-        K=d["K"], q=d["q"], s=d["s"],
-        A_list=d["A_list"], B_list=d["B_list"],
-        C_list=d["C_list"], D_list=d["D_list"],
+        K=d["K"],
+        q=d["q"],
+        s=d["s"],
+        A_list=d["A_list"],
+        B_list=d["B_list"],
+        C_list=d["C_list"],
+        D_list=d["D_list"],
     )
     noise_cov = GSSNoiseCovariance(
-        K=d["K"], q=d["q"], s=d["s"],
+        K=d["K"],
+        q=d["q"],
+        s=d["s"],
         Sigma_U_list=d["Sigma_U_list"],
         Delta_list=d["Delta_list"],
         Sigma_V_list=d["Sigma_V_list"],
     )
     return GSSParams(
-        K=d["K"], q=d["q"], s=d["s"],
+        K=d["K"],
+        q=d["q"],
+        s=d["s"],
         P=np.asarray(d["P"], dtype=float),
         f_matrix=f_matrix,
         noise_cov=noise_cov,

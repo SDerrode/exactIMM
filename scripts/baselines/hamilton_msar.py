@@ -42,11 +42,10 @@ class HamiltonMSAR:
     def __init__(self, K: int = 2, ar_order: int = 1) -> None:
         self.K = K
         self.ar_order = ar_order
-        self._res = None       # fitted MarkovAutoregressionResults
+        self._res = None  # fitted MarkovAutoregressionResults
         self._train_mean = 0.0
 
-    def fit(self, x_train: np.ndarray, max_iter: int = 500,
-            seed: int = 42) -> HamiltonMSAR:
+    def fit(self, x_train: np.ndarray, max_iter: int = 500, seed: int = 42) -> HamiltonMSAR:
         x_train = np.asarray(x_train).ravel()
         self._train_mean = float(x_train.mean())
         mod = MarkovAutoregression(
@@ -63,9 +62,7 @@ class HamiltonMSAR:
             self._res = mod.fit(em_iter=max_iter, disp=False)
         return self
 
-    def predict_test(
-        self, x_train: np.ndarray, x_test: np.ndarray
-    ) -> dict:
+    def predict_test(self, x_train: np.ndarray, x_test: np.ndarray) -> dict:
         """
         Score on the test series using the in-sample-trained model.
         Computes per-step one-step-ahead predictive log-likelihood and MSE.
@@ -78,10 +75,10 @@ class HamiltonMSAR:
         assert self._res is not None, "call .fit(...) first"
 
         x_train = np.asarray(x_train).ravel()
-        x_test  = np.asarray(x_test).ravel()
-        x_full  = np.concatenate([x_train, x_test])
+        x_test = np.asarray(x_test).ravel()
+        x_full = np.concatenate([x_train, x_test])
         N_train = len(x_train)
-        N_test  = len(x_test)
+        N_test = len(x_test)
 
         # Rebuild the model on the full sample
         mod_full = MarkovAutoregression(
@@ -104,7 +101,7 @@ class HamiltonMSAR:
         # Predicted regime probabilities (one-step-ahead): pi_pred_t = P^T @ pi_filt_{t-1}
         # statsmodels stores pi_filt with shape (nobs, k_regimes).
         # Recover transition matrix.
-        P_T = self._res.regime_transition[..., 0]   # (K, K, 1) → (K, K)
+        P_T = self._res.regime_transition[..., 0]  # (K, K, 1) → (K, K)
         # regime_transition has shape (k_to, k_from) in statsmodels.
 
         # Per-step log-likelihood on the full sample, via llf_obs if exposed
@@ -120,11 +117,11 @@ class HamiltonMSAR:
         r_hat_test = np.argmax(pi_filt[-N_test:], axis=1)
 
         return {
-            "log_lik_test":   ll_test,
-            "nll_per_obs":    -ll_test / N_test,
-            "mse_x":          sse_test / N_test,
-            "pi_filt_test":   pi_filt[-N_test:],
+            "log_lik_test": ll_test,
+            "nll_per_obs": -ll_test / N_test,
+            "mse_x": sse_test / N_test,
+            "pi_filt_test": pi_filt[-N_test:],
             "pi_smoothed_test": pi_smoothed[-N_test:],
-            "r_hat_test":     r_hat_test,
-            "fitted_test":    fitted_by_regime[-N_test:],
+            "r_hat_test": r_hat_test,
+            "fitted_test": fitted_by_regime[-N_test:],
         }

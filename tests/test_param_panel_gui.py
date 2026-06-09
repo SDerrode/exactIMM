@@ -84,9 +84,7 @@ def test_toggle_AB_locks_blocks_and_writes_closed_form(qtbot):
     tab._constraint_AB_check.setChecked(True)
 
     F = tab.get_F()
-    A_expected, B_expected = compute_AB(
-        C=F0[q:, :q], D=F0[q:, q:], Dt=SW[:q, q:], SV=SW[q:, q:]
-    )
+    A_expected, B_expected = compute_AB(C=F0[q:, :q], D=F0[q:, q:], Dt=SW[:q, q:], SV=SW[q:, q:])
     np.testing.assert_allclose(F[:q, :q], A_expected, atol=1e-12)
     np.testing.assert_allclose(F[:q, q:], B_expected, atol=1e-12)
 
@@ -138,8 +136,10 @@ def test_value_change_triggers_recompute(qtbot):
 
     # And the new (A, B) must match the closed form for the *new* C.
     A_expected, B_expected = compute_AB(
-        C=F_after[q:, :q], D=F_after[q:, q:],
-        Dt=tab.get_Sigma_W()[:q, q:], SV=tab.get_Sigma_W()[q:, q:],
+        C=F_after[q:, :q],
+        D=F_after[q:, q:],
+        Dt=tab.get_Sigma_W()[:q, q:],
+        SV=tab.get_Sigma_W()[q:, q:],
     )
     np.testing.assert_allclose(F_after[:q, :q], A_expected, atol=1e-12)
     np.testing.assert_allclose(F_after[:q, q:], B_expected, atol=1e-12)
@@ -168,12 +168,15 @@ def test_h5_badge_amber_for_generic_model(qtbot):
 
     # Sanity: the seeded model is generically non-(H5)-compatible.
     res = compute_h5_residual(
-        A=F[:q, :q], B=F[:q, q:], C=F[q:, :q], D=F[q:, q:],
-        SU=SW[:q, :q], Dt=SW[:q, q:], SV=SW[q:, q:],
+        A=F[:q, :q],
+        B=F[:q, q:],
+        C=F[q:, :q],
+        D=F[q:, q:],
+        SU=SW[:q, :q],
+        Dt=SW[:q, q:],
+        SV=SW[q:, q:],
     )
-    assert np.linalg.norm(res, "fro") > 1e-6, (
-        "test seed should yield a non-(H5)-compatible model"
-    )
+    assert np.linalg.norm(res, "fro") > 1e-6, "test seed should yield a non-(H5)-compatible model"
 
     text = tab._h5_badge.text()
     assert "⚠" in text, f"expected ⚠ in badge, got {text!r}"

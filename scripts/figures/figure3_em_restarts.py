@@ -24,21 +24,21 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_JSON = ROOT / "results/e3/table3.json"
-DEFAULT_OUT  = ROOT / "paper/figures/fig03_em_restarts.pdf"
+DEFAULT_OUT = ROOT / "paper/figures/fig03_em_restarts.pdf"
 
 # Nicer human names for the plot
 LABELS = {
-    "V0_unconstr":  r"V0 $\;$unconstr.",
+    "V0_unconstr": r"V0 $\;$unconstr.",
     "V1_posthoc_B": r"V1 $\;$post-hoc $B$",
     "V2_posthoc_A": r"V2 $\;$post-hoc $A$",
-    "V3_GEM_B":     r"V3 $\;$GEM $B$",
+    "V3_GEM_B": r"V3 $\;$GEM $B$",
 }
 
 COLORS = {
-    "V0_unconstr":  "#d0e1f9",
+    "V0_unconstr": "#d0e1f9",
     "V1_posthoc_B": "#f9d0d0",
     "V2_posthoc_A": "#d0f9db",
-    "V3_GEM_B":     "#f9ead0",
+    "V3_GEM_B": "#f9ead0",
 }
 
 
@@ -61,8 +61,12 @@ def _draw_panel(ax, names, all_logLs, best_logLs, *, title, with_legend):
         ax.scatter(xj, vals, color="0.2", s=14, alpha=0.7, zorder=3)
 
     ax.scatter(
-        pos, best_logLs,
-        marker="*", color="tab:red", s=110, zorder=5,
+        pos,
+        best_logLs,
+        marker="*",
+        color="tab:red",
+        s=110,
+        zorder=5,
         label="retained restart" if with_legend else None,
     )
 
@@ -83,14 +87,14 @@ def main() -> None:
 
     data = json.loads(args.json.read_text(encoding="utf-8"))
     # BW-EM variants only (skip Hamilton baseline, which has empty restarts)
-    variants = [v for v in data["variants"]
-                if v["name"] in LABELS and v.get("all_train_log_liks")]
+    variants = [v for v in data["variants"] if v["name"] in LABELS and v.get("all_train_log_liks")]
 
     posthoc = [v for v in variants if v["name"] != "V3_GEM_B"]
-    gem     = [v for v in variants if v["name"] == "V3_GEM_B"]
+    gem = [v for v in variants if v["name"] == "V3_GEM_B"]
 
     fig, (ax_l, ax_r) = plt.subplots(
-        ncols=2, figsize=(7.6, 3.6),
+        ncols=2,
+        figsize=(7.6, 3.6),
         gridspec_kw={"width_ratios": [3, 1], "wspace": 0.35},
     )
 
@@ -112,12 +116,12 @@ def main() -> None:
         title="GEM / each-iter $B=0$",
         with_legend=False,
     )
-    ax_r.set_ylabel(r"final train $\log\hat L$ (different scale)",
-                    fontsize=8)
+    ax_r.set_ylabel(r"final train $\log\hat L$ (different scale)", fontsize=8)
 
     n_inits = len(posthoc[0]["all_train_log_liks"])
-    fig.suptitle(rf"BW-EM: final log-likelihood over {n_inits} k-means restarts",
-                 fontsize=11, y=1.02)
+    fig.suptitle(
+        rf"BW-EM: final log-likelihood over {n_inits} k-means restarts", fontsize=11, y=1.02
+    )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, bbox_inches="tight")

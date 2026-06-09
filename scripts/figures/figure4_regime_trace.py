@@ -56,11 +56,19 @@ def main() -> None:
         ax.fill_between(df.index, 0, pi1, alpha=0.15, color="tab:blue")
         # Ground-truth L2 regimes as red bands.
         for start, end in nber:
-            ax.axvspan(pd.Timestamp(start), pd.Timestamp(end),
-                       color="tab:red", alpha=0.18, zorder=0)
+            ax.axvspan(
+                pd.Timestamp(start), pd.Timestamp(end), color="tab:red", alpha=0.18, zorder=0
+            )
         # Ground-truth L1 as a step trace (on a twin axis if crowded).
-        ax.step(df.index, df["r_L1"], where="post",
-                color="tab:green", lw=0.5, alpha=0.65, label="L1 (VIX-med.)")
+        ax.step(
+            df.index,
+            df["r_L1"],
+            where="post",
+            color="tab:green",
+            lw=0.5,
+            alpha=0.65,
+            label="L1 (VIX-med.)",
+        )
         ax.set_ylim(-0.05, 1.05)
         ax.set_ylabel(vname, fontsize=9)
         ax.grid(ls=":", lw=0.4)

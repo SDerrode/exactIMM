@@ -100,10 +100,15 @@ def random_AB(K: int, q: int, s: int, rng: np.random.Generator):
 # (H5) residual
 # ---------------------------------------------------------------------------
 def h5_residual(
-    A2: np.ndarray, B2: np.ndarray,                       # at r_2
-    C2: np.ndarray, D2: np.ndarray,                       # at r_2
-    SU1: np.ndarray, SV1: np.ndarray, Dt1: np.ndarray,    # at r_1
-    SV2: np.ndarray, Dt2: np.ndarray,                     # at r_2
+    A2: np.ndarray,
+    B2: np.ndarray,  # at r_2
+    C2: np.ndarray,
+    D2: np.ndarray,  # at r_2
+    SU1: np.ndarray,
+    SV1: np.ndarray,
+    Dt1: np.ndarray,  # at r_1
+    SV2: np.ndarray,
+    Dt2: np.ndarray,  # at r_2
 ) -> np.ndarray:
     """
     Evaluate the (H5) residual at the pair (r_1, r_2):
@@ -141,9 +146,15 @@ def evaluate_all_pairs(C, D, SU, SV, Dt, A, B) -> np.ndarray:
     for r1 in range(K):
         for r2 in range(K):
             F = h5_residual(
-                A[r2], B[r2], C[r2], D[r2],
-                SU[r1], SV[r1], Dt[r1],
-                SV[r2], Dt[r2],
+                A[r2],
+                B[r2],
+                C[r2],
+                D[r2],
+                SU[r1],
+                SV[r1],
+                Dt[r1],
+                SV[r2],
+                Dt[r2],
             )
             norms[r1, r2] = float(np.linalg.norm(F, "fro"))
     return norms
@@ -160,20 +171,28 @@ def main() -> int:
     ap.add_argument("-K", type=int, default=3, help="Number of regimes (default 3).")
     ap.add_argument("-q", type=int, default=2, help="Dim. of X (default 2).")
     ap.add_argument("-s", type=int, default=2, help="Dim. of Y (default 2).")
-    ap.add_argument("-n", "--n-draws", type=int, default=20,
-                    help="Number of independent random draws (default 20).")
+    ap.add_argument(
+        "-n",
+        "--n-draws",
+        type=int,
+        default=20,
+        help="Number of independent random draws (default 20).",
+    )
     ap.add_argument("--seed", type=int, default=0, help="RNG seed (default 0).")
-    ap.add_argument("--tol", type=float, default=1e-9,
-                    help="Pass tolerance on max ‖F‖_F (default 1e-9).")
-    ap.add_argument("--show-pair-table", action="store_true",
-                    help="Also print the (K × K) residual table for the first draw.")
+    ap.add_argument(
+        "--tol", type=float, default=1e-9, help="Pass tolerance on max ‖F‖_F (default 1e-9)."
+    )
+    ap.add_argument(
+        "--show-pair-table",
+        action="store_true",
+        help="Also print the (K × K) residual table for the first draw.",
+    )
     args = ap.parse_args()
 
     rng = np.random.default_rng(args.seed)
 
     print("Verification of AB constraint: A(r) = Δ Σ_V⁻¹ C, B(r) = Δ Σ_V⁻¹ D")
-    print(f"Setup: K={args.K}, q={args.q}, s={args.s}, "
-          f"n_draws={args.n_draws}, seed={args.seed}")
+    print(f"Setup: K={args.K}, q={args.q}, s={args.s}, n_draws={args.n_draws}, seed={args.seed}")
     print()
 
     max_res_c = np.empty(args.n_draws)
@@ -197,11 +216,15 @@ def main() -> int:
 
     print(f"{'Strategy':<32} {'min ‖F‖':>12} {'med ‖F‖':>12} {'max ‖F‖':>12}")
     print("-" * 72)
-    print(f"{'AB constraint (closed-form)':<32} "
-          f"{max_res_c.min():12.3e} {np.median(max_res_c):12.3e} {max_res_c.max():12.3e}")
-    print(f"{'random A, B (negative control)':<32} "
-          f"{max_res_rand.min():12.3e} {np.median(max_res_rand):12.3e} "
-          f"{max_res_rand.max():12.3e}")
+    print(
+        f"{'AB constraint (closed-form)':<32} "
+        f"{max_res_c.min():12.3e} {np.median(max_res_c):12.3e} {max_res_c.max():12.3e}"
+    )
+    print(
+        f"{'random A, B (negative control)':<32} "
+        f"{max_res_rand.min():12.3e} {np.median(max_res_rand):12.3e} "
+        f"{max_res_rand.max():12.3e}"
+    )
     print()
 
     if args.show_pair_table:
@@ -217,15 +240,14 @@ def main() -> int:
     pass_rand = max_res_rand.min() > args.tol
 
     if pass_c and pass_rand:
-        print(f"OK  : AB constraint gives ‖F‖ < {args.tol:.0e} for every (r_1, r_2) "
-              f"and every draw.")
-        print("OK  : random A, B yields strictly positive residuals "
-              "(negative control sane).")
+        print(
+            f"OK  : AB constraint gives ‖F‖ < {args.tol:.0e} for every (r_1, r_2) and every draw."
+        )
+        print("OK  : random A, B yields strictly positive residuals (negative control sane).")
         return 0
     else:
         print(f"FAIL: (c).max  = {max_res_c.max():.3e}  (tol={args.tol:.0e})")
-        print(f"FAIL: rand.min = {max_res_rand.min():.3e}  "
-              f"(expected > {args.tol:.0e})")
+        print(f"FAIL: rand.min = {max_res_rand.min():.3e}  (expected > {args.tol:.0e})")
         return 1
 
 

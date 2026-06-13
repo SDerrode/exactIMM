@@ -30,6 +30,8 @@ from scipy.stats import multivariate_normal
 
 from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
+from prg.experiments.models_paper import get_params
+from prg.experiments.run_simulations import _params_from_dict
 from prg.learning.semi_supervised import (
     _backward,
     _compute_log_emissions,
@@ -730,3 +732,44 @@ class TestCLI:
         finally:
             sys.path.pop(0)
             sys.modules.pop("model_em_gem", None)
+
+
+# ---------------------------------------------------------------------------
+# Joint noise covariance stays PSD after AB-constrained EM
+# ---------------------------------------------------------------------------
+def _joint_min_eig(params: dict, k: int) -> float:
+    SU = np.asarray(params["Sigma_U_list"][k])
+    Dt = np.asarray(params["Delta_list"][k])
+    SV = np.asarray(params["Sigma_V_list"][k])
+    J = np.block([[SU, Dt], [Dt.T, SV]])
+    return float(np.linalg.eigvalsh(0.5 * (J + J.T)).min())
+
+
+class TestEMJointNoiseCovariancePSD:
+    """The M-step clamps Σ_U and Σ_V blockwise but reassembles the JOINT
+    Σ_W = [[Σ_U, Δ], [Δᵀ, Σ_V]] without re-checking it; guard that the joint
+    covariance stays positive semi-definite after AB-constrained EM."""
+
+    def test_scalar(self, simulated):
+        xs, ys, _, _ = simulated
+        params, _ = fit_semi_supervised(
+            xs, ys, K=2, constraint="ab", n_inits=2, max_iter=30, seed=0
+        )
+        for k in range(params["K"]):
+            assert _joint_min_eig(params, k) > -1e-8
+
+    def test_multivariate(self):
+        true = _params_from_dict(get_params("M2"))  # K=2, q=2, s=2
+        sim = GSSSimulator(true, N=800, seed=0)
+        xs, ys = [], []
+        for tup in sim:
+            xs.append(np.asarray(tup[2]).ravel())
+            ys.append(np.asarray(tup[3]).ravel())
+        xs, ys = np.array(xs), np.array(ys)
+        params, _ = fit_semi_supervised(
+            xs, ys, K=2, constraint="ab", n_inits=2, max_iter=30, seed=0
+        )
+        for k in range(params["K"]):
+            assert _joint_min_eig(params, k) > -1e-8, (
+                f"regime {k}: joint Σ_W min eig = {_joint_min_eig(params, k):.2e}"
+            )

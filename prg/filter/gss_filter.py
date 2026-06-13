@@ -232,57 +232,43 @@ class GSSFilter:
     def _check_h5(self) -> None:
         """Emit a RuntimeWarning if (H5) is violated.
 
-        (H5) is the algebraic constraint  Δᵀ Aᵀ + Σ_V Bᵀ = P M⁻¹ W
-        tying together all 7 parameter matrices of each regime. It is
-        **not** equivalent to B(k) = 0. We evaluate the relative
-        Frobenius residual
+        (H5) — the Markovianity of (R, Y) — requires, for **every** ordered
+        regime pair (j, k), that the regression of X_{n+1} on (Y_n, Y_{n+1})
+        given (r_n=j, r_{n+1}=k) not load on Y_n. We evaluate the relative
+        pairwise residual
 
-            r(k) = ‖Z(k) − P(k) M(k)⁻¹ W(k)‖_F / max(‖Z(k)‖_F, 1)
+            r(j, k) = ‖β₁(j, k)‖_F / ‖[β₁ β₂](j, k)‖_F
 
-        for each regime k and warn if  max_k r(k) > H5_TOL.
+        over all K² pairs and warn if  max_{j,k} r(j, k) > H5_TOL. (The
+        same-regime algebraic residual alone — compute_h5_residual — is
+        necessary but **not** sufficient.)
         """
-        from prg.utils.h5_constraint import compute_h5_residual
+        from prg.utils.h5_constraint import h5_residual_max
 
-        p = self._p
-        max_rel = 0.0
-        worst_k = 0
-        for k in range(p.K):
-            A = p.f_matrix.A(k)
-            B = p.f_matrix.B(k)
-            C = p.f_matrix.C(k)
-            D = p.f_matrix.D(k)
-            SU = p.noise_cov.Sigma_U(k)
-            Dt = p.noise_cov.Delta(k)
-            SV = p.noise_cov.Sigma_V(k)
-            try:
-                F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
-            except np.linalg.LinAlgError:
-                # M(k) singular: cannot evaluate the constraint cleanly.
-                # Treat this as a violation so the user gets a warning.
-                warnings.warn(
-                    f"mode='h5_exact': could not evaluate the (H5) residual "
-                    f"for regime k={k} (M(k) is singular). The filter may be "
-                    f"biased. Use mode='imm_general' if in doubt.",
-                    RuntimeWarning,
-                    stacklevel=3,
-                )
-                continue
-            Z = Dt.T @ A.T + SV @ B.T  # LHS of (H5): Δᵀ Aᵀ + Σ_V Bᵀ
-            scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
-            rel = float(np.linalg.norm(F, "fro")) / scale
-            if rel > max_rel:
-                max_rel = rel
-                worst_k = k
+        max_rel, (worst_j, worst_k) = h5_residual_max(self._p, relative=True)
+
+        if not np.isfinite(max_rel):
+            warnings.warn(
+                f"mode='h5_exact': could not evaluate the (H5) residual for "
+                f"regime pair (j={worst_j}, k={worst_k}) — the conditional "
+                f"(Y_n, Y_{{n+1}}) covariance is singular. The filter may be "
+                f"biased. Use mode='imm_general' if in doubt.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            return
+
         if max_rel > H5_TOL:
             warnings.warn(
-                f"mode='h5_exact' assumes (H5) — i.e. the algebraic constraint "
-                f"Δᵀ Aᵀ + Σ_V Bᵀ = P M⁻¹ W holds for every "
-                f"regime — but the model has max relative residual = "
-                f"{max_rel:.3g} (worst at k={worst_k}). The filter will be "
-                f"biased. Use mode='imm_general' for non-(H5) models, or "
-                f"apply prg.utils.h5_constraint.apply_AB_constraint to "
-                f"enforce (H5) by recomputing A(k), B(k) via the closed "
-                f"form A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.",
+                f"mode='h5_exact' assumes (H5) — the Markovianity of (R, Y), "
+                f"requiring that for every regime pair the predictive law of "
+                f"Y_{{n+1}} not depend on Y_n through X_n — but the model has "
+                f"max relative pairwise residual = {max_rel:.3g} (worst pair "
+                f"(j={worst_j}, k={worst_k})). The filter will be biased. Use "
+                f"mode='imm_general' for non-(H5) models, or apply "
+                f"prg.utils.h5_constraint.apply_AB_constraint to enforce (H5) "
+                f"by recomputing A(k), B(k) via the closed form "
+                f"A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.",
                 RuntimeWarning,
                 stacklevel=3,
             )
@@ -790,8 +776,6 @@ class GSSFilter:
         y_pred_acc = np.zeros_like(y_new)  # (s, 1)
 
         for rnp1 in range(K):
-            Sig_np1 = _sym(P_np1[rnp1] - mu_np1[rnp1] @ mu_np1[rnp1].T)
-            S_YY_np1 = Sig_np1[q:, q:]
             F = p.f_matrix.F(rnp1)
 
             log_terms: list[float] = []
@@ -806,7 +790,12 @@ class GSSFilter:
 
                 Cov_Ynp1_Yn = (F @ Sig_n)[q:, q:]  # (16)
                 M_t = _safe_solve(S_YY_n.T, Cov_Ynp1_Yn.T).T  # (14)
-                Gamma = _psd_floor(_sym(S_YY_np1 - M_t @ Cov_Ynp1_Yn.T))
+                # Pair-conditional predictive variance Var(Y_{n+1} | r_n=rn, r_{n+1}=rnp1):
+                # the block of F Sigma_n(rn) F^T + Sigma_W(rnp1) — NOT the r_n-marginal
+                # Sigma_{YY,n+1}(rnp1). With it, Gamma is the Schur complement of S_YY_n and
+                # is PSD by construction (no spurious mixing of conditionings). (eq. 22)
+                S_YY_pair = (F @ Sig_n @ F.T + p.noise_cov.Sigma_W(rnp1))[q:, q:]
+                Gamma = _psd_floor(_sym(S_YY_pair - M_t @ Cov_Ynp1_Yn.T))
 
                 mu_Ynp1 = F[q:, :] @ self._mu[rn] + p.b(rnp1)[q:]
                 mean_c = mu_Ynp1 + M_t @ (y_prev - mu_Y_n)

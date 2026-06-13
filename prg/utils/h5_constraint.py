@@ -37,9 +37,13 @@ apply_AB_constraint(params, *, logger=None) -> GSSParams
     Return a new GSSParams with each regime's (A_k, B_k) replaced by
     the closed form.
 compute_h5_residual(A, B, C, D, SU, Dt, SV) -> ndarray (s, q)
-    Frobenius-norm-zero ⇔ (H5) holds. This is the source of truth
-    for (H5)-compatibility, regardless of whether (A, B) takes the
-    AB form.
+    Same-regime (k, k) residual. Frobenius-norm-zero is *necessary* for
+    (H5) but not sufficient (it ignores the cross pairs j != k).
+compute_h5_pair_residual(A_k, B_k, C_k, D_k, Dt_k, SV_k, SU_j, Dt_j, SV_j) -> (q, s)
+    Pairwise residual beta_1(j, k) for the ordered pair (source j -> target k);
+    zero for all K^2 pairs <=> (H5) holds.
+h5_residual_max(params) -> (max_resid, (j, k))
+    Complete (H5) check: max pairwise residual over all ordered pairs.
 """
 
 from __future__ import annotations
@@ -55,7 +59,9 @@ if TYPE_CHECKING:
 __all__ = [
     "apply_AB_constraint",
     "compute_AB",
+    "compute_h5_pair_residual",
     "compute_h5_residual",
+    "h5_residual_max",
 ]
 
 
@@ -83,9 +89,16 @@ def compute_h5_residual(
         R = C Δ  + D Σ_V  (= Pᵀ)    (s × s)
         M = Q Cᵀ + R Dᵀ + Σ_V       (s × s, symmetric, ≻ 0 if Σ_U, Σ_V ≻ 0).
 
+    This is the **same-regime** constraint (the regime pair ``(k, k)``). It is
+    a *necessary* condition for (H5), but **not sufficient**: when the regimes
+    have different joint covariances, (H5) also constrains the cross pairs
+    ``(j, k)``, ``j ≠ k``. Use :func:`h5_residual_max` (or
+    :func:`compute_h5_pair_residual`) for the complete, all-pairs check.
+
     Returns
     -------
-    F : ndarray of shape (s, q).  ``‖F‖ = 0`` ⇔ (H5) holds exactly.
+    F : ndarray of shape (s, q).  ``‖F‖ = 0`` ⇔ the same-regime ``(k, k)``
+        condition holds (necessary for (H5)).
 
     Raises
     ------
@@ -100,6 +113,129 @@ def compute_h5_residual(
     Z = Dt.T @ A.T + SV @ B.T
     residual: np.ndarray = Z - P @ np.linalg.solve(M, W)
     return residual
+
+
+# ---------------------------------------------------------------------------
+# Pairwise (H5) residual — the *complete* (H5)-compatibility check
+# ---------------------------------------------------------------------------
+def _h5_pair_beta(
+    A_k: np.ndarray,  # (q, q)  target-regime k dynamics
+    B_k: np.ndarray,  # (q, s)
+    C_k: np.ndarray,  # (s, q)
+    D_k: np.ndarray,  # (s, s)
+    Delta_k: np.ndarray,  # (q, s)  Cov(W_X, W_Y | r=k)
+    SV_k: np.ndarray,  # (s, s)   Var(W_Y | r=k)
+    SU_j: np.ndarray,  # (q, q)  source-regime j joint-covariance blocks
+    Delta_j: np.ndarray,  # (q, s)
+    SV_j: np.ndarray,  # (s, s)
+) -> np.ndarray:
+    """Regression of X_{n+1} on (Y_n, Y_{n+1}) given r_n=j, r_{n+1}=k.
+
+    Returns ``beta`` of shape (q, 2s); the first s columns are the loading on
+    Y_n (``beta_1``), the last s the loading on Y_{n+1}.
+
+    Raises numpy.linalg.LinAlgError if the joint (Y_n, Y_{n+1}) covariance is
+    singular.
+    """
+    cov_Xn1_Yn = A_k @ Delta_j + B_k @ SV_j
+    cov_Xn1_Yn1 = (
+        A_k @ SU_j @ C_k.T
+        + A_k @ Delta_j @ D_k.T
+        + B_k @ Delta_j.T @ C_k.T
+        + B_k @ SV_j @ D_k.T
+        + Delta_k
+    )
+    cov_Yn_Yn1 = Delta_j.T @ C_k.T + SV_j @ D_k.T
+    var_Yn1 = (
+        C_k @ SU_j @ C_k.T
+        + C_k @ Delta_j @ D_k.T
+        + D_k @ Delta_j.T @ C_k.T
+        + D_k @ SV_j @ D_k.T
+        + SV_k
+    )
+    V = np.block([[SV_j, cov_Yn_Yn1], [cov_Yn_Yn1.T, var_Yn1]])  # (2s, 2s)
+    cov_X = np.hstack([cov_Xn1_Yn, cov_Xn1_Yn1])  # (q, 2s)
+    beta: np.ndarray = np.linalg.solve(V, cov_X.T).T  # (q, 2s)
+    return beta
+
+
+def compute_h5_pair_residual(
+    A_k: np.ndarray,
+    B_k: np.ndarray,
+    C_k: np.ndarray,
+    D_k: np.ndarray,
+    Delta_k: np.ndarray,
+    SV_k: np.ndarray,
+    SU_j: np.ndarray,
+    Delta_j: np.ndarray,
+    SV_j: np.ndarray,
+) -> np.ndarray:
+    """Pairwise (H5) residual ``β₁(j, k)`` for the ordered pair (source j → target k).
+
+    (H5) — the Markovianity of ``(R, Y)`` — holds for the pair (j, k) iff,
+    conditionally on ``r_n = j`` and ``r_{n+1} = k``, the regression of
+    ``X_{n+1}`` on ``(Y_n, Y_{n+1})`` does *not* load on ``Y_n``. This returns
+    that loading ``β₁`` (shape ``(q, s)``); ``‖β₁‖ = 0`` ⇔ (H5) holds for the
+    pair. The model is (H5)-compatible iff ``β₁(j, k) = 0`` for **all** K²
+    ordered pairs.
+
+    The single-regime :func:`compute_h5_residual` only covers the same-regime
+    pairs ``(k, k)``: that is **necessary but not sufficient** for (H5) whenever
+    the regimes have different joint covariances. Use :func:`h5_residual_max`
+    for the complete check.
+
+    Target-regime arguments ``A_k, B_k, C_k, D_k`` (dynamics), ``Delta_k``
+    (``Cov(W_X, W_Y | k)``), ``SV_k`` (``Var(W_Y | k)``); source-regime joint
+    noise-covariance blocks ``SU_j, Delta_j, SV_j``.
+
+    Raises numpy.linalg.LinAlgError if the joint (Y_n, Y_{n+1}) covariance is
+    singular.
+    """
+    s = SV_j.shape[0]
+    return _h5_pair_beta(A_k, B_k, C_k, D_k, Delta_k, SV_k, SU_j, Delta_j, SV_j)[:, :s]
+
+
+def h5_residual_max(
+    params: GSSParams,
+    *,
+    relative: bool = True,
+) -> tuple[float, tuple[int, int]]:
+    """Largest pairwise (H5) residual over all K² ordered regime pairs.
+
+    Returns ``(max_resid, (j, k))`` where ``max_resid`` is the maximum over all
+    ordered pairs (j, k) of ``‖β₁(j, k)‖_F`` — relative to the regression scale
+    ``‖[β₁ β₂](j, k)‖_F`` when ``relative=True``. ``max_resid = 0`` ⇔ the model
+    is fully (H5)-compatible; ``inf`` is returned if some pair's (Y_n, Y_{n+1})
+    covariance is singular.
+
+    This is the **complete** (H5) check. :func:`compute_h5_residual` only tests
+    the same-regime pairs (necessary, not sufficient).
+    """
+    K = params.K
+    A = [params.f_matrix.A(k) for k in range(K)]
+    B = [params.f_matrix.B(k) for k in range(K)]
+    C = [params.f_matrix.C(k) for k in range(K)]
+    D = [params.f_matrix.D(k) for k in range(K)]
+    SU = [params.noise_cov.Sigma_U(k) for k in range(K)]
+    Dt = [params.noise_cov.Delta(k) for k in range(K)]
+    SV = [params.noise_cov.Sigma_V(k) for k in range(K)]
+
+    s = params.s
+    worst = 0.0
+    arg: tuple[int, int] = (0, 0)
+    for j in range(K):
+        for k in range(K):
+            try:
+                beta = _h5_pair_beta(A[k], B[k], C[k], D[k], Dt[k], SV[k], SU[j], Dt[j], SV[j])
+            except np.linalg.LinAlgError:
+                return float("inf"), (j, k)
+            r = float(np.linalg.norm(beta[:, :s], "fro"))
+            if relative:
+                r /= max(float(np.linalg.norm(beta, "fro")), 1e-300)
+            if r > worst:
+                worst = r
+                arg = (j, k)
+    return worst, arg
 
 
 # ---------------------------------------------------------------------------

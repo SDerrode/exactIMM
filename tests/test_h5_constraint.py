@@ -26,7 +26,9 @@ from prg.models.base_gss_model import BaseGSSModel
 from prg.utils.h5_constraint import (
     apply_AB_constraint,
     compute_AB,
+    compute_h5_pair_residual,
     compute_h5_residual,
+    h5_residual_max,
 )
 
 
@@ -201,3 +203,96 @@ class TestComputeH5Residual:
         B = rng.standard_normal((q, s)) * 0.5
         F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
         assert np.linalg.norm(F, "fro") > 1e-3
+
+
+# ---------------------------------------------------------------------------
+# Pairwise (all-pairs) (H5) check
+# ---------------------------------------------------------------------------
+class TestPairwiseH5:
+    def test_ab_model_fully_compatible(self, params_K2_q1_s1):
+        """An AB-constrained model is (H5)-compatible across every regime pair."""
+        ab = apply_AB_constraint(params_K2_q1_s1)
+        max_rel, _ = h5_residual_max(ab)
+        assert max_rel < 1e-9, f"AB model not fully (H5)-compatible: {max_rel:.3e}"
+
+    def test_pair_residual_zero_on_AB_manifold(self, rng):
+        """β₁(j, k) vanishes for all pairs when every regime is AB-parametrised."""
+        q, s = 2, 1
+        reg = []
+        for _ in range(2):
+            C, D, SU, Dt, SV = _random_inputs(q, s, rng)
+            A, B = compute_AB(C, D, Dt, SV)
+            reg.append((A, B, C, D, SU, Dt, SV))
+        for j in range(2):
+            for k in range(2):
+                Ak, Bk, Ck, Dk, _, Dtk, SVk = reg[k]
+                _, _, _, _, SUj, Dtj, SVj = reg[j]
+                b1 = compute_h5_pair_residual(Ak, Bk, Ck, Dk, Dtk, SVk, SUj, Dtj, SVj)
+                assert np.linalg.norm(b1, "fro") < 1e-9
+
+    def test_pairwise_strictly_stronger_than_same_regime(self):
+        """A non-AB model can satisfy *every* same-regime residual yet violate
+        (H5) on a cross pair (j != k); only the pairwise check catches it.
+
+        Built in the sub-determined regime K=2, q=2, s=1 (Ks < q+s), where the
+        same-regime residual has a non-trivial null space.
+        """
+        rng = np.random.default_rng(3)
+        q, s = 2, 1
+
+        def spd(n):
+            M = rng.standard_normal((n, n))
+            return M @ M.T + 0.5 * np.eye(n)
+
+        reg = []
+        for _ in range(2):
+            C = rng.standard_normal((s, q))
+            D = rng.standard_normal((s, s))
+            SU, SV, Dt = spd(q), spd(s), 0.3 * rng.standard_normal((q, s))
+            A, B = compute_AB(C, D, Dt, SV)
+            reg.append([A, B, C, D, SU, Dt, SV])
+
+        # Perturb regime 0's (A, B) inside the null space of its same-regime residual.
+        r0 = reg[0]
+        base = np.concatenate([r0[0].ravel(), r0[1].ravel()])
+        nA = q * q
+
+        def mono_of(vec):
+            A = vec[:nA].reshape(q, q)
+            B = vec[nA:].reshape(q, s)
+            return compute_h5_residual(A, B, r0[2], r0[3], r0[4], r0[5], r0[6]).ravel()
+
+        n = base.size
+        J = np.zeros((s * q, n))
+        rb = mono_of(base)
+        for i in range(n):
+            e = np.zeros(n)
+            e[i] = 1.0
+            J[:, i] = mono_of(base + e) - rb
+        _, S, Vt = np.linalg.svd(J)
+        null_dir = Vt[int((S > 1e-9).sum()) :][0]
+        pert = base + null_dir
+        reg[0][0] = pert[:nA].reshape(q, q)
+        reg[0][1] = pert[nA:].reshape(q, s)
+
+        # Same-regime residual stays ~0 for every regime (necessary condition holds) ...
+        mono_max = max(np.linalg.norm(compute_h5_residual(*reg[k]), "fro") for k in range(2))
+        assert mono_max < 1e-8, f"same-regime residual unexpectedly nonzero: {mono_max:.2e}"
+
+        # ... yet the pairwise check detects the cross-pair (H5) violation.
+        pair_max = 0.0
+        for j in range(2):
+            for k in range(2):
+                b1 = compute_h5_pair_residual(
+                    reg[k][0],
+                    reg[k][1],
+                    reg[k][2],
+                    reg[k][3],
+                    reg[k][5],
+                    reg[k][6],
+                    reg[j][4],
+                    reg[j][5],
+                    reg[j][6],
+                )
+                pair_max = max(pair_max, float(np.linalg.norm(b1, "fro")))
+        assert pair_max > 1e-2, f"pairwise check missed the violation: {pair_max:.2e}"

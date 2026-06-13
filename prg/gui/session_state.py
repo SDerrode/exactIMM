@@ -52,22 +52,32 @@ class _SessionState:
 
     # ----- Atomic mutations -------------------------------------------
 
-    def reset(self) -> None:
-        """Forget everything — called from Reset button."""
-        self.data = None
-        self.params = None
-        self.params_signature = None
+    def _clear_filter(self) -> None:
+        """Drop every filter-produced array (innovations + D5 results).
+
+        Must run whenever the data or params change, otherwise a stale
+        ``filter_pis`` / ``filter_E_xs`` from a previous run would be paired
+        with new ground-truth regimes (e.g. in the regime-diagnostics
+        confusion matrix), silently producing wrong figures.
+        """
         self.innovations = None
         self.filter_E_xs = None
         self.filter_Var_xs = None
         self.filter_pis = None
         self.filter_log_lik = None
 
+    def reset(self) -> None:
+        """Forget everything — called from Reset button."""
+        self.data = None
+        self.params = None
+        self.params_signature = None
+        self._clear_filter()
+
     def begin_simulation(self, params: object, signature: tuple | None) -> None:
         """About to launch a new Simulate: capture params, drop stale results."""
         self.params = params
         self.params_signature = signature
-        self.innovations = None  # filter result no longer matches
+        self._clear_filter()  # previous filter results no longer match the new data
 
     def store_data(self, ns, rs, xs, ys, seed) -> None:
         self.data = (ns, rs, xs, ys, seed)
@@ -92,4 +102,4 @@ class _SessionState:
         self.data = (ns, rs, xs, ys, None)
         self.params = params
         self.params_signature = signature
-        self.innovations = None
+        self._clear_filter()  # any previous filter results belong to the old data

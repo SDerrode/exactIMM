@@ -5,6 +5,10 @@ tests/test_gss_params.py
 Unit tests for GSSParams.
 """
 
+import pathlib
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
@@ -356,3 +360,32 @@ class TestGSSParamsDisplay:
         params.summary()
         captured = capsys.readouterr()
         assert "GSSParams" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Validation must not be gated behind __debug__ (i.e. it must run under -O)
+# ---------------------------------------------------------------------------
+class TestValidationUnderOptimize:
+    def test_validation_runs_under_O(self):
+        """Constructing an invalid GSSParams must still raise under ``python -O``.
+
+        Regression guard: the structural validation used to sit behind
+        ``if __debug__:``, which silently disabled it under ``-O``.
+        """
+        root = pathlib.Path(__file__).resolve().parent.parent
+        code = (
+            "import numpy as np;"
+            "from prg.classes.GSSParams import GSSParams;"
+            "GSSParams(K=1, q=1, s=1, P=np.array([[1.0]]), f_matrix=None,"
+            " noise_cov=None, pi0=None, mu_z0_list=[], Sigma_z0_list=[])"
+        )
+        res = subprocess.run(
+            [sys.executable, "-O", "-c", code],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode != 0, "GSSParams(K=1) must fail even under python -O"
+        assert "K must be" in res.stderr, (
+            f"structural validation did not fire under -O:\n{res.stderr}"
+        )

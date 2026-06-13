@@ -85,13 +85,16 @@ class GSSParams:
         Sigma_z0_list: list[np.ndarray],
         b_list: list[np.ndarray] | None = None,
     ) -> None:
-        if __debug__:
-            self._validate_scalars(K, q, s)
-            self._validate_P(P, K)
-            self._validate_fmatrix(f_matrix, K, q, s)
-            self._validate_noise_cov(noise_cov, K, q, s)
-            self._validate_pi0(pi0, K)
-            self._validate_initial_conditions(mu_z0_list, Sigma_z0_list, K, q + s)
+        # Structural validation always runs: gating it behind ``if __debug__``
+        # silently disables it under ``python -O``, letting malformed parameters
+        # through. The cost is negligible — validation happens once at
+        # construction, never inside the filter loop.
+        self._validate_scalars(K, q, s)
+        self._validate_P(P, K)
+        self._validate_fmatrix(f_matrix, K, q, s)
+        self._validate_noise_cov(noise_cov, K, q, s)
+        self._validate_pi0(pi0, K)
+        self._validate_initial_conditions(mu_z0_list, Sigma_z0_list, K, q + s)
 
         self._K = int(K)
         self._q = int(q)

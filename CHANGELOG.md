@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Filter**: corrected the pair-conditional innovation covariance in
+  ``mode="imm_general"`` (Schur complement); it was mixing conditionings and
+  could become indefinite. The two filter modes now agree to machine precision
+  on any (H5)-compatible model.
+- **(H5) check**: the same-regime ``compute_h5_residual`` is only *necessary*;
+  added ``compute_h5_pair_residual`` / ``h5_residual_max`` for the complete
+  all-pairs check, now used by the ``h5_exact`` (H5) warning.
+- **GSSParams**: structural validation is no longer gated behind ``__debug__``
+  (it was silently skipped under ``python -O``).
+- **GUI**: ``_SessionState`` now drops stale filter results on
+  re-Simulate / Load-CSV (the regime-diagnostics confusion matrix could pair
+  new ground truth with old posteriors).
+- **CI**: removed the unused ``hmmlearn`` dependency (it broke the weekly
+  security-audit job on Python 3.14); bumped GitHub Actions off the deprecated
+  Node 20 runtime; ``run_em.py`` defaults realigned to the §6.4 protocol.
+
+### Added
+
+- Filter-mode equivalence tests across dimensions (K>2, q,s>1) and a
+  joint noise-covariance PSD test after AB-constrained EM.
+
 ## [0.13.1] — 2026-05-06
 
 ### Added

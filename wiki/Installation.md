@@ -2,8 +2,9 @@
 
 ## Requirements
 
-- Python **3.14+** (lower versions untested; 3.13 likely works but the
-  type annotations target 3.14)
+- Python **3.14+** — required: ``pyproject.toml`` sets
+  ``requires-python = ">=3.14"``, so ``pip`` refuses to install on 3.13 or
+  earlier
 - `pip ≥ 24` (for PEP 660 editable installs)
 - A C/Fortran toolchain is *not* required: NumPy, SciPy and pandas
   ship as wheels for all major platforms.
@@ -14,8 +15,9 @@
 git clone https://github.com/SDerrode/exactIMM.git
 cd exactIMM       # the Python package inside is called `exactIMM`
 
-# Create and activate a project virtualenv
-python3 -m venv .venv
+# Create and activate a project virtualenv (use python3.14 explicitly:
+# a system python3 that is < 3.14 will be rejected by pip)
+python3.14 -m venv .venv
 source .venv/bin/activate     # Windows: .venv\Scripts\activate
 
 # Editable install + dev tools (pytest)
@@ -74,4 +76,4 @@ re-run `pip install -e ".[dev]"`.
 | `ImportError: numpy.core.multiarray failed to import` | Activate the venv (`source .venv/bin/activate`) |
 | `Qt platform plugin "cocoa" could not be found` (macOS GUI) | `pip install --upgrade --force-reinstall PyQt6` |
 | GUI launches but no plots show | Check that `matplotlib` is installed *inside the venv* |
-| `pytest` fails on `test_semi_supervised` only on Apple Silicon | Known stochastic flakiness on `--n-inits 1`; rerun with `pytest --rerun-failures 2` |
+| `pytest` fails on `test_semi_supervised` only on Apple Silicon | Known stochastic flakiness in the EM basin selection; simply re-run the suite (tests are seeded but occasionally sensitive on a single restart) |

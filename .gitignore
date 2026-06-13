@@ -14,12 +14,6 @@ paper/
 # Original and generated data
 /data/simulated/*
 !/data/simulated/.gitkeep
-data/output/*
-!/data/output/.gitkeep
-data/historyTracker/*
-!/data/historyTracker/.gitkeep
-data/plot/*
-!/data/plot/.gitkeep
 
 # Monte-Carlo simulation outputs (large; regenerable via prg.experiments.run_*)
 data/experiments/*.csv

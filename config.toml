@@ -1,19 +1,11 @@
 # exactIMM – Application configuration
 # Edit this file to tune simulation and I/O parameters.
+# Only the keys below are read by the code (general.log_level,
+# paths.data_simulated, paths.logs); everything else is hard-coded.
 
 [general]
-project_name   = "exactIMM"
-random_seed    = 42
-log_level      = "INFO"   # DEBUG | INFO | WARNING | ERROR
+log_level = "INFO"   # DEBUG | INFO | WARNING | ERROR
 
 [paths]
-data_simulated  = "data/simulated"
-data_output     = "data/output"
-data_plot       = "data/plot"
-history_tracker = "data/historyTracker"
-logs            = "logs"
-
-[output]
-save_interval = 10       # save every N steps
-plot_format   = "png"    # png | pdf | svg
-dpi           = 150
+data_simulated = "data/simulated"
+logs           = "logs"

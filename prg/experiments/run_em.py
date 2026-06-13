@@ -19,9 +19,9 @@ GEM (Generalized EM)
 
 Protocol (§6.4)
 ---------------
-For each N ∈ {500, 2000, 5000} × seed ∈ range(N_RUNS):
+For each N ∈ {500, 2000} × seed ∈ range(N_RUNS):
   1. Simulate N steps from M1 (regime sequence hidden).
-  2. Run PH and GEM, each with n_inits=10 restarts.
+  2. Run PH and GEM, each with n_inits=5 restarts.
   3. Record:
        - best log-likelihood over restarts
        - per-restart log-likelihoods  (→ basin selection rate)
@@ -67,10 +67,12 @@ logger = logging.getLogger("exactIMM.experiments.em")
 # ---------------------------------------------------------------------------
 
 DEFAULT_MODEL = "M1"
-DEFAULT_N_LIST = (500, 2_000, 5_000)
+# Protocol of paper §6.4 (matches the committed tab_em_* tables): the defaults
+# below are what the documented reproduction command (run with no flags) uses.
+DEFAULT_N_LIST = (500, 2_000)
 DEFAULT_N_RUNS = 100
-DEFAULT_N_INITS = 10  # EM restarts per trial
-DEFAULT_MAX_ITER = 100
+DEFAULT_N_INITS = 5  # EM restarts per trial
+DEFAULT_MAX_ITER = 50
 DEFAULT_TOL = 1e-5
 DEFAULT_OUT_DIR = pathlib.Path("data") / "experiments"
 

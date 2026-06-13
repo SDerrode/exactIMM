@@ -101,7 +101,13 @@ def build_csv() -> Path:
     df = pd.concat([s34, s12, soni], axis=1).dropna()
     df.index.name = "date"
 
-    # K=3 regime label from ONI thresholds (NOAA convention)
+    # K=3 regime label from the NOAA ONI thresholds.
+    # CAVEAT (look-ahead): ONI is a *centred* 3-month running mean of Niño 3.4
+    # (the observation Y), so the label R_n depends on Y_{n-1}, Y_n AND Y_{n+1}
+    # — a non-causal, one-month-ahead, strongly Y-collinear target. Any
+    # supervised fit or regime-recovery accuracy graded against it therefore
+    # enjoys a mild look-ahead. Kept as-is to follow the standard NOAA
+    # definition; this is flagged in §7 of the paper.
     df["regime"] = 1  # neutral
     df.loc[df["oni"] < -0.5, "regime"] = 0  # La Niña
     df.loc[df["oni"] > 0.5, "regime"] = 2  # El Niño

@@ -13,6 +13,15 @@ This script reads:
 and writes numerical values directly into the LaTeX source,
 replacing every ``\\ph{...}`` occurrence with the computed value.
 
+.. warning::
+   This rewrite is **destructive and not idempotent**: each ``\\ph{key}`` is
+   overwritten by its value, so the key is lost and the number can no longer be
+   regenerated from this file. Keep the placeholder version under version
+   control (or restore it before re-running). The non-destructive design is to
+   emit the values into a *separate* generated macro file (``\\newcommand``
+   definitions) that the ``.tex`` ``\\input``s, leaving the ``\\ph{}`` source
+   intact and the pipeline repeatable.
+
 Usage
 -----
     python -m prg.experiments.fill_placeholders
@@ -300,6 +309,12 @@ def fill_placeholders(
     print(f"\nReplaced: {n_replaced}/{total_ph}  ({remaining} remaining as \\ph{{}})")
 
     if not dry_run and n_replaced > 0:
+        print(
+            "WARNING: replacing \\ph{} in place is destructive — the keys are lost "
+            "and these numbers cannot be regenerated from the file afterwards. "
+            "Ensure the placeholder version is under version control.",
+            file=sys.stderr,
+        )
         tex_path.write_text(new_text, encoding="utf-8")
         print(f"Written: {tex_path}")
     elif dry_run:

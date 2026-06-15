@@ -129,7 +129,7 @@ cd paper
 pdflatex paper && bibtex paper && pdflatex paper && pdflatex paper
 ```
 
-You should obtain a 27-page PDF.
+You should obtain a 26-page PDF.
 
 ## Why are some `*.csv` not in the repo?
 

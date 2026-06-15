@@ -33,8 +33,8 @@ pip install -e ".[dev]"
 | Extra | Installs | When to use |
 |---|---|---|
 | `gui` | PyQt6, matplotlib | Interactive parameter exploration |
-| `paper` | matplotlib, statsmodels, hmmlearn, scikit-learn, requests, yfinance | Reproducing §6 and §7 experiments |
-| `dev` | pytest, pytest-cov | Running the test suite |
+| `paper` | matplotlib, statsmodels, scikit-learn, requests, yfinance | Reproducing §6 and §7 experiments |
+| `dev` | pytest, pytest-cov, pytest-qt, mypy, ruff | Running the test suite and static checks |
 
 ```bash
 pip install -e ".[gui]"           # GUI only
@@ -45,7 +45,7 @@ pip install -e ".[gui,paper,dev]" # everything
 ## Verifying the install
 
 ```bash
-# Run the test suite (≈ 45 s, 204 tests)
+# Run the test suite (≈ 45 s, 235 tests)
 pytest
 
 # Smoke-test the simulator
@@ -55,7 +55,7 @@ python -m prg.simulate --model model_gss_K2_q1_s1 -N 100 --seed 0 --no-save
 python -m prg.filter.main --model model_gss_K2_q1_s1 -N 100 --seed 0 --no-save
 ```
 
-If `pytest` reports `204 passed` and the two CLI calls finish without
+If `pytest` reports `235 passed` and the two CLI calls finish without
 error, the install is good.
 
 ## Updating

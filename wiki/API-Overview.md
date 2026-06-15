@@ -30,8 +30,9 @@ print(params.K, params.q, params.s)
 print(params.stationary_distribution())   # π_∞ from P
 ```
 
-Mutable in tests, immutable in normal use. Provides `to_dict()` for
-serialisation and `from_dict()` for round-trips.
+Mutable in tests, immutable in normal use. Build instances with
+`from_model`; it exposes `K`, `q`, `s`, the `f_matrix`/`noise_cov`
+blocks and `stationary_distribution()`.
 
 ### `GSSSimulator` (`prg/classes/GSSSimulator.py`)
 
@@ -65,6 +66,11 @@ print(res.E_x, res.Var_x, res.pi, res.log_lik, res.innovation)
 |---|---|---|
 | `h5_exact` | constant Kalman gain (precomputed) | requires (H5) |
 | `imm_general` | full IMM mixing | works for any GSS |
+
+Both modes use the exact pair-conditional predictive covariance, so on
+(H5)-compatible params they produce numerically identical output (checked
+in `tests/test_filter_modes.py`); `imm_general` is the fallback for
+unconstrained models.
 
 Note that `h5_exact` issues a `RuntimeWarning` if the params do not
 satisfy (H5) — you can suppress this with `warnings.catch_warnings()`
@@ -104,9 +110,27 @@ Same, for a single regime. Returns the tuple `(A, B)`.
 
 ### `compute_h5_residual(A, B, C, D, Su, Delta, Sv)`
 
-Frobenius-norm residual of the (H5) algebraic identity
+Frobenius-norm residual of the **same-regime** \((k, k)\) (H5) algebraic
+identity
 \(\Delta^T A^T + \Sigma_V B^T - P M^{-1}(Q A^T + R B^T + \Delta^T)\).
-Returns a `(s, q)` array; \(\|F\|_F = 0\) iff (H5) holds.
+Returns a `(s, q)` array. \(\|F\|_F = 0\) is **necessary but not
+sufficient** for (H5): when regimes have different joint covariances,
+(H5) also constrains the cross pairs \((j, k)\), \(j \neq k\).
+
+### `compute_h5_pair_residual(A_k, B_k, C_k, D_k, Delta_k, Sv_k, Su_j, Delta_j, Sv_j)`
+
+Pairwise residual \(\beta_1(j, k)\) (shape `(q, s)`) — the loading on
+\(Y_n\) of the regression of \(X_{n+1}\) on \((Y_n, Y_{n+1})\) given
+\(r_n = j,\ r_{n+1} = k\). \(\|\beta_1(j, k)\| = 0\) for **all** \(K^2\)
+ordered pairs \(\iff\) (H5) holds.
+
+### `h5_residual_max(params, *, relative=True)`
+
+The **complete** (H5) check. Returns `(max_resid, (j, k))`: the largest
+pairwise residual over all \(K^2\) ordered pairs (normalised by the
+regression scale when `relative=True`). `max_resid == 0` \(\iff\) the
+model is fully (H5)-compatible. This is the test `GSSFilter` uses to
+decide whether to emit the `h5_exact` warning.
 
 ### Error hierarchy
 

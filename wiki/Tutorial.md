@@ -70,7 +70,8 @@ for y in observations:                            # y shape (s,) or (s,1)
 
 ```python
 import numpy as np
-from scipy.stats import jarque_bera, ljungbox
+from scipy.stats import jarque_bera
+from statsmodels.stats.diagnostic import acorr_ljungbox   # in the [paper] extra
 
 # Collect innovations during a run
 innov = []
@@ -80,7 +81,7 @@ for y in observations:
 innov = np.asarray(innov).squeeze()
 
 # Whiteness test (good filter ↔ p > 0.05)
-print(ljungbox(innov, lags=20).iloc[-1])
+print(acorr_ljungbox(innov, lags=[20], return_df=True))
 print(jarque_bera(innov))                          # mixture-of-Gaussians: kurtosis ≠ 0 expected
 ```
 

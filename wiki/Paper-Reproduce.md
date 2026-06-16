@@ -4,7 +4,7 @@ The paper has two empirical sections:
 
 | Section | Content | Wall time | Script |
 |---|---|---|---|
-| §6 | Monte-Carlo simulation study (M1, M2, M3 reference models) | ~3 h total | `prg.experiments.run_simulations` + `run_supervised` + `run_em` |
+| §6 | Monte-Carlo simulation study (M1, M2, M3 reference models) | ~20 h total (EM-dominated) | `prg.experiments.run_simulations` + `run_supervised` + `run_em` |
 | §7 | ENSO real-data experiment (K=3 regimes, NOAA SST) | ~1 min | `prg.experiments.run_real_data` |
 
 All scripts are deterministic given a fixed `--seed`.
@@ -37,8 +37,8 @@ python -m prg.experiments.run_supervised
 python -m prg.experiments.run_em
 ```
 
-- 3 models × 2 sequence lengths × 30 seeds × 2 variants × 5 restarts = 360 EM runs
-- Wall time ≈ 2 h (the bulk of the budget)
+- 1 model (M1) × 2 sequence lengths {500, 2000} × 100 seeds × 2 variants (PH / GEM) = 400 EM trials, each the best of 5 restarts (k-means init, 50 EM iterations)
+- Wall time ≈ 20 h single-threaded — the EM dominates the §6 budget (measured: a 4-seed subset ≈ 50 min on an Apple-silicon laptop, scaling ~25× to the full 100-seed run)
 - Output: `data/experiments/em_results.csv` + `em_ll_history.csv`
 
 ### Generating the paper figures and tables

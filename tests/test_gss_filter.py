@@ -54,6 +54,41 @@ def run_df(params):
     return df
 
 
+@pytest.fixture(scope="module")
+def non_h5_params(params) -> GSSParams:
+    """A model that deliberately violates (H5).
+
+    The reference preset is now (H5)-valid by construction (A, B are derived from
+    (C, D, Δ, Σ_V) via the AB constraint), so these tests rebuild the original
+    non-(H5) blocks (A = 0.8 / 0.5, B = 0.1 / 0.3 — stable but off the AB
+    manifold) to exercise the h5_exact warning / bias path.
+    """
+    from prg.classes.FMatrix import FMatrix
+
+    K, q, s = params.K, params.q, params.s
+    fm = FMatrix(
+        K=K,
+        q=q,
+        s=s,
+        A_list=[np.array([[0.8]]), np.array([[0.5]])],
+        B_list=[np.array([[0.1]]), np.array([[0.3]])],
+        C_list=[params.f_matrix.C(k) for k in range(K)],
+        D_list=[params.f_matrix.D(k) for k in range(K)],
+    )
+    return GSSParams(
+        K=K,
+        q=q,
+        s=s,
+        P=params.P,
+        f_matrix=fm,
+        noise_cov=params.noise_cov,
+        pi0=params.pi0,
+        mu_z0_list=[params.mu_z0(k) for k in range(K)],
+        Sigma_z0_list=[params.Sigma_z0(k) for k in range(K)],
+        b_list=[params.b(k) for k in range(K)],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Construction
 # ---------------------------------------------------------------------------
@@ -465,13 +500,13 @@ class TestFilterModes:
             filt = GSSFilter(params, mode="h5_exact")
         assert filt.mode == "h5_exact"
 
-    def test_h5_warns_on_non_h5_model(self, params):
-        """Model_gss_K2_q1_s1 has B(k) != 0, so h5_exact must warn."""
+    def test_h5_warns_on_non_h5_model(self, non_h5_params):
+        """A model off the AB manifold violates (H5), so h5_exact must warn."""
         import warnings
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")
-            GSSFilter(params, mode="h5_exact")
+            GSSFilter(non_h5_params, mode="h5_exact")
         runtime_ws = [w for w in ws if issubclass(w.category, RuntimeWarning)]
         assert len(runtime_ws) >= 1
         assert "B(k)" in str(runtime_ws[0].message)
@@ -492,16 +527,16 @@ class TestFilterModes:
         with pytest.raises(ValueError, match="Unknown mode"):
             GSSFilter(params, mode="nope")
 
-    def test_imm_general_matches_pre_v0_10_behavior(self, params):
+    def test_imm_general_matches_pre_v0_10_behavior(self, non_h5_params):
         """
         imm_general on a non-(H5) model should track the true state well
         (MSE much smaller than h5_exact's biased estimate).
         """
         import warnings
 
-        _, df_gen = GSSFilter(params, mode="imm_general").run(N=300, seed=11)
+        _, df_gen = GSSFilter(non_h5_params, mode="imm_general").run(N=300, seed=11)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            _, df_h5 = GSSFilter(params, mode="h5_exact").run(N=300, seed=11)
+            _, df_h5 = GSSFilter(non_h5_params, mode="h5_exact").run(N=300, seed=11)
         # On a non-(H5) model, imm_general should have strictly lower MSE.
         assert df_gen["sq_err"].mean() < df_h5["sq_err"].mean()

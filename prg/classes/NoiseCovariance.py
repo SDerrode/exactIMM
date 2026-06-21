@@ -200,6 +200,41 @@ class GSSNoiseCovariance:
         """Lower-right block, shape (s, s): covariance of noise on Y."""
         return self._Sigma_V[k]
 
+    # ------------------------------------------------------------------
+    # Closed-form regime-conditional moments (AB / NGH-MSM family)
+    # ------------------------------------------------------------------
+
+    def M(self, k: int) -> np.ndarray:
+        """
+        Closed-form regime-conditional gain ``M_k = Δ_k Σ_V_k⁻¹``, shape (q, s).
+
+        Under the AB constraint that defines the NGH-MSM family
+        (``A_k = Δ_k Σ_V_k⁻¹ C_k``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``), the hidden
+        state is, conditionally on the regime, an affine function of the
+        *current* observation:
+
+            E[X_n | r_n = k, y_n] = M_k y_n     (constant in n).
+
+        Σ_V(k) is symmetric positive definite (guaranteed at construction
+        via the SPD check on Σ_W(k)), so the solve is well posed.
+        """
+        # solve(Σ_V, Δ^T) = Σ_V⁻¹ Δ^T  (s × q); transpose → Δ Σ_V⁻¹  (Σ_V symmetric)
+        return np.linalg.solve(self._Sigma_V[k], self._Delta[k].T).T
+
+    def Gamma(self, k: int) -> np.ndarray:
+        """
+        Closed-form regime-conditional covariance ``Γ_k`` (Schur complement),
+        shape (q, q):
+
+            Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T.
+
+        Under the AB constraint, ``Cov[X_n | r_n = k, y_n] = Γ_k`` (constant
+        in n).  ``Γ_k ⪰ 0`` since the joint noise covariance Σ_W(k) is SPD.
+        """
+        return self._Sigma_U[k] - self._Delta[k] @ np.linalg.solve(
+            self._Sigma_V[k], self._Delta[k].T
+        )
+
     def chol_W(self, k: int) -> np.ndarray:
         """
         Cached lower-triangular Cholesky factor L_k such that

@@ -59,15 +59,10 @@ PRESETS: list[PresetEntry] = [
         q=1,
         s=2,
     ),
-    PresetEntry(
-        label="K=2, q=2, s=1 — Slow / Fast",
-        tooltip="2 regimes (slow / fast), 2 hidden variables, 1 observed.",
-        module_name="model_gss_K2_q2_s1",
-        class_name="ModelGss_K2_q2_s1",
-        K=2,
-        q=2,
-        s=1,
-    ),
+    # NOTE: the K=2, q=2, s=1 model is intentionally NOT offered as a preset.
+    # With s = 1 < q = 2, C cannot have full column rank q, so it is not a valid
+    # NGH-MSM (the corrected CNS of Prop. 2 fails). The file
+    # model_gss_K2_q2_s1.py is kept only as a test fixture for that invalid case.
     PresetEntry(
         label="K=2, q=2, s=2 — Stable / Active",
         tooltip="2 regimes (stable / active), 2 hidden variables, 2 observed.",

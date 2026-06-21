@@ -15,9 +15,11 @@ Matrice de transition (diagonale dominante — peu de transitions)
   P = [[0.95, 0.05],
        [0.05, 0.95]]
 
-Stabilité (|λ(F(k))| < 1) et SPD de Σ_W(k) vérifiées numériquement :
-  k=0 : max|λ(F)| = 0.782   min λ(Σ_W) = 0.120
-  k=1 : max|λ(F)| = 0.581   min λ(Σ_W) = 0.300
+A_k, B_k sont dérivés de (C, D, Δ, Σ_V) via la contrainte AB
+(A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) dans get_params() — (H5) par construction.
+C_k est de rang colonne plein (rang 2 = q) ; D_k inversible ; Σ_W(k) SPD :
+  k=0 : max|λ(F)| = 0.608   min λ(Σ_W) ≈ 0.12
+  k=1 : max|λ(F)| = 0.481   min λ(Σ_W) ≈ 0.30
 
 Conditions initiales : pi0=None (stationnaire), Z_0 ~ N(0, I_4).
 """
@@ -44,18 +46,9 @@ class ModelGss_K2_q2_s2(BaseGSSModel):
 
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
     #   A_k : (2,2)   B_k : (2,2)   C_k : (2,2)   D_k : (2,2)
-    A_list: list[np.ndarray] = [
-        np.array([[0.75, 0.05],   # k=0 : λ = 0.75 / 0.70
-                  [0.00, 0.70]]),
-        np.array([[0.50, 0.05],   # k=1 : λ = 0.50 / 0.45
-                  [0.00, 0.45]]),
-    ]
-    B_list: list[np.ndarray] = [
-        np.array([[0.04, 0.02],   # k=0 : faible couplage Y→X
-                  [0.02, 0.03]]),
-        np.array([[0.05, 0.03],   # k=1
-                  [0.03, 0.04]]),
-    ]
+    # A_k, B_k are derived from (C, D, Δ, Σ_V) in get_params() via the AB
+    # constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) — (H5) holds by construction.
+    # C_k must be full column rank (rank 2 = q); both blocks below are.
     C_list: list[np.ndarray] = [
         np.array([[0.08, 0.06],   # k=0 : faible couplage X→Y
                   [0.04, 0.10]]),
@@ -111,9 +104,12 @@ class ModelGss_K2_q2_s2(BaseGSSModel):
     # ------------------------------------------------------------------
 
     def get_params(self) -> dict:
+        A_list, B_list = self._ab_constraint(
+            self.C_list, self.D_list, self.Delta_list, self.Sigma_V_list
+        )
         return {
             "K": self.K, "q": self.q, "s": self.s, "P": self.P,
-            "A_list": self.A_list, "B_list": self.B_list,
+            "A_list": A_list, "B_list": B_list,
             "C_list": self.C_list, "D_list": self.D_list,
             "Sigma_U_list": self.Sigma_U_list,
             "Delta_list": self.Delta_list,

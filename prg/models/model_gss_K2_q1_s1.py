@@ -29,10 +29,9 @@ class ModelGssK2Q1S1(BaseGSSModel):
           [0.02, 0.98]])
 
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
-    A_list: list[np.ndarray] = [np.array([[0.8]]),
-     np.array([[0.5]])]
-    B_list: list[np.ndarray] = [np.array([[0.1]]),
-     np.array([[0.3]])]
+    # A_k, B_k are not stored: they are derived from (C, D, Δ, Σ_V) in
+    # get_params() via the AB constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D),
+    # so the model satisfies (H5) — Markovianity of (R, Y) — by construction.
     C_list: list[np.ndarray] = [np.array([[0.2]]),
      np.array([[0.1]])]
     D_list: list[np.ndarray] = [np.array([[0.7]]),
@@ -57,17 +56,18 @@ class ModelGssK2Q1S1(BaseGSSModel):
           [0, 1]]),
      np.array([[1, 0],
           [0, 1]])]
-    b_list: list[np.ndarray] = [np.array([[1],
-          [2]]),
-     np.array([[-2],
-          [-1]])]
+    # Drift bias b(k) = 0: the reference NGH-MSM is zero-mean (paper convention).
+    b_list: list[np.ndarray] = [np.zeros((2, 1)), np.zeros((2, 1))]
 
     # ------------------------------------------------------------------
 
     def get_params(self) -> dict:
+        A_list, B_list = self._ab_constraint(
+            self.C_list, self.D_list, self.Delta_list, self.Sigma_V_list
+        )
         return {
             "K": self.K, "q": self.q, "s": self.s, "P": self.P,
-            "A_list": self.A_list, "B_list": self.B_list,
+            "A_list": A_list, "B_list": B_list,
             "C_list": self.C_list, "D_list": self.D_list,
             "Sigma_U_list": self.Sigma_U_list,
             "Delta_list": self.Delta_list,

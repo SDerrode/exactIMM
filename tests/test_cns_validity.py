@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""
+tests/test_cns_validity.py
+==========================
+Guard tests for the corrected NGH-MSM condition (Proposition 2) and the
+closed-form regime-conditional moments.
+
+Coverage
+--------
+- Every GUI preset is a *valid* NGH-MSM (AB constraint + s ≥ q, rank(C) = q,
+  D invertible, Σ_V ≻ 0, Γ ⪰ 0).  This would fail on the pre-fix presets,
+  which all violated the AB constraint — it is the regression guard for P0.
+- The retired s < q model is correctly rejected.
+- ``NoiseCovariance.M`` / ``Gamma`` match the closed forms, and under AB
+  ``A = M C``, ``B = M D``.
+- ``validate_ngh_msm`` / ``GSSParams.check_ngh_msm`` flag each violated
+  condition (AB residual, singular D, s < q).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from prg.classes.FMatrix import FMatrix
+from prg.classes.GSSParams import GSSParams
+from prg.classes.NoiseCovariance import GSSNoiseCovariance
+from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
+from prg.models.model_gss_K2_q2_s1 import ModelGss_K2_q2_s1
+from prg.models.presets import PRESETS
+from prg.utils.exceptions import ParamError
+from prg.utils.h5_constraint import compute_AB, is_ngh_msm, validate_ngh_msm
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def _params(A, B, C, D, SU, Dt, SV, *, K=2, q=1, s=1):
+    """Build a GSSParams from explicit block lists (zero mean, Z0 ~ N(0, I))."""
+    dim = q + s
+    fm = FMatrix(K=K, q=q, s=s, A_list=A, B_list=B, C_list=C, D_list=D)
+    nc = GSSNoiseCovariance(K=K, q=q, s=s, Sigma_U_list=SU, Delta_list=Dt, Sigma_V_list=SV)
+    return GSSParams(
+        K=K,
+        q=q,
+        s=s,
+        P=np.full((K, K), 1.0 / K),
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
+        mu_z0_list=[np.zeros((dim, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(dim) for _ in range(K)],
+    )
+
+
+def _valid_ab_params():
+    """A small, valid AB / NGH-MSM model (K=2, q=1, s=1)."""
+    C = [np.array([[0.2]]), np.array([[0.1]])]
+    D = [np.array([[0.7]]), np.array([[0.6]])]
+    SU = [np.array([[0.1]]), np.array([[0.2]])]
+    Dt = [np.array([[0.05]]), np.array([[0.02]])]
+    SV = [np.array([[0.1]]), np.array([[0.15]])]
+    A, B = [], []
+    for k in range(2):
+        Ak, Bk = compute_AB(C[k], D[k], Dt[k], SV[k])
+        A.append(Ak)
+        B.append(Bk)
+    return _params(A, B, C, D, SU, Dt, SV)
+
+
+# ---------------------------------------------------------------------------
+# Presets are valid NGH-MSM (regression guard for P0)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("entry", PRESETS, ids=lambda e: e.module_name)
+def test_preset_is_valid_ngh_msm(entry):
+    params = GSSParams.from_model(entry.load())
+    issues = validate_ngh_msm(params)
+    assert issues == [], f"{entry.module_name} violates the CNS:\n  - " + "\n  - ".join(issues)
+
+
+@pytest.mark.parametrize("entry", PRESETS, ids=lambda e: e.module_name)
+def test_preset_satisfies_s_ge_q(entry):
+    assert entry.s >= entry.q, f"{entry.module_name} has s={entry.s} < q={entry.q}"
+
+
+def test_retired_s_lt_q_model_is_rejected():
+    params = GSSParams.from_model(ModelGss_K2_q2_s1())
+    issues = validate_ngh_msm(params)
+    assert any("s = 1 < q = 2" in m for m in issues)
+    assert any("rank(C)" in m for m in issues)
+    assert not is_ngh_msm(params)
+
+
+# ---------------------------------------------------------------------------
+# Closed-form regime moments M_k, Γ_k
+# ---------------------------------------------------------------------------
+def test_M_Gamma_closed_form_and_AB_identities():
+    params = GSSParams.from_model(ModelGssK2Q1S1())
+    nc = params.noise_cov
+    fm = params.f_matrix
+    for k in range(params.K):
+        SV = nc.Sigma_V(k)
+        Dt = nc.Delta(k)
+        SU = nc.Sigma_U(k)
+        SV_inv = np.linalg.inv(SV)
+        # M_k = Δ_k Σ_V_k⁻¹  ;  Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T
+        np.testing.assert_allclose(nc.M(k), Dt @ SV_inv, rtol=1e-10, atol=1e-12)
+        np.testing.assert_allclose(nc.Gamma(k), SU - Dt @ SV_inv @ Dt.T, rtol=1e-10, atol=1e-12)
+        # Γ_k symmetric and PSD (Schur complement of an SPD Σ_W)
+        np.testing.assert_allclose(nc.Gamma(k), nc.Gamma(k).T, atol=1e-12)
+        assert np.linalg.eigvalsh(nc.Gamma(k))[0] > -1e-12
+        # Under AB: A_k = M_k C_k, B_k = M_k D_k
+        np.testing.assert_allclose(fm.A(k), nc.M(k) @ fm.C(k), rtol=1e-10, atol=1e-12)
+        np.testing.assert_allclose(fm.B(k), nc.M(k) @ fm.D(k), rtol=1e-10, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# validate_ngh_msm flags each violated condition
+# ---------------------------------------------------------------------------
+def test_valid_model_has_no_issues():
+    params = _valid_ab_params()
+    assert validate_ngh_msm(params) == []
+    assert is_ngh_msm(params)
+    assert params.check_ngh_msm() == []  # raise_on_fail=True must not raise
+
+
+def test_non_ab_model_is_flagged():
+    p = _valid_ab_params()
+    # Perturb A(0) off the AB manifold (stays stable: 0.x + 0.3 < 1).
+    A = [p.f_matrix.A(k).copy() for k in range(p.K)]
+    A[0] = A[0] + 0.3
+    broken = _params(
+        A,
+        [p.f_matrix.B(k) for k in range(p.K)],
+        [p.f_matrix.C(k) for k in range(p.K)],
+        [p.f_matrix.D(k) for k in range(p.K)],
+        [p.noise_cov.Sigma_U(k) for k in range(p.K)],
+        [p.noise_cov.Delta(k) for k in range(p.K)],
+        [p.noise_cov.Sigma_V(k) for k in range(p.K)],
+    )
+    issues = validate_ngh_msm(broken)
+    assert any("AB / (H5) constraint violated" in m for m in issues)
+
+
+def test_singular_D_is_flagged():
+    # Valid AB blocks but D(0) singular → D-invertibility violated.
+    C = [np.array([[0.2]]), np.array([[0.1]])]
+    D = [np.array([[0.0]]), np.array([[0.6]])]  # D(0) singular
+    SU = [np.array([[0.1]]), np.array([[0.2]])]
+    Dt = [np.array([[0.05]]), np.array([[0.02]])]
+    SV = [np.array([[0.1]]), np.array([[0.15]])]
+    A, B = [], []
+    for k in range(2):
+        Ak, Bk = compute_AB(C[k], D[k], Dt[k], SV[k])
+        A.append(Ak)
+        B.append(Bk)
+    params = _params(A, B, C, D, SU, Dt, SV)
+    issues = validate_ngh_msm(params)
+    assert any("D is singular" in m for m in issues)
+
+
+def test_check_ngh_msm_raises_on_invalid():
+    params = GSSParams.from_model(ModelGss_K2_q2_s1())
+    with pytest.raises(ParamError, match="not a valid NGH-MSM"):
+        params.check_ngh_msm(raise_on_fail=True)
+    # raise_on_fail=False returns the issue list instead
+    assert params.check_ngh_msm(raise_on_fail=False)

@@ -15,9 +15,12 @@ Matrice de transition (diagonale dominante — peu de transitions)
   P = [[0.95, 0.05],
        [0.05, 0.95]]
 
-Stabilité (|λ(F(k))| < 1) et SPD de Σ_W(k) vérifiées numériquement :
-  k=0 : max|λ(F)| = 0.862   min λ(Σ_W) = 0.170
-  k=1 : max|λ(F)| = 0.575   min λ(Σ_W) = 0.310
+A_k, B_k sont dérivés de (C, D, Δ, Σ_V) via la contrainte AB
+(A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) dans get_params(), de sorte que le modèle
+vérifie (H5) par construction. La stabilité (|λ(F(k))| < 1) est gouvernée par D
+(contractif) ; Σ_W(k) est SPD :
+  k=0 : max|λ(F)| = 0.618   min λ(Σ_W) ≈ 0.17
+  k=1 : max|λ(F)| = 0.449   min λ(Σ_W) ≈ 0.31
 
 Conditions initiales : pi0=None (stationnaire), Z_0 ~ N(0, I_3).
 """
@@ -44,14 +47,8 @@ class ModelGss_K2_q1_s2(BaseGSSModel):
 
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
     #   A_k : (1,1)   B_k : (1,2)   C_k : (2,1)   D_k : (2,2)
-    A_list: list[np.ndarray] = [
-        np.array([[0.80]]),              # k=0 : mémoire longue
-        np.array([[0.45]]),              # k=1 : dynamique rapide
-    ]
-    B_list: list[np.ndarray] = [
-        np.array([[0.06, 0.04]]),        # k=0 : faible couplage Y→X
-        np.array([[0.08, 0.06]]),        # k=1
-    ]
+    # A_k, B_k are derived from (C, D, Δ, Σ_V) in get_params() via the AB
+    # constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) — (H5) holds by construction.
     C_list: list[np.ndarray] = [
         np.array([[0.20],                # k=0 : X observe les deux Y
                   [0.15]]),
@@ -103,9 +100,12 @@ class ModelGss_K2_q1_s2(BaseGSSModel):
     # ------------------------------------------------------------------
 
     def get_params(self) -> dict:
+        A_list, B_list = self._ab_constraint(
+            self.C_list, self.D_list, self.Delta_list, self.Sigma_V_list
+        )
         return {
             "K": self.K, "q": self.q, "s": self.s, "P": self.P,
-            "A_list": self.A_list, "B_list": self.B_list,
+            "A_list": A_list, "B_list": B_list,
             "C_list": self.C_list, "D_list": self.D_list,
             "Sigma_U_list": self.Sigma_U_list,
             "Delta_list": self.Delta_list,

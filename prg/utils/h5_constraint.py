@@ -57,12 +57,20 @@ if TYPE_CHECKING:
     from prg.classes.GSSParams import GSSParams
 
 __all__ = [
+    "NGH_MSM_RESID_TOL",
     "apply_AB_constraint",
     "compute_AB",
     "compute_h5_pair_residual",
     "compute_h5_residual",
     "h5_residual_max",
+    "is_ngh_msm",
+    "validate_ngh_msm",
 ]
+
+# Default tolerance on the *relative* pairwise (H5) residual used by
+# validate_ngh_msm / is_ngh_msm. Mirrors GSSFilter.H5_TOL so that a model
+# accepted here is also accepted (no warning) by mode="h5_exact".
+NGH_MSM_RESID_TOL = 1e-6
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +244,107 @@ def h5_residual_max(
                 worst = r
                 arg = (j, k)
     return worst, arg
+
+
+# ---------------------------------------------------------------------------
+# NGH-MSM validity (the corrected CNS of Proposition 2)
+# ---------------------------------------------------------------------------
+def _min_eig_sym(M: np.ndarray) -> float:
+    """Smallest eigenvalue of the symmetric part of M (real, finite or -inf)."""
+    Msym = 0.5 * (M + M.T)
+    try:
+        return float(np.linalg.eigvalsh(Msym)[0])
+    except np.linalg.LinAlgError:
+        return float("-inf")
+
+
+def validate_ngh_msm(
+    params: GSSParams,
+    *,
+    tol: float = NGH_MSM_RESID_TOL,
+    cond_max: float = 1e12,
+) -> list[str]:
+    """List the ways ``params`` violates the corrected NGH-MSM condition (Prop. 2).
+
+    Returns an empty list iff ``params`` is a valid NGH-MSM: a model of the AB
+    family whose structural hypotheses all hold. Each non-empty entry is a
+    human-readable description of one violated condition. Nothing is raised — the
+    caller decides what to do (cf. :meth:`GSSParams.check_ngh_msm`).
+
+    Conditions checked (per the corrected Proposition 2)
+    ----------------------------------------------------
+    1. ``s ≥ q``                         — necessary for ``C`` to have full
+       column rank ``q``;
+    2. ``rank(C_k) = q``      ∀ k        — ``C_k`` full column rank;
+    3. ``D_k`` invertible     ∀ k        — ``cond(D_k) ≤ cond_max``;
+    4. ``Σ_V_k ≻ 0``          ∀ k        — symmetric positive definite;
+    5. ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T ⪰ 0`` ∀ k — the Schur complement is a
+       genuine covariance (⇔ the joint noise covariance Σ_W(k) is PSD);
+    6. AB / (H5) constraint   — ``max`` relative pairwise residual ``≤ tol``,
+       i.e. ``A_k = Δ_k Σ_V_k⁻¹ C_k`` and ``B_k = Δ_k Σ_V_k⁻¹ D_k`` (up to tol).
+
+    Conditions (1)–(6) are exactly what makes the exact fast filter of
+    Proposition 4 (closed form ``M_k = Δ_k Σ_V_k⁻¹``, ``Γ_k`` constant in n)
+    applicable. They are *not* imposed at ``GSSParams`` construction, because the
+    same class also serves non-(H5) models handled by ``mode="imm_general"``.
+    """
+    issues: list[str] = []
+    K, q, s = params.K, params.q, params.s
+
+    if s < q:
+        issues.append(f"s = {s} < q = {q}: C cannot have full column rank q (need s ≥ q).")
+
+    for k in range(K):
+        C = params.f_matrix.C(k)
+        D = params.f_matrix.D(k)
+        SU = params.noise_cov.Sigma_U(k)
+        Dt = params.noise_cov.Delta(k)
+        SV = params.noise_cov.Sigma_V(k)
+
+        rank_C = int(np.linalg.matrix_rank(C))
+        if rank_C < q:
+            issues.append(f"regime {k}: rank(C) = {rank_C} < q = {q} (C not full column rank).")
+
+        cond_D = float(np.linalg.cond(D))
+        if not np.isfinite(cond_D) or cond_D > cond_max:
+            issues.append(f"regime {k}: D is singular / ill-conditioned (cond = {cond_D:.3e}).")
+
+        ev_SV = _min_eig_sym(SV)
+        if ev_SV <= 0.0:
+            issues.append(f"regime {k}: Σ_V is not positive definite (min eig = {ev_SV:.3e}).")
+        else:
+            Gamma = SU - Dt @ np.linalg.solve(SV, Dt.T)
+            ev_G = _min_eig_sym(Gamma)
+            psd_tol = 1e-9 * max(1.0, float(np.linalg.norm(SU, "fro")))
+            if ev_G < -psd_tol:
+                issues.append(
+                    f"regime {k}: Γ = Σ_U − Δ Σ_V⁻¹ Δ^T is not PSD (min eig = {ev_G:.3e}); "
+                    f"the joint noise covariance Σ_W is not PSD."
+                )
+
+    try:
+        max_rel, (j, k) = h5_residual_max(params, relative=True)
+    except (np.linalg.LinAlgError, ValueError) as exc:  # pragma: no cover - defensive
+        issues.append(f"could not evaluate the (H5) residual: {exc}")
+    else:
+        if not np.isfinite(max_rel):
+            issues.append(
+                "(H5) residual is infinite (a regime pair has a singular "
+                "(Y_n, Y_{n+1}) covariance)."
+            )
+        elif max_rel > tol:
+            issues.append(
+                f"AB / (H5) constraint violated: max relative pairwise residual = "
+                f"{max_rel:.3e} > tol = {tol:.1e} (worst pair j={j}, k={k}). Enforce it "
+                f"with apply_AB_constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)."
+            )
+
+    return issues
+
+
+def is_ngh_msm(params: GSSParams, *, tol: float = NGH_MSM_RESID_TOL) -> bool:
+    """``True`` iff ``params`` is a valid NGH-MSM (cf. :func:`validate_ngh_msm`)."""
+    return not validate_ngh_msm(params, tol=tol)
 
 
 # ---------------------------------------------------------------------------

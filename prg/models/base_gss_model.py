@@ -80,6 +80,42 @@ class BaseGSSModel(ABC):
         """String identifier derived from the class name."""
         return self.__class__.MODEL_NAME  # type: ignore[attr-defined]
 
+    @staticmethod
+    def _ab_constraint(
+        C_list: list,
+        D_list: list,
+        Delta_list: list,
+        Sigma_V_list: list,
+    ) -> tuple[list, list]:
+        """
+        Closed-form AB blocks ``A_k = Δ_k Σ_V_k⁻¹ C_k``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``.
+
+        NGH-MSM presets declare only the *free* blocks (C, D, Δ, Σ_V) and call
+        this in ``get_params()`` so that A, B are **derived** — guaranteeing the
+        model satisfies the AB / (H5) constraint by construction (Proposition 2,
+        sufficiency), rather than relying on hand-entered A, B that may be
+        inconsistent with it. Mirrors ``prg/experiments/models_paper.py``.
+
+        Returns
+        -------
+        (A_list, B_list) : tuple of two lists of K arrays.
+        """
+        import numpy as np
+
+        from prg.utils.h5_constraint import compute_AB
+
+        A_list, B_list = [], []
+        for C, D, Dt, SV in zip(C_list, D_list, Delta_list, Sigma_V_list, strict=True):
+            A, B = compute_AB(
+                np.asarray(C, dtype=float),
+                np.asarray(D, dtype=float),
+                np.asarray(Dt, dtype=float),
+                np.asarray(SV, dtype=float),
+            )
+            A_list.append(A)
+            B_list.append(B)
+        return A_list, B_list
+
     @abstractmethod
     def get_params(self) -> dict:
         """

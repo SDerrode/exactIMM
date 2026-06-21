@@ -397,6 +397,62 @@ class GSSParams:
         return self._chol_z0[k]
 
     # ------------------------------------------------------------------
+    # NGH-MSM validity (corrected CNS of Proposition 2)
+    # ------------------------------------------------------------------
+
+    def check_ngh_msm(
+        self,
+        *,
+        tol: float = 1e-6,
+        raise_on_fail: bool = True,
+    ) -> list[str]:
+        """
+        Validate that this model is a valid NGH-MSM (corrected CNS, Prop. 2).
+
+        Checks the AB / (H5) constraint together with the structural
+        hypotheses (s ≥ q, rank(C_k) = q, D_k invertible, Σ_V_k ≻ 0,
+        Γ_k ⪰ 0). See :func:`prg.utils.h5_constraint.validate_ngh_msm`.
+
+        Parameters
+        ----------
+        tol : float
+            Tolerance on the relative pairwise (H5) residual.
+        raise_on_fail : bool
+            If True (default) and the model violates at least one condition,
+            raise :class:`~prg.utils.exceptions.ParamError`. If False, the
+            list of issues is returned for the caller to handle (e.g. GUI).
+
+        Returns
+        -------
+        list[str]
+            Empty iff the model is a valid NGH-MSM; otherwise one string per
+            violated condition.
+
+        Raises
+        ------
+        ParamError
+            If ``raise_on_fail`` and the model is not a valid NGH-MSM.
+
+        Notes
+        -----
+        This validity is intentionally *not* enforced at construction: the same
+        class also represents non-(H5) models used by ``mode="imm_general"``.
+        """
+        from prg.utils.h5_constraint import validate_ngh_msm
+
+        issues = validate_ngh_msm(self, tol=tol)
+        if issues and raise_on_fail:
+            raise ParamError(
+                "Model is not a valid NGH-MSM (corrected CNS of Prop. 2):\n  - "
+                + "\n  - ".join(issues)
+            )
+        return issues
+
+    def is_ngh_msm(self, *, tol: float = 1e-6) -> bool:
+        """``True`` iff this model is a valid NGH-MSM (cf. :meth:`check_ngh_msm`)."""
+        return not self.check_ngh_msm(tol=tol, raise_on_fail=False)
+
+    # ------------------------------------------------------------------
     # Display
     # ------------------------------------------------------------------
 

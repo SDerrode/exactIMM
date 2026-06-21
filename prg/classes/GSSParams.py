@@ -24,7 +24,7 @@ from prg.classes.NoiseCovariance import GSSNoiseCovariance
 from prg.utils.exceptions import CovarianceError, ParamError
 from prg.utils.matrix_checks import CovarianceMatrix, StochasticMatrix
 
-__all__ = ["GSSParams"]
+__all__ = ["GSSParams", "NGHMSMParams"]
 
 
 class GSSParams:
@@ -463,7 +463,7 @@ class GSSParams:
             return np.array2string(M, formatter={"float_kind": lambda x: f"{x:8.4f}"})
 
         print("=" * 50)
-        print(f"GSSParams  (K={self._K}, q={self._q}, s={self._s})")
+        print(f"{type(self).__name__}  (K={self._K}, q={self._q}, s={self._s})")
         print("=" * 50)
         print(f"\nTransition matrix P:\n{fmt(self._P)}")
         print(f"\nInitial distribution pi0: {self._pi0}")
@@ -482,3 +482,172 @@ class GSSParams:
             f"<GSSParams(K={self._K}, q={self._q}, s={self._s}, "
             f"pi0={'stationary' if self._pi0 is None else 'given'})>"
         )
+
+
+class NGHMSMParams(GSSParams):
+    """
+    A :class:`GSSParams` restricted to the NGH-MSM (AB) family.
+
+    Holding an ``NGHMSMParams`` is a *type-level guarantee* that the model
+    satisfies the corrected CNS of Proposition 2: the AB constraint
+    ``A_k = Δ_k Σ_V_k⁻¹ C_k``, ``B_k = Δ_k Σ_V_k⁻¹ D_k`` together with the
+    structural hypotheses (s ≥ q, rank(C_k) = q, D_k invertible, Σ_V_k ≻ 0,
+    Γ_k ⪰ 0).  Such a model admits the exact fast filter (``mode="h5_exact"``).
+
+    Two ways to construct it:
+
+    * :meth:`from_free_blocks` — pass only the *free* blocks
+      (C, D, Σ_U, Δ, Σ_V); A, B are **derived** via the AB constraint, so a
+      non-AB instance is unrepresentable through this entry point.  This is the
+      recommended path for presets, the paper models, and the GUI.
+    * ``NGHMSMParams(...)`` — same signature as the base class (an already
+      assembled ``FMatrix`` carrying A, B); the CNS is **validated** and a
+      :class:`~prg.utils.exceptions.ParamError` is raised on any violation,
+      so hand-built blocks that are off the AB manifold are rejected.
+
+    Notes
+    -----
+    * The CNS / (H5) validity is independent of the drift bias ``b(k)``, which
+      is passed through unconstrained (beyond the base shape checks).
+    * Validity is intentionally *not* imposed on the base :class:`GSSParams`,
+      which also represents general (non-(H5)) models handled by
+      ``mode="imm_general"``.  ``NGHMSMParams`` is a *restriction* of the base
+      type (it adds guarantees, never changes behaviour), so it substitutes
+      for a ``GSSParams`` everywhere.
+    """
+
+    def __init__(
+        self,
+        K: int,
+        q: int,
+        s: int,
+        P: np.ndarray,
+        f_matrix: FMatrix,
+        noise_cov: GSSNoiseCovariance,
+        pi0: np.ndarray | None,
+        mu_z0_list: list[np.ndarray],
+        Sigma_z0_list: list[np.ndarray],
+        b_list: list[np.ndarray] | None = None,
+        *,
+        tol: float = 1e-6,
+    ) -> None:
+        super().__init__(K, q, s, P, f_matrix, noise_cov, pi0, mu_z0_list, Sigma_z0_list, b_list)
+        # Validate the corrected CNS; reuses all of validate_ngh_msm's logic.
+        from prg.utils.h5_constraint import validate_ngh_msm
+
+        issues = validate_ngh_msm(self, tol=tol)
+        if issues:
+            raise ParamError(
+                "NGHMSMParams requires a valid NGH-MSM (corrected CNS of Prop. 2):\n  - "
+                + "\n  - ".join(issues)
+            )
+
+    # ------------------------------------------------------------------
+    # Factories
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_free_blocks(
+        cls,
+        K: int,
+        q: int,
+        s: int,
+        P: np.ndarray,
+        C_list: list[np.ndarray],
+        D_list: list[np.ndarray],
+        Sigma_U_list: list[np.ndarray],
+        Delta_list: list[np.ndarray],
+        Sigma_V_list: list[np.ndarray],
+        pi0: np.ndarray | None,
+        mu_z0_list: list[np.ndarray],
+        Sigma_z0_list: list[np.ndarray],
+        b_list: list[np.ndarray] | None = None,
+        *,
+        tol: float = 1e-6,
+    ) -> NGHMSMParams:
+        """
+        Build an NGH-MSM from its *free* blocks, **deriving** A, B.
+
+        ``A_k, B_k`` are computed as ``Δ_k Σ_V_k⁻¹ C_k`` and ``Δ_k Σ_V_k⁻¹ D_k``
+        (``compute_AB``), so the AB constraint holds by construction — a non-AB
+        model is unrepresentable through this path.  The remaining structural
+        conditions (s ≥ q, rank(C_k) = q, D_k invertible, Σ_V_k ≻ 0, Γ_k ⪰ 0)
+        are checked by ``__init__`` and raise :class:`ParamError` if violated.
+        """
+        from prg.classes.FMatrix import FMatrix as _FMatrix
+        from prg.classes.NoiseCovariance import GSSNoiseCovariance as _NoiseCov
+        from prg.utils.h5_constraint import compute_AB
+
+        A_list, B_list = [], []
+        for C, D, Dt, SV in zip(C_list, D_list, Delta_list, Sigma_V_list, strict=True):
+            A, B = compute_AB(
+                np.asarray(C, dtype=float),
+                np.asarray(D, dtype=float),
+                np.asarray(Dt, dtype=float),
+                np.asarray(SV, dtype=float),
+            )
+            A_list.append(A)
+            B_list.append(B)
+        f_matrix = _FMatrix(
+            K=K, q=q, s=s, A_list=A_list, B_list=B_list, C_list=C_list, D_list=D_list
+        )
+        noise_cov = _NoiseCov(
+            K=K,
+            q=q,
+            s=s,
+            Sigma_U_list=Sigma_U_list,
+            Delta_list=Delta_list,
+            Sigma_V_list=Sigma_V_list,
+        )
+        return cls(
+            K=K,
+            q=q,
+            s=s,
+            P=P,
+            f_matrix=f_matrix,
+            noise_cov=noise_cov,
+            pi0=pi0,
+            mu_z0_list=mu_z0_list,
+            Sigma_z0_list=Sigma_z0_list,
+            b_list=b_list,
+            tol=tol,
+        )
+
+    @classmethod
+    def from_model(cls, model) -> NGHMSMParams:
+        """
+        Build a validated NGH-MSM from a model, **deriving** A, B from its free
+        blocks (any model-supplied A, B are ignored — for an NGH-MSM model they
+        are redundant with the derivation).
+        """
+        p = model.get_params()
+        return cls.from_free_blocks(
+            K=p["K"],
+            q=p["q"],
+            s=p["s"],
+            P=p["P"],
+            C_list=p["C_list"],
+            D_list=p["D_list"],
+            Sigma_U_list=p["Sigma_U_list"],
+            Delta_list=p["Delta_list"],
+            Sigma_V_list=p["Sigma_V_list"],
+            pi0=p["pi0"],
+            mu_z0_list=p["mu_z0_list"],
+            Sigma_z0_list=p["Sigma_z0_list"],
+            b_list=p.get("b_list", None),
+        )
+
+    # ------------------------------------------------------------------
+    # Closed-form regime-conditional moments (discoverable on the type)
+    # ------------------------------------------------------------------
+
+    def M(self, k: int) -> np.ndarray:
+        """Closed-form gain ``M_k = Δ_k Σ_V_k⁻¹`` (delegates to NoiseCovariance)."""
+        return self._noise_cov.M(k)
+
+    def Gamma(self, k: int) -> np.ndarray:
+        """Closed-form covariance ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T``."""
+        return self._noise_cov.Gamma(k)
+
+    def __repr__(self) -> str:
+        return f"<NGHMSMParams(K={self._K}, q={self._q}, s={self._s})>"

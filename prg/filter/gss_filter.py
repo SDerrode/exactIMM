@@ -212,7 +212,13 @@ class GSSFilter:
         self._mode = mode
 
         if mode == "h5_exact":
-            self._check_h5()
+            # An NGHMSMParams already guarantees the (H5) / CNS precondition by
+            # its type, so the residual recheck is redundant; only re-check
+            # (and possibly warn) when handed a base GSSParams.
+            from prg.classes.GSSParams import NGHMSMParams
+
+            if not isinstance(params, NGHMSMParams):
+                self._check_h5()
             self._precompute()  # calls _precompute_stationary() internally
         else:
             # imm_general: no (H5) pre-computation; joseph flag is ignored

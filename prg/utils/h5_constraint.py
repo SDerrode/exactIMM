@@ -419,16 +419,25 @@ def apply_AB_constraint(
     Returns
     -------
     GSSParams
-        A *new* object with updated A, B blocks.
+        A *new* object with updated A, B blocks. Because the result satisfies
+        the AB constraint by construction, it is returned as the stronger type
+        :class:`~prg.classes.GSSParams.NGHMSMParams` **when** the structural
+        CNS also holds (s ≥ q, rank(C_k) = q, D_k invertible, Σ_V_k ≻ 0,
+        Γ_k ⪰ 0). If a structural condition fails (e.g. a rank-deficient C or a
+        non-PSD Schur complement — the projected model then has no valid exact
+        filter), a base :class:`GSSParams` is returned and a warning is logged,
+        preserving the "project what you can" contract for CLI/script paths.
 
     Raises
     ------
     ValueError
-        If Σ_V(k) is singular for any k.
+        If Σ_V(k) is singular for any k (the AB blocks cannot be computed).
     """
     # Import here to avoid circular imports at module level
     from prg.classes.FMatrix import FMatrix
     from prg.classes.GSSParams import GSSParams as _GSSParams
+    from prg.classes.GSSParams import NGHMSMParams as _NGHMSMParams
+    from prg.utils.exceptions import ParamError as _ParamError
 
     log = logger or logging.getLogger("exactIMM.h5_constraint")
     K, q, s = params.K, params.q, params.s
@@ -472,7 +481,7 @@ def apply_AB_constraint(
         D_list=D_list,
     )
 
-    return _GSSParams(
+    kwargs = dict(
         K=K,
         q=q,
         s=s,
@@ -484,3 +493,16 @@ def apply_AB_constraint(
         Sigma_z0_list=[params.Sigma_z0(k) for k in range(K)],
         b_list=[params.b(k) for k in range(K)],
     )
+    # A, B are AB-correct by construction, so only the *structural* CNS can
+    # fail. Prefer the stronger NGHMSMParams type; if a structural condition is
+    # violated, fall back to a base GSSParams (warn, do not raise) so callers
+    # that "project what they can" (CLI/script --constraint) keep working.
+    try:
+        return _NGHMSMParams(**kwargs)
+    except _ParamError as exc:
+        log.warning(
+            "AB constraint applied, but the result is not a fully valid NGH-MSM "
+            "(%s); returning a base GSSParams.",
+            exc,
+        )
+        return _GSSParams(**kwargs)

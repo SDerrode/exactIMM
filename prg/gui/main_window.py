@@ -811,9 +811,46 @@ class GSSMainWindow(QMainWindow):
         self.statusBar().showMessage(f"Simulation error: {msg}", 8000)
         self._refresh_simulate_button()
 
+    def _h5_exact_blockers(self, params) -> list[str]:
+        """Reasons the selected mode would be inexact for ``params``.
+
+        Returns the list of NGH-MSM/CNS violations (from ``validate_ngh_msm``)
+        when the filter-mode combo is set to ``"h5_exact"`` and ``params`` is
+        not a valid NGH-MSM; otherwise an empty list. Pure logic (no UI), so it
+        is unit-testable independently of the warning dialog.
+        """
+        if params is None or self._mode_combo.currentData() != "h5_exact":
+            return []
+        from prg.utils.h5_constraint import validate_ngh_msm
+
+        return validate_ngh_msm(params)
+
     def _on_filter(self) -> None:
         if not self._state.can_filter():
             return
+
+        # CNS guard: 'exactIMM (H5 required)' is exact only on a valid NGH-MSM.
+        # If the user picked it for a model that violates (H5) / the structural
+        # CNS, surface the issues (the filter would otherwise only emit a
+        # RuntimeWarning the GUI swallows) and let them proceed or cancel.
+        blockers = self._h5_exact_blockers(self._state.params)
+        if blockers:
+            from PyQt6.QtWidgets import QMessageBox
+
+            detail = "\n".join(f"  • {m}" for m in blockers)
+            resp = QMessageBox.warning(
+                self,
+                "Model is not a valid NGH-MSM",
+                "The 'exactIMM (H5 required)' filter is exact only for a model that "
+                "satisfies (H5) and the structural conditions. The captured model "
+                f"violates:\n\n{detail}\n\nThe filter will be biased. Switch to "
+                "'Approximate IMM', or enforce the AB constraint on every regime.\n\n"
+                "Run the exact filter anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if resp != QMessageBox.StandardButton.Yes:
+                return
 
         _, _, _, ys, _ = self._state.data
 

@@ -151,6 +151,11 @@ class _StateTab(QWidget):
         self._h5_badge = QLabel()
         self._h5_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._h5_badge.setFixedHeight(16)
+        self._h5_badge.setToolTip(
+            "Per-regime (k,k) residual — a NECESSARY but not sufficient (H5) check.\n"
+            "Full (H5) is over all K² regime pairs and is verified on the complete\n"
+            "model when you Filter (the 'exactIMM (H5 required)' mode validates it)."
+        )
 
         f_col = QVBoxLayout()
         f_col.setSpacing(2)

@@ -180,6 +180,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "regime before filtering.",
     )
     parser.add_argument(
+        "--mode",
+        default=None,
+        choices=["imm_general", "h5_exact"],
+        help="Filter recursion variant. Omit to dispatch on the model: a model "
+        "satisfying (H5) — e.g. after --constraint — uses 'h5_exact' (exact "
+        "fast filter), any other model uses 'imm_general' (IMM approximation).",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         type=int,
@@ -244,7 +252,9 @@ def main() -> None:
     log.info("GSSParams OK: K=%d  q=%d  s=%d", params.K, params.q, params.s)
 
     # --- Build filter ---
-    filt = GSSFilter(params)
+    # mode=None lets GSSFilter dispatch on the params type (NGHMSMParams →
+    # h5_exact, base GSSParams → imm_general); --mode overrides explicitly.
+    filt = GSSFilter(params, mode=args.mode)
     log.info("GSSFilter ready: %s", filt)
 
     if args.no_save:

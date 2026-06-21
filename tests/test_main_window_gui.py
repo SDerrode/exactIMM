@@ -130,3 +130,25 @@ class TestMainWindow:
         win = GSSMainWindow(K=2, q=1, s=1, P=_P)
         qtbot.addWidget(win)
         assert win.windowTitle() != ""
+
+    def test_h5_exact_blockers_guard(self, qtbot):
+        """The h5_exact CNS guard fires only for non-(H5) models in h5_exact mode."""
+        from prg.classes.GSSParams import NGHMSMParams
+        from prg.models.model_gss_K2_q2_s1 import ModelGss_K2_q2_s1
+
+        win = GSSMainWindow(K=2, q=1, s=1, P=_P)
+        qtbot.addWidget(win)
+        valid = NGHMSMParams.from_model(ModelGssK2Q1S1())
+        invalid = GSSParams.from_model(ModelGss_K2_q2_s1())  # s<q → non-(H5)
+
+        # imm_general selected → never blocks, whatever the model.
+        win._mode_combo.setCurrentIndex(win._mode_combo.findData("imm_general"))
+        assert win._h5_exact_blockers(valid) == []
+        assert win._h5_exact_blockers(invalid) == []
+        assert win._h5_exact_blockers(None) == []
+
+        # h5_exact selected → valid passes, invalid lists CNS issues.
+        win._mode_combo.setCurrentIndex(win._mode_combo.findData("h5_exact"))
+        assert win._h5_exact_blockers(valid) == []
+        issues = win._h5_exact_blockers(invalid)
+        assert issues and any("s = 1 < q = 2" in m for m in issues)

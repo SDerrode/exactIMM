@@ -24,7 +24,9 @@ import pytest
 
 from prg.classes.FMatrix import FMatrix
 from prg.classes.GSSParams import GSSParams, NGHMSMParams
+from prg.classes.GSSSimulator import GSSSimulator
 from prg.classes.NoiseCovariance import GSSNoiseCovariance
+from prg.filter.gss_filter import GSSFilter
 from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
 from prg.models.model_gss_K2_q2_s1 import ModelGss_K2_q2_s1
 from prg.models.presets import PRESETS
@@ -286,3 +288,51 @@ class TestNGHMSMParams:
         out = apply_AB_constraint(base)
         assert isinstance(out, GSSParams)
         assert not isinstance(out, NGHMSMParams)
+
+
+# ---------------------------------------------------------------------------
+# Closed-form filter (Prop. 4 is redundant) and the regime-conditional law
+# ---------------------------------------------------------------------------
+class TestClosedFormFilter:
+    def test_h5_exact_gain_equals_M_and_Gamma(self):
+        """Under AB, the h5_exact gain/posterior are exactly M_k and Γ_k."""
+        p = NGHMSMParams.from_model(ModelGssK2Q1S1())
+        filt = GSSFilter(p, mode="h5_exact")
+        for k in range(p.K):
+            np.testing.assert_allclose(filt._K_gain[k], p.M(k), atol=1e-12)
+            np.testing.assert_allclose(filt._P_post[k], p.Gamma(k), atol=1e-12)
+
+    def test_derived_gain_also_converges_to_closed_form(self):
+        """The general fixed-point derivation (base GSSParams) reaches the same
+        M_k / Γ_k — i.e. the Riccati/Prop.-4 machinery is redundant under AB."""
+        ref = NGHMSMParams.from_model(ModelGssK2Q1S1())
+        base = GSSParams.from_model(ModelGssK2Q1S1())  # AB-valid, but base type
+        filt = GSSFilter(base, mode="h5_exact")
+        for k in range(base.K):
+            np.testing.assert_allclose(filt._K_gain[k], ref.M(k), atol=1e-7)
+            np.testing.assert_allclose(filt._P_post[k], ref.Gamma(k), atol=1e-7)
+
+    def test_default_mode_dispatches_on_type(self):
+        nghmsm = NGHMSMParams.from_model(ModelGssK2Q1S1())
+        base = GSSParams.from_model(ModelGssK2Q1S1())
+        assert GSSFilter(nghmsm).mode == "h5_exact"
+        assert GSSFilter(base).mode == "imm_general"
+
+    def test_simulator_matches_regime_conditional_law(self):
+        """Empirically X_n | (r_n=k, y_n) = M_k y_n + ξ, Cov(ξ)=Γ_k (slaving)."""
+        p = NGHMSMParams.from_model(ModelGssK2Q1S1())
+        xs = {k: [] for k in range(p.K)}
+        ys = {k: [] for k in range(p.K)}
+        for n, r, x, y in GSSSimulator(p, N=40000, seed=0):
+            if n >= 2:  # slaving holds on transitions, not the arbitrary init
+                xs[r].append(x.ravel())
+                ys[r].append(y.ravel())
+        for k in range(p.K):
+            X = np.array(xs[k])  # (n_k, q)
+            Y = np.array(ys[k])  # (n_k, s)
+            # OLS through the origin (zero-mean): slope = (X^T Y)(Y^T Y)^-1 ≈ M_k
+            slope = (X.T @ Y) @ np.linalg.inv(Y.T @ Y)
+            np.testing.assert_allclose(slope, p.M(k), atol=0.03)
+            resid = X - Y @ slope.T
+            cov = resid.T @ resid / len(resid)
+            np.testing.assert_allclose(cov, p.Gamma(k), atol=0.03)

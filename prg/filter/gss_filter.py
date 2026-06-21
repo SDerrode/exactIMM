@@ -7,7 +7,7 @@ IMM-style optimal filter for the GSS model with two operating modes.
 Modes
 -----
 
-``mode="h5_exact"`` (default) — exact IMM recursion under hypothesis (H5)
+``mode="h5_exact"`` — exact IMM recursion under hypothesis (H5)
     Under (H5) the mode-conditional state posterior collapses on the
     current regime and observation alone:
 
@@ -61,6 +61,14 @@ Modes
     unconditional marginals of the paper.  The difference is negligible
     when the chain is near-stationary but can be significant in transient
     regimes.  For the exact (H5)-optimal filter use ``mode="h5_exact"``.
+
+Default mode (``mode=None``)
+---------------------------
+When ``mode`` is left ``None`` the filter dispatches on the *type* of
+``params``: a :class:`~prg.classes.GSSParams.NGHMSMParams` (a validated
+NGH-MSM, where (H5) holds by construction) defaults to ``"h5_exact"``;
+any other :class:`GSSParams` defaults to ``"imm_general"`` (safe for
+general, possibly non-(H5) models). Pass ``mode`` explicitly to override.
 
 Joseph form (optional, h5_exact only)
 -------------------------------------
@@ -169,10 +177,13 @@ class GSSFilter:
         posterior covariance uses the Joseph form (paper App. E) instead of
         the short form. Mathematically equivalent under stationarity;
         numerically more stable.
-    mode : {"imm_general", "h5_exact"}, default "imm_general"
-        Filter recursion variant.
+    mode : {"imm_general", "h5_exact"} or None, default None
+        Filter recursion variant. When ``None`` the mode dispatches on the
+        type of ``params``: a :class:`~prg.classes.GSSParams.NGHMSMParams`
+        (validated NGH-MSM) uses ``"h5_exact"``, any other ``GSSParams``
+        uses ``"imm_general"``. An explicit value always overrides.
 
-        * ``"imm_general"`` (default) — IMM recursion with per-step
+        * ``"imm_general"`` — IMM recursion with per-step
           moment propagation; no (H5) requirement. Matches
           ``exactIMM ≤ v0.9.0`` and is the correct choice for any GSS
           model, in particular those that do not satisfy (H5).
@@ -189,7 +200,7 @@ class GSSFilter:
     --------
     Step-by-step, (H5)-exact::
 
-        filt = GSSFilter(params)                    # default mode, short form
+        filt = GSSFilter(params)                    # default mode dispatches on type(params)
         for y in observations:
             res = filt.step(y)
 
@@ -203,8 +214,15 @@ class GSSFilter:
         self,
         params: GSSParams,
         joseph: bool = False,
-        mode: str = "imm_general",
+        mode: str | None = None,
     ) -> None:
+        from prg.classes.GSSParams import NGHMSMParams
+
+        # Default mode dispatches on type: a validated NGH-MSM uses the exact
+        # filter; a general GSSParams uses the IMM approximation (see module
+        # docstring). An explicit mode always overrides.
+        if mode is None:
+            mode = "h5_exact" if isinstance(params, NGHMSMParams) else "imm_general"
         if mode not in FILTER_MODES:
             raise ValueError(f"Unknown mode {mode!r}. Expected one of: {FILTER_MODES}.")
         self._p = params
@@ -215,8 +233,6 @@ class GSSFilter:
             # An NGHMSMParams already guarantees the (H5) / CNS precondition by
             # its type, so the residual recheck is redundant; only re-check
             # (and possibly warn) when handed a base GSSParams.
-            from prg.classes.GSSParams import NGHMSMParams
-
             if not isinstance(params, NGHMSMParams):
                 self._check_h5()
             self._precompute()  # calls _precompute_stationary() internally
@@ -414,6 +430,19 @@ class GSSFilter:
                 # Short form: P_post(k) = Σ_XX(k) - K_k Σ_YY(k) K_k^T
                 P_post_k = _psd_floor(_sym(self._S_XX[k] - Kg @ self._S_YY[k] @ Kg.T))
             self._P_post.append(P_post_k)
+
+        # Closed-form gain for a validated NGH-MSM. Under the AB constraint the
+        # regime-conditional posterior is *exactly* N(M_k y, Γ_k), constant in n
+        # and independent of the stationary Σ(k): K_k ≡ M_k = Δ_k Σ_V_k⁻¹ and
+        # P_post(k) ≡ Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T (Schur complement). The
+        # Riccati machinery of Proposition 4 is therefore redundant; using the
+        # closed forms makes the gain exact regardless of the fixed-point's
+        # convergence and needs no Joseph / PSD-floor stabilisation.
+        from prg.classes.GSSParams import NGHMSMParams
+
+        if isinstance(p, NGHMSMParams):
+            self._K_gain = [p.noise_cov.M(k) for k in range(K)]
+            self._P_post = [p.noise_cov.Gamma(k) for k in range(K)]
 
         # --- Pair-conditional regime-update constants ----------------------
         # For each (j, k):

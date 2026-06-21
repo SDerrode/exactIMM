@@ -1431,10 +1431,12 @@ class GSSMainWindow(QMainWindow):
             for k in range(K):
                 self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu_list[k], b_list[k])
 
-            # Re-apply any active AB constraint to the newly loaded
-            # parameter values.  The ParamPanel signals are still blocked here,
-            # so constraint_toggled cannot propagate to _on_reset.
-            self._param_panel.reapply_active_constraints()
+            # Align each regime's AB checkbox with the loaded data: lock the
+            # regimes whose A, B already satisfy the closed form, leave the
+            # others editable. This preserves a loaded general (non-AB) model
+            # instead of silently re-projecting it onto the AB manifold (which
+            # the now-default-on constraint + reapply_active_constraints would do).
+            self._param_panel.sync_constraints_to_data()
 
             self._P = P
             self._p_widget.set_matrix(self._P)

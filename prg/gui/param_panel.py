@@ -21,7 +21,9 @@ When checked, the A and B blocks of F(k) are read-only and are recomputed
 on every edit of (C(k), D(k), Δ(k), Σ_V(k)). When unchecked, the previous
 (saved) values of A and B are restored and the blocks become editable again.
 
-The constraint is unchecked by default on every newly built / loaded tab.
+The constraint is **checked by default** on every newly built tab, so a fresh
+model is a valid NGH-MSM out of the box (A, B derived, blocks greyed out).
+Uncheck it to edit A, B freely and explore general / non-(H5) models.
 
 Stability indicators
 --------------------
@@ -222,6 +224,13 @@ class _StateTab(QWidget):
         # Initialise the badges with the default matrix
         self._update_stability_badges()
 
+        # AB constraint ON by default: a fresh tab is a valid NGH-MSM (A, B are
+        # derived from C, D, Δ, Σ_V and the blocks are greyed out). Done last,
+        # after the widgets and the toggled→_on_AB_toggled connection exist, so
+        # the closed form is computed and the blocks are locked. No external
+        # listener is attached to constraint_toggled yet, so the emit is a no-op.
+        self._constraint_AB_check.setChecked(True)
+
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
@@ -366,6 +375,47 @@ class _StateTab(QWidget):
                 self._updating = False
         self._saved_A = None
         self._saved_B = None
+        self._update_stability_badges()
+
+    def sync_constraint_to_data(self, tol: float = 1e-8) -> None:
+        """Align the AB checkbox with the current data, **without altering A, B**.
+
+        After loading external parameters, set the constraint *active* iff the
+        loaded A, B already equal the closed form (Δ Σ_V⁻¹ C, Δ Σ_V⁻¹ D): a valid
+        NGH-MSM then stays locked, while a general (non-AB) model stays editable
+        with its A, B preserved. Unlike a normal toggle this never recomputes or
+        restores blocks — it only sets the checkbox and the read-only state — so
+        loaded data is never silently re-projected.
+        """
+        q, s = self._q, self._s
+        F = self._f_widget.get_matrix()
+        Sw = self._sigma_widget.get_matrix()
+        active = False
+        if F is not None and Sw is not None:
+            try:
+                A_cf, B_cf = compute_AB(C=F[q:, :q], D=F[q:, q:], Dt=Sw[:q, q:], SV=Sw[q:, q:])
+                active = bool(
+                    np.allclose(F[:q, :q], A_cf, atol=tol)
+                    and np.allclose(F[:q, q:], B_cf, atol=tol)
+                )
+            except ValueError:
+                active = False
+        blocked = self._constraint_AB_check.blockSignals(True)
+        self._constraint_AB_check.setChecked(active)
+        self._constraint_AB_check.blockSignals(blocked)
+        self._f_widget.set_block_editable(0, q, 0, q, not active)
+        self._f_widget.set_block_editable(0, q, q, q + s, not active)
+        if active and F is not None:
+            self._saved_A = F[:q, :q].copy()
+            self._saved_B = F[:q, q:].copy()
+            self._f_widget.set_constraint_status(
+                "✓  A, B satisfy the AB constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)",
+                _CONSTRAINT_OK_STYLE,
+            )
+        else:
+            self._saved_A = None
+            self._saved_B = None
+            self._f_widget.set_constraint_status("")
         self._update_stability_badges()
 
     # ------------------------------------------------------------------
@@ -665,6 +715,18 @@ class ParamPanel(QWidget):
         for tab in self._state_tabs:
             if tab.is_AB_constraint_active():
                 tab._recompute_AB()
+
+    def sync_constraints_to_data(self, tol: float = 1e-8) -> None:
+        """Align each tab's AB checkbox with its loaded data, without altering A, B.
+
+        Use this (rather than :meth:`reapply_active_constraints`) after loading
+        external parameters: it checks the box on regimes whose A, B already
+        satisfy the closed form and unchecks it elsewhere, so a loaded general
+        (non-AB) model is *preserved* rather than silently re-projected onto the
+        AB manifold. See :meth:`_StateTab.sync_constraint_to_data`.
+        """
+        for tab in self._state_tabs:
+            tab.sync_constraint_to_data(tol)
 
     # ------------------------------------------------------------------
     # Internal

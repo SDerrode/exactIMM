@@ -63,12 +63,12 @@ def _seed_model(tab, q: int, s: int) -> tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------
 # Default state
 # ---------------------------------------------------------------------------
-def test_AB_default_unchecked(qtbot):
-    """On a freshly built panel, the AB checkbox is unchecked on every tab."""
+def test_AB_active_by_default(qtbot):
+    """On a freshly built panel, the AB constraint is active (checked) on every tab."""
     panel = _build_panel(qtbot, K=3, q=2, s=2)
     for tab in panel._state_tabs:
-        assert tab.is_AB_constraint_active() is False
-        assert tab._constraint_AB_check.isChecked() is False
+        assert tab.is_AB_constraint_active() is True
+        assert tab._constraint_AB_check.isChecked() is True
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +79,7 @@ def test_toggle_AB_locks_blocks_and_writes_closed_form(qtbot):
     q, s = 2, 2
     panel = _build_panel(qtbot, K=2, q=q, s=s)
     tab = panel._state_tabs[0]
+    tab._constraint_AB_check.setChecked(False)  # AB is on by default; start from off
     F0, SW = _seed_model(tab, q, s)
 
     tab._constraint_AB_check.setChecked(True)
@@ -94,6 +95,7 @@ def test_toggle_AB_off_restores_previous_AB(qtbot):
     q, s = 2, 2
     panel = _build_panel(qtbot, K=2, q=q, s=s)
     tab = panel._state_tabs[0]
+    tab._constraint_AB_check.setChecked(False)  # AB is on by default; start from off
     F0, _ = _seed_model(tab, q, s)
     A0 = F0[:q, :q].copy()
     B0 = F0[:q, q:].copy()
@@ -153,6 +155,7 @@ def test_h5_badge_green_when_AB_active(qtbot):
     q, s = 2, 2
     panel = _build_panel(qtbot, K=2, q=q, s=s)
     tab = panel._state_tabs[0]
+    tab._constraint_AB_check.setChecked(False)  # AB is on by default; start from off
     _seed_model(tab, q, s)
     tab._constraint_AB_check.setChecked(True)
     text = tab._h5_badge.text()
@@ -164,6 +167,7 @@ def test_h5_badge_amber_for_generic_model(qtbot):
     q, s = 2, 2
     panel = _build_panel(qtbot, K=2, q=q, s=s)
     tab = panel._state_tabs[0]
+    tab._constraint_AB_check.setChecked(False)  # AB is on by default; uncheck to keep A,B generic
     F, SW = _seed_model(tab, q, s)
 
     # Sanity: the seeded model is generically non-(H5)-compatible.
@@ -191,6 +195,7 @@ def test_apply_AB_all_propagates_across_tabs(qtbot):
     panel = _build_panel(qtbot, K=3, q=q, s=s)
     for tab in panel._state_tabs:
         _seed_model(tab, q, s)
+        tab._constraint_AB_check.setChecked(False)  # AB is on by default; clear all first
 
     panel._tabs.setCurrentIndex(0)
     panel._state_tabs[0]._constraint_AB_check.setChecked(True)
@@ -204,3 +209,31 @@ def test_apply_AB_all_propagates_across_tabs(qtbot):
     # Now every tab has the AB constraint active.
     for tab in panel._state_tabs:
         assert tab.is_AB_constraint_active() is True
+
+
+# ---------------------------------------------------------------------------
+# Loading: sync constraint to data (do not re-project a loaded non-AB model)
+# ---------------------------------------------------------------------------
+def test_sync_constraint_to_data_preserves_loaded_model(qtbot):
+    """sync checks AB iff loaded A,B already match the closed form, and never
+    alters the loaded A, B (no silent re-projection onto the AB manifold)."""
+    q, s = 2, 2
+    panel = _build_panel(qtbot, K=2, q=q, s=s)
+    tab = panel._state_tabs[0]
+
+    # (1) Generic, non-AB model → sync leaves it unchecked and unchanged.
+    F, SW = _seed_model(tab, q, s)
+    tab.sync_constraint_to_data()
+    assert tab.is_AB_constraint_active() is False
+    np.testing.assert_allclose(tab.get_F(), F, atol=1e-12)
+
+    # (2) AB-valid model → sync checks it and keeps the (closed-form) A, B.
+    A_cf, B_cf = compute_AB(C=F[q:, :q], D=F[q:, q:], Dt=SW[:q, q:], SV=SW[q:, q:])
+    F_ab = F.copy()
+    F_ab[:q, :q] = A_cf
+    F_ab[:q, q:] = B_cf
+    tab.set_F(F_ab)
+    tab.sync_constraint_to_data()
+    assert tab.is_AB_constraint_active() is True
+    np.testing.assert_allclose(tab.get_F()[:q, :q], A_cf, atol=1e-12)
+    np.testing.assert_allclose(tab.get_F()[:q, q:], B_cf, atol=1e-12)

@@ -65,3 +65,26 @@ def test_oracle_beats_single_kalman():
     rmse_k = float(np.sqrt(np.mean((Ek - xs) ** 2)))
     assert rmse_o <= rmse_k + 1e-9
     assert Eo.shape == (300, params.q)
+
+
+def test_rank_deficient_model_is_valid_and_exact():
+    """E7: with a rank-deficient C (s < q, full column rank impossible), the model
+    is still a valid NGH-MSM and h5_exact still equals the exact Bayesian filter."""
+    from prg.experiments.study import rank_deficient_model
+    from prg.utils.h5_constraint import validate_ngh_msm
+
+    params = rank_deficient_model()
+    assert params.s < params.q  # under-observed: C cannot be full column rank
+    assert all(np.linalg.matrix_rank(params.f_matrix.C(k)) < params.q for k in range(params.K))
+    assert validate_ngh_msm(params) == []  # accepted by the relaxed (C≠0) gate
+
+    _, ys = _data(params, N=9, seed=11)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        filt = GSSFilter(params, mode="h5_exact")
+        ExH = np.array([filt.step(y.reshape(-1, 1)).E_x.ravel() for y in ys])
+        filt2 = GSSFilter(params, mode="h5_exact")
+        PiH = np.array([np.asarray(filt2.step(y.reshape(-1, 1)).pi).ravel() for y in ys])
+    ExE, _VarE, PiE = exact_mixture_filter(params, ys)
+    assert np.abs(ExH - ExE).max() < 1e-9
+    assert np.abs(PiH - PiE).max() < 1e-9

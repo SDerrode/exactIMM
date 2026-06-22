@@ -62,11 +62,12 @@ def _build(name: str) -> GSSParams:
     return with_stationary_init(_params_from_dict(get_params(name)))
 
 
-def contrasted_model(p_switch: float = 0.04) -> GSSParams:
+def contrasted_model(p_switch: float = 0.04, m: float = 0.8) -> GSSParams:
     """A K=2 'quiet / volatile' regime-switching model where the switching genuinely
     matters: the observation reveals the regime (very different Y-volatility/dynamics)
-    and the X–Y coupling flips sign across regimes (M_0=+0.8, M_1=-0.8), so a
-    regime-blind filter that averages the coupling estimates X≈0.
+    and the X–Y coupling flips sign across regimes (M_0=+m, M_1=-m, default m=0.8),
+    so a regime-blind filter that averages the coupling estimates X≈0. The coupling
+    magnitude m is the 'regime contrast' knob swept in E3'.
 
     Built from the free blocks (NGH-MSM valid by construction); stationary init.
     """
@@ -76,12 +77,56 @@ def contrasted_model(p_switch: float = 0.04) -> GSSParams:
 
     K, q, s = 2, 1, 1
     P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
-    M = [0.8, -0.8]
+    M = [m, -m]
     SV = [np.array([[0.05]]), np.array([[0.60]])]  # quiet vs volatile observation
     D = [np.array([[0.30]]), np.array([[0.85]])]  # fast vs persistent Y
     C = [np.array([[0.50]]), np.array([[0.50]])]
     SU = [np.array([[0.10]]), np.array([[0.70]])]
     Dt = [M[k] * SV[k] for k in range(K)]  # Δ = M Σ_V  ⇒  M_k = Δ_k Σ_V_k⁻¹
+    A_list, B_list = [], []
+    for k in range(K):
+        a, b = compute_AB(C[k], D[k], Dt[k], SV[k])
+        A_list.append(a)
+        B_list.append(b)
+    fm = FMatrix(K, q, s, A_list, B_list, C, D)
+    nc = GSSNoiseCovariance(K, q, s, SU, Dt, SV)
+    p = GSSParams(
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
+        mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
+    )
+    return with_stationary_init(p)
+
+
+def rank_deficient_model(p_switch: float = 0.05) -> GSSParams:
+    """A K=2, q=2, s=1 NGH-MSM with a *rank-deficient* observation map: each C_r is
+    a 1×2 matrix of rank 1 < q, so the two-dimensional hidden state is observed
+    through a single scalar at every step. Full column rank of C is NOT required
+    for the AB constraint to be the NSC (reformulated Prop. 2): the model is a
+    valid NGH-MSM and the fast exact filter stays exact on it (E7).
+
+    Built from the free blocks (A,B derived via the AB constraint); stationary init.
+    """
+    from prg.classes.FMatrix import FMatrix
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance
+    from prg.utils.h5_constraint import compute_AB
+
+    K, q, s = 2, 2, 1
+    P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
+    C = [np.array([[0.5, 0.2]]), np.array([[0.3, 0.6]])]  # 1×2, rank 1 < q = 2
+    D = [np.array([[0.5]]), np.array([[0.6]])]  # 1×1, invertible
+    SV = [np.array([[0.25]]), np.array([[0.60]])]  # 1×1, SPD
+    Dt = [np.array([[0.10], [0.03]]), np.array([[0.18], [0.10]])]  # Δ : 2×1
+    SU = [
+        np.array([[0.40, 0.05], [0.05, 0.30]]),
+        np.array([[0.70, 0.10], [0.10, 0.60]]),
+    ]
     A_list, B_list = [], []
     for k in range(K):
         a, b = compute_AB(C[k], D[k], Dt[k], SV[k])
@@ -306,6 +351,76 @@ def exp_value(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# E3' — Value vs the regime contrast (sweep)
+# ---------------------------------------------------------------------------
+def exp_value_sweep(outdir: Path) -> dict:
+    """E3' — when does modelling the switching pay off? Sweep the regime contrast,
+    i.e. the coupling magnitude m of the quiet/volatile model (M_0=+m, M_1=-m, the
+    observation volatilities held fixed). At m=0 the two regimes act identically on
+    X and the switching is irrelevant (Kalman = h5_exact = oracle); as m grows the
+    regime-blind Kalman filter must average +m and -m and degrades, while h5_exact
+    tracks the regime-aware oracle. The RMSE reduction over Kalman grows with m.
+    """
+    ms = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    N, seeds = 500, list(range(25))
+    rmse = {"single_kalman": [], "h5_exact": [], "oracle": []}
+    rstd = {"single_kalman": [], "h5_exact": [], "oracle": []}
+    for m in ms:
+        params = contrasted_model(m=m)
+        eh, ek, eo = [], [], []
+        for sd in seeds:
+            rs, xs, ys = _simulate(params, N, seed=300 + sd)
+            ExH, _, _ = _run(params, ys, "h5_exact")
+            ExK, _ = single_kalman_filter(params, ys)
+            ExO, _ = oracle_filter(params, rs, ys)
+            eh.append(_rmse(ExH, xs))
+            ek.append(_rmse(ExK, xs))
+            eo.append(_rmse(ExO, xs))
+        rmse["h5_exact"].append(float(np.mean(eh)))
+        rstd["h5_exact"].append(float(np.std(eh)))
+        rmse["single_kalman"].append(float(np.mean(ek)))
+        rstd["single_kalman"].append(float(np.std(ek)))
+        rmse["oracle"].append(float(np.mean(eo)))
+        rstd["oracle"].append(float(np.std(eo)))
+    gain = [
+        (rmse["single_kalman"][i] - rmse["h5_exact"][i]) / rmse["single_kalman"][i]
+        for i in range(len(ms))
+    ]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
+    ax1.errorbar(
+        ms, rmse["single_kalman"], yerr=rstd["single_kalman"], fmt="^-", color=_C["kal"],
+        capsize=2, label="single Kalman",
+    )
+    ax1.errorbar(
+        ms, rmse["h5_exact"], yerr=rstd["h5_exact"], fmt="o-", color=_C["h5"],
+        capsize=2, label="h5_exact (proposed)",
+    )
+    ax1.errorbar(
+        ms, rmse["oracle"], yerr=rstd["oracle"], fmt="s-", color=_C["oracle"],
+        capsize=2, label="oracle (regimes known)",
+    )
+    ax1.set_xlabel("regime contrast: coupling magnitude $m$  ($M_0={+}m,\\ M_1={-}m$)")
+    ax1.set_ylabel("state RMSE")
+    ax1.set_title("E3$'$a — RMSE vs regime contrast")
+    ax1.legend(fontsize=7)
+    ax2.plot(ms, [100 * g for g in gain], "o-", color=_C["h5"])
+    ax2.set_xlabel("coupling magnitude $m$")
+    ax2.set_ylabel("RMSE reduction over Kalman [%]")
+    ax2.set_title("E3$'$b — value grows with the contrast")
+    fig.savefig(outdir / "figures" / "e3plus_value_sweep.pdf")
+    plt.close(fig)
+    return {
+        "m": ms,
+        "rmse_mean": rmse,
+        "rmse_std": rstd,
+        "gain_over_kalman": gain,
+        "N": N,
+        "n_seeds": len(seeds),
+    }
+
+
+# ---------------------------------------------------------------------------
 # E4 — Multivariate showcase (M2)
 # ---------------------------------------------------------------------------
 def exp_multivariate(outdir: Path) -> dict:
@@ -476,6 +591,80 @@ def exp_robustness(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# E7 — Exact filtering with a rank-deficient observation map (s < q)
+# ---------------------------------------------------------------------------
+def exp_rank_deficient(outdir: Path) -> dict:
+    """E7 — the fast exact filter does not need C to have full column rank. On a
+    K=2, q=2, s=1 NGH-MSM (each C_r is 1×2, rank 1 < q), h5_exact still equals the
+    brute-force K^N Bayesian filter, and recovers *both* hidden components from the
+    single observation. This is the experimental face of dropping the rank
+    hypothesis (reformulated Prop. 2)."""
+    from prg.utils.h5_constraint import validate_ngh_msm
+
+    params = rank_deficient_model()
+    issues = validate_ngh_msm(params)  # [] ⇒ accepted by the relaxed (C≠0) gate
+    rank_C = [int(np.linalg.matrix_rank(params.f_matrix.C(k))) for k in range(params.K)]
+
+    # (a) exactness vs the brute-force K^N filter across N
+    Ns = [3, 4, 5, 6, 7, 8, 9, 10]
+    errsE, errsP = [], []
+    for N in Ns:
+        _, _, ys = _simulate(params, N, seed=11)
+        ExH, PiH, _ = _run(params, ys, "h5_exact")
+        ExE, _, PiE = exact_mixture_filter(params, ys)
+        errsE.append(float(np.abs(ExH - ExE).max()))
+        errsP.append(float(np.abs(PiH - PiE).max()))
+    worst = max(max(errsE), max(errsP))
+
+    # (b) one longer run: both hidden components recovered from the single scalar Y
+    N = 200
+    rs, xs, ys = _simulate(params, N, seed=4)
+    ExH, PiH, VarH = _run(params, ys, "h5_exact")
+
+    fig, (axA, ax0, ax1) = plt.subplots(
+        3, 1, figsize=(8.0, 6.4), gridspec_kw={"height_ratios": [2.4, 2.4, 2.4]}
+    )
+    axA.semilogy(Ns, errsE, "o-", color=_C["h5"], ms=4, label="$|\\Delta E[X|y]|$")
+    axA.semilogy(Ns, errsP, "s--", color=_C["imm"], ms=4, label="$|\\Delta p(r|y)|$")
+    axA.axhline(1e-10, color="grey", ls=":", lw=1)
+    axA.set_xlabel("sequence length $N$")
+    axA.set_ylabel("h5_exact vs exact")
+    axA.set_title(
+        f"E7a — exact despite rank-deficient $C$ "
+        f"($\\mathrm{{rank}}\\,C_r={rank_C}$, $q={params.q}>s={params.s}$)"
+    )
+    axA.legend(fontsize=7)
+    t = np.arange(N)
+    for i, ax in enumerate((ax0, ax1)):
+        sd = np.sqrt(np.clip(VarH[:, i, i], 0, None))
+        ax.fill_between(
+            t, ExH[:, i] - 2 * sd, ExH[:, i] + 2 * sd, color=_C["h5"], alpha=0.2,
+            label="h5_exact $\\pm 2\\sigma$",
+        )
+        ax.plot(t, xs[:, i], "k", lw=1, label="true $X$")
+        ax.plot(t, ExH[:, i], color=_C["h5"], lw=1.2, label="$E[X|y]$")
+        ax.set_ylabel(f"$X_{{{i + 1}}}$")
+        if i == 0:
+            ax.legend(fontsize=7, ncol=3, loc="upper right")
+    ax1.set_xlabel("time $n$")
+    fig.suptitle("E7 — two hidden states recovered exactly from one observation", y=0.995)
+    fig.savefig(outdir / "figures" / "e7_rank_deficient.pdf")
+    plt.close(fig)
+
+    return {
+        "q": params.q,
+        "s": params.s,
+        "rank_C": rank_C,
+        "validate_issues": issues,
+        "worst_exactness": worst,
+        "N_exact": Ns,
+        "max_dEx": errsE,
+        "max_dpi": errsP,
+        "rmse_h5": _rmse(ExH, xs),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 def main(outdir: str | Path) -> dict:
@@ -486,9 +675,11 @@ def main(outdir: str | Path) -> dict:
         ("E1_exactness", exp_exactness),
         ("E2_speed", exp_speed),
         ("E3_value", exp_value),
+        ("E3p_value_sweep", exp_value_sweep),
         ("E4_multivariate", exp_multivariate),
         ("E5_closed_form", exp_closed_form),
         ("E6_robustness", exp_robustness),
+        ("E7_rank_deficient", exp_rank_deficient),
     ]:
         print(f"running {key} …", flush=True)
         results[key] = fn(outdir)

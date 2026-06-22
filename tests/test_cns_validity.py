@@ -7,14 +7,15 @@ closed-form regime-conditional moments.
 
 Coverage
 --------
-- Every GUI preset is a *valid* NGH-MSM (AB constraint + s ≥ q, rank(C) = q,
-  D invertible, Σ_V ≻ 0, Γ ⪰ 0).  This would fail on the pre-fix presets,
-  which all violated the AB constraint — it is the regression guard for P0.
-- The retired s < q model is correctly rejected.
+- Every GUI preset is a *valid* NGH-MSM (AB constraint + C ≠ 0, D invertible,
+  Σ_V ≻ 0, Γ ⪰ 0).  This would fail on the pre-fix presets, which all violated
+  the AB constraint — it is the regression guard for P0.
+- Full column rank of C (s ≥ q) is *not* required: an AB-constrained s < q model
+  is a valid NGH-MSM (the rank condition was an over-restriction).
 - ``NoiseCovariance.M`` / ``Gamma`` match the closed forms, and under AB
   ``A = M C``, ``B = M D``.
 - ``validate_ngh_msm`` / ``GSSParams.check_ngh_msm`` flag each violated
-  condition (AB residual, singular D, s < q).
+  condition (AB residual, singular D, C = 0).
 """
 
 from __future__ import annotations
@@ -104,12 +105,19 @@ def test_preset_satisfies_s_ge_q(entry):
     assert entry.s >= entry.q, f"{entry.module_name} has s={entry.s} < q={entry.q}"
 
 
-def test_retired_s_lt_q_model_is_rejected():
-    params = GSSParams.from_model(ModelGss_K2_q2_s1())
-    issues = validate_ngh_msm(params)
-    assert any("s = 1 < q = 2" in m for m in issues)
-    assert any("rank(C)" in m for m in issues)
-    assert not is_ngh_msm(params)
+def test_s_lt_q_validity_is_about_AB_not_rank():
+    # s < q (rank-deficient C) is NOT a rejection reason anymore: the full-column-
+    # rank condition was an over-restriction (verified single- and multi-regime).
+    # The raw fixture has non-AB blocks, so it is rejected *only* for the AB / (H5)
+    # violation — not for rank or s < q. AB-constraining the same blocks yields a
+    # valid NGH-MSM.
+    raw = GSSParams.from_model(ModelGss_K2_q2_s1())  # s=1 < q=2, raw (non-AB) blocks
+    issues = validate_ngh_msm(raw)
+    assert not any("rank(C)" in m for m in issues)
+    assert not any("< q" in m for m in issues)
+    assert any("AB / (H5)" in m for m in issues)
+    assert not is_ngh_msm(raw)
+    assert is_ngh_msm(apply_AB_constraint(raw))  # AB-constrained s<q model is valid
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +188,24 @@ def test_singular_D_is_flagged():
     assert any("D is singular" in m for m in issues)
 
 
+def test_C_zero_is_flagged():
+    # C = 0 (the observation is independent of the state) is the genuine validity
+    # gate that replaced the over-restrictive full-column-rank condition.
+    C = [np.array([[0.2]]), np.zeros((1, 1))]  # C(1) = 0
+    D = [np.array([[0.5]]), np.array([[0.6]])]
+    SU = [np.array([[0.1]]), np.array([[0.2]])]
+    Dt = [np.array([[0.05]]), np.array([[0.02]])]
+    SV = [np.array([[0.1]]), np.array([[0.15]])]
+    A, B = [], []
+    for k in range(2):
+        Ak, Bk = compute_AB(C[k], D[k], Dt[k], SV[k])
+        A.append(Ak)
+        B.append(Bk)
+    params = _params(A, B, C, D, SU, Dt, SV)
+    issues = validate_ngh_msm(params)
+    assert any("C = 0" in m for m in issues)
+
+
 def test_check_ngh_msm_raises_on_invalid():
     params = GSSParams.from_model(ModelGss_K2_q2_s1())
     with pytest.raises(ParamError, match="not a valid NGH-MSM"):
@@ -213,24 +239,27 @@ class TestNGHMSMParams:
             np.testing.assert_array_equal(p.M(k), p.noise_cov.M(k))
             np.testing.assert_array_equal(p.Gamma(k), p.noise_cov.Gamma(k))
 
-    def test_from_free_blocks_rejects_s_lt_q(self):
+    def test_from_free_blocks_accepts_s_lt_q(self):
+        # s < q is no longer rejected: from_free_blocks AB-derives A, B, yielding a
+        # valid NGH-MSM even with a rank-deficient (but nonzero) C.
         d = ModelGss_K2_q2_s1().get_params()  # s=1 < q=2
-        with pytest.raises(ParamError, match="s = 1 < q = 2"):
-            NGHMSMParams.from_free_blocks(
-                K=d["K"],
-                q=d["q"],
-                s=d["s"],
-                P=d["P"],
-                C_list=d["C_list"],
-                D_list=d["D_list"],
-                Sigma_U_list=d["Sigma_U_list"],
-                Delta_list=d["Delta_list"],
-                Sigma_V_list=d["Sigma_V_list"],
-                pi0=d["pi0"],
-                mu_z0_list=d["mu_z0_list"],
-                Sigma_z0_list=d["Sigma_z0_list"],
-                b_list=d.get("b_list"),
-            )
+        p = NGHMSMParams.from_free_blocks(
+            K=d["K"],
+            q=d["q"],
+            s=d["s"],
+            P=d["P"],
+            C_list=d["C_list"],
+            D_list=d["D_list"],
+            Sigma_U_list=d["Sigma_U_list"],
+            Delta_list=d["Delta_list"],
+            Sigma_V_list=d["Sigma_V_list"],
+            pi0=d["pi0"],
+            mu_z0_list=d["mu_z0_list"],
+            Sigma_z0_list=d["Sigma_z0_list"],
+            b_list=d.get("b_list"),
+        )
+        assert isinstance(p, NGHMSMParams)
+        assert is_ngh_msm(p)
 
     def test_from_free_blocks_rejects_singular_D(self):
         # compute_AB succeeds with D=0 (B=0); __init__ validation catches it.
@@ -283,8 +312,19 @@ class TestNGHMSMParams:
         assert isinstance(out, NGHMSMParams)
 
     def test_apply_AB_constraint_falls_back_on_degenerate(self):
-        # s<q model: AB is computable but the structural CNS fails → base, no raise.
-        base = GSSParams.from_model(ModelGss_K2_q2_s1())
+        # When the AB-enforced model still fails a structural condition (here C=0),
+        # apply_AB_constraint falls back to a base GSSParams (no raise).
+        C = [np.array([[0.2]]), np.zeros((1, 1))]  # C(1) = 0
+        D = [np.array([[0.5]]), np.array([[0.6]])]
+        SU = [np.array([[0.1]]), np.array([[0.2]])]
+        Dt = [np.array([[0.05]]), np.array([[0.02]])]
+        SV = [np.array([[0.1]]), np.array([[0.15]])]
+        A, B = [], []
+        for k in range(2):
+            Ak, Bk = compute_AB(C[k], D[k], Dt[k], SV[k])
+            A.append(Ak)
+            B.append(Bk)
+        base = _params(A, B, C, D, SU, Dt, SV)
         out = apply_AB_constraint(base)
         assert isinstance(out, GSSParams)
         assert not isinstance(out, NGHMSMParams)

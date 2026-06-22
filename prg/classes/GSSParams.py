@@ -410,7 +410,7 @@ class GSSParams:
         Validate that this model is a valid NGH-MSM (corrected CNS, Prop. 2).
 
         Checks the AB / (H5) constraint together with the structural
-        hypotheses (s ≥ q, rank(C_k) = q, D_k invertible, Σ_V_k ≻ 0,
+        hypotheses (C_k ≠ 0, D_k invertible, Σ_V_k ≻ 0,
         Γ_k ⪰ 0). See :func:`prg.utils.h5_constraint.validate_ngh_msm`.
 
         Parameters
@@ -491,7 +491,7 @@ class NGHMSMParams(GSSParams):
     Holding an ``NGHMSMParams`` is a *type-level guarantee* that the model
     satisfies the corrected CNS of Proposition 2: the AB constraint
     ``A_k = Δ_k Σ_V_k⁻¹ C_k``, ``B_k = Δ_k Σ_V_k⁻¹ D_k`` together with the
-    structural hypotheses (s ≥ q, rank(C_k) = q, D_k invertible, Σ_V_k ≻ 0,
+    structural hypotheses (C_k ≠ 0, D_k invertible, Σ_V_k ≻ 0,
     Γ_k ⪰ 0).  Such a model admits the exact fast filter (``mode="h5_exact"``).
 
     Two ways to construct it:
@@ -571,7 +571,7 @@ class NGHMSMParams(GSSParams):
         ``A_k, B_k`` are computed as ``Δ_k Σ_V_k⁻¹ C_k`` and ``Δ_k Σ_V_k⁻¹ D_k``
         (``compute_AB``), so the AB constraint holds by construction — a non-AB
         model is unrepresentable through this path.  The remaining structural
-        conditions (s ≥ q, rank(C_k) = q, D_k invertible, Σ_V_k ≻ 0, Γ_k ⪰ 0)
+        conditions (C_k ≠ 0, D_k invertible, Σ_V_k ≻ 0, Γ_k ⪰ 0)
         are checked by ``__init__`` and raise :class:`ParamError` if violated.
         """
         from prg.classes.FMatrix import FMatrix as _FMatrix

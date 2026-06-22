@@ -273,14 +273,15 @@ def validate_ngh_msm(
 
     Conditions checked (per the corrected Proposition 2)
     ----------------------------------------------------
-    1. ``s ≥ q``                         — necessary for ``C`` to have full
-       column rank ``q``;
-    2. ``rank(C_k) = q``      ∀ k        — ``C_k`` full column rank;
-    3. ``D_k`` invertible     ∀ k        — ``cond(D_k) ≤ cond_max``;
-    4. ``Σ_V_k ≻ 0``          ∀ k        — symmetric positive definite;
-    5. ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T ⪰ 0`` ∀ k — the Schur complement is a
+    1. ``C_k ≠ 0``            ∀ k        — the observation depends on the state.
+       (Full column rank of ``C_k``, hence ``s ≥ q``, is *not* required — the rank
+       condition was an over-restriction; see the module docstring. AB is the
+       necessary-and-sufficient (H5) parametrisation for any ``C_k ≠ 0``.)
+    2. ``D_k`` invertible     ∀ k        — ``cond(D_k) ≤ cond_max``;
+    3. ``Σ_V_k ≻ 0``          ∀ k        — symmetric positive definite;
+    4. ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T ⪰ 0`` ∀ k — the Schur complement is a
        genuine covariance (⇔ the joint noise covariance Σ_W(k) is PSD);
-    6. AB / (H5) constraint   — ``max`` relative pairwise residual ``≤ tol``,
+    5. AB / (H5) constraint   — ``max`` relative pairwise residual ``≤ tol``,
        i.e. ``A_k = Δ_k Σ_V_k⁻¹ C_k`` and ``B_k = Δ_k Σ_V_k⁻¹ D_k`` (up to tol).
 
     Conditions (1)–(6) are exactly what makes the exact fast filter of
@@ -289,10 +290,7 @@ def validate_ngh_msm(
     same class also serves non-(H5) models handled by ``mode="imm_general"``.
     """
     issues: list[str] = []
-    K, q, s = params.K, params.q, params.s
-
-    if s < q:
-        issues.append(f"s = {s} < q = {q}: C cannot have full column rank q (need s ≥ q).")
+    K = params.K
 
     for k in range(K):
         C = params.f_matrix.C(k)
@@ -301,9 +299,16 @@ def validate_ngh_msm(
         Dt = params.noise_cov.Delta(k)
         SV = params.noise_cov.Sigma_V(k)
 
-        rank_C = int(np.linalg.matrix_rank(C))
-        if rank_C < q:
-            issues.append(f"regime {k}: rank(C) = {rank_C} < q = {q} (C not full column rank).")
+        # ``C_k != 0`` is the genuine validity condition (the observation must
+        # depend on the state). Full column rank of ``C_k`` (hence ``s >= q``) is
+        # NOT required: AB is the necessary-and-sufficient (H5) parametrisation for
+        # any ``C_k != 0`` with ``Σ_V ≻ 0`` and ``D`` invertible (verified
+        # numerically, single- and multi-regime, including rank-deficient C).
+        # Whether AB is moreover the *unique* (H5)-compatible parametrisation is a
+        # separate identifiability question, governed by ``K·s >= q + s`` — see the
+        # module docstring; it does not affect validity and is not flagged here.
+        if float(np.linalg.norm(C, "fro")) <= 1e-12:
+            issues.append(f"regime {k}: C = 0 (the observation does not depend on the state).")
 
         cond_D = float(np.linalg.cond(D))
         if not np.isfinite(cond_D) or cond_D > cond_max:

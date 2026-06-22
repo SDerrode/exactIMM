@@ -139,7 +139,7 @@ class TestMainWindow:
         win = GSSMainWindow(K=2, q=1, s=1, P=_P)
         qtbot.addWidget(win)
         valid = NGHMSMParams.from_model(ModelGssK2Q1S1())
-        invalid = GSSParams.from_model(ModelGss_K2_q2_s1())  # s<q → non-(H5)
+        invalid = GSSParams.from_model(ModelGss_K2_q2_s1())  # raw blocks violate AB → non-(H5)
 
         # imm_general selected → never blocks, whatever the model.
         win._mode_combo.setCurrentIndex(win._mode_combo.findData("imm_general"))
@@ -151,4 +151,4 @@ class TestMainWindow:
         win._mode_combo.setCurrentIndex(win._mode_combo.findData("h5_exact"))
         assert win._h5_exact_blockers(valid) == []
         issues = win._h5_exact_blockers(invalid)
-        assert issues and any("s = 1 < q = 2" in m for m in issues)
+        assert issues and any("AB / (H5)" in m for m in issues)

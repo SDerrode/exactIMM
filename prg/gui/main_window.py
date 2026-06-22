@@ -2070,7 +2070,11 @@ class GSSMainWindow(QMainWindow):
             f_matrix = FMatrix(K, q, s, A_list, B_list, C_list, D_list)
             noise_cov = GSSNoiseCovariance(K, q, s, Sigma_U_list, Delta_list, Sigma_V_list)
 
-            Sigma_z0_list = [np.eye(q + s) for _ in range(K)]
+            # Σ_z0 = Σ_W makes the (R, Y) chain homogeneous from the *first*
+            # transition for NGH-MSMs (Prop. 3): the regime-conditional state law
+            # p(x_n | r_n, y_n) is then the same at every n. The filter starts at
+            # stationarity regardless, so this choice only affects simulated data.
+            Sigma_z0_list = [sw.copy() for sw in Sigma_W_list]
 
             params = GSSParams(
                 K=K,
@@ -2195,7 +2199,8 @@ class GSSMainWindow(QMainWindow):
             "    pi0: np.ndarray | None = None   # None → stationary distribution",
             "",
             f"    mu_z0_list: list[np.ndarray] = {_fmt_list(mu_z0_list)}",
-            f"    Sigma_z0_list: list[np.ndarray] = {_fmt_list([np.eye(q + s)] * K)}",
+            "    # Sigma_z0 = Sigma_W  →  (R, Y) chain homogeneous from the first transition (Prop. 3)",
+            f"    Sigma_z0_list: list[np.ndarray] = {_fmt_list(Sigma_W_list)}",
             f"    b_list: list[np.ndarray] = {_fmt_list(b_list)}",
             "",
             "    # ------------------------------------------------------------------",

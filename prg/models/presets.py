@@ -59,10 +59,12 @@ PRESETS: list[PresetEntry] = [
         q=1,
         s=2,
     ),
-    # NOTE: the K=2, q=2, s=1 model is intentionally NOT offered as a preset.
-    # With s = 1 < q = 2, C cannot have full column rank q, so it is not a valid
-    # NGH-MSM (the corrected CNS of Prop. 2 fails). The file
-    # model_gss_K2_q2_s1.py is kept only as a test fixture for that invalid case.
+    # NOTE: the K=2, q=2, s=1 model is not offered as a preset. Its raw blocks are
+    # not AB-constrained, so it is not a valid NGH-MSM (the AB / (H5) residual is
+    # nonzero). Note that s < q (rank-deficient C) is NOT itself a defect: an
+    # AB-constrained s < q model IS a valid NGH-MSM (the full-column-rank condition
+    # was an over-restriction). The file model_gss_K2_q2_s1.py is kept as a test
+    # fixture for the non-AB / sub-determined (K·s < q+s) case.
     PresetEntry(
         label="K=2, q=2, s=2 — Stable / Active",
         tooltip="2 regimes (stable / active), 2 hidden variables, 2 observed.",

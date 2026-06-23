@@ -1,14 +1,19 @@
-# exactIMM — Fast Optimal Filtering in Gaussian Switching Systems
+# exactIMM — On Fast Optimal Filtering in Gaussian Switching Systems
 
-Implementation of the filtering and simulation algorithms described in:
+Simulation and **fast exact jump-filtering** algorithms for the paper:
 
-> *On fast optimal filtering in Gaussian switching systems*  
-> Stéphane Derrode & Wojciech Pieczynski (preprint, 2026)
+> *On Fast Optimal Filtering in Gaussian Switching Systems*  
+> Stéphane Derrode, Clément Fernandes, Frédéric Lehmann & Wojciech Pieczynski (preprint, 2026)
 
-The paper introduces an exact constant-gain filter for switching state-space
-models satisfying a structural assumption (H5), validated by a Monte-Carlo
-simulation study and a real-data experiment on NOAA SST anomalies (ENSO
-regime detection). See [Reproducing the paper experiments](#reproducing-the-paper-experiments) below.
+The paper introduces an exact, **linear-time** optimal filter for Gaussian
+switching state-space models satisfying a closed-form structural constraint
+(the **AB / (H5) constraint**). The LaTeX sources of the current version live in
+`docs/wojciech/article_vWojciech_tex/`;
+the commands that regenerate its figures are in
+[Reproducing the paper figures](#reproducing-the-paper-figures) below.
+
+This README documents the **jump-filtering** pipeline: define a model →
+simulate → filter exactly.
 
 ---
 
@@ -53,6 +58,16 @@ regime locks both blocks simultaneously. See the
 [CHANGELOG](CHANGELOG.md) for details and the v0.11 → v0.13 migration
 table.
 
+**Why this matters for filtering.** The AB constraint is exactly the
+closed-form condition under which the observation marginal $(R_n, Y_n)$ is
+itself a homogeneous Markov chain. This *marginal Markovianity* is what
+makes an **exact, linear-time** optimal filter possible: $p(R_n \mid
+Y_{1:n})$ is propagated by a forward recursion and $\mathbb{E}[X_n \mid
+Y_{1:n}]$ then follows in closed form, with no Riccati covariance
+propagation to carry. The condition $C(k) \neq 0$ characterises this new
+family, distinguishing it from the classical conditionally-Gaussian
+switching models ($C = 0$); it is checked at model-build time.
+
 ---
 
 ## Project structure
@@ -73,29 +88,17 @@ exactIMM/
 │   │   ├── GSSParams.py        # Aggregates all model parameters
 │   │   └── GSSSimulator.py     # Iterator-based simulator
 │   ├── filter/
-│   │   ├── gss_filter.py       # GSSFilter — fast optimal filter (Option B)
+│   │   ├── gss_filter.py       # GSSFilter — fast exact optimal filter
 │   │   └── main.py             # CLI entry point for the filter
-│   ├── learning/
-│   │   ├── supervised.py       # OLS fit when R is observed
-│   │   └── semi_supervised.py  # Baum-Welch EM when R is hidden
-│   ├── experiments/            # §6 simulation + §7 ENSO pipelines (paper reproducibility)
-│   │   ├── run_simulations.py  # §6.2 filter benchmark MC
-│   │   ├── run_supervised.py   # §6.3 supervised OLS MC
-│   │   ├── run_em.py           # §6.4 semi-supervised EM MC
-│   │   ├── run_real_data.py    # §7 ENSO E1+E2+E3
-│   │   ├── make_figures.py     # §6 figures + LaTeX tables
-│   │   └── make_figures_real.py# §7 figures (regime trace)
+│   ├── experiments/
+│   │   └── study.py            # Jump-filtering study (E1–E9) → paper figures
 │   ├── simulate.py             # CLI entry point for the simulator
 │   └── gui/                    # Optional PyQt6 graphical interface
-├── scripts/                    # Standalone exploratory scripts (E1/E2/E3 originals,
-│   │                             baselines: Hamilton-MSAR, Kalman K=1)
-│   ├── baselines/
-│   ├── figures/
-│   └── e{1,2,3}_*.py
-├── tests/                      # 209 pytest tests
+├── docs/wojciech/
+│   └── article_vWojciech_tex/  # LaTeX sources of the current paper version
+├── tests/                      # pytest suite
 ├── data/
-│   ├── simulated/              # Generated CSV files (gitignored)
-│   └── real/                   # Real datasets: ENSO (NOAA SST), SP500/VIX
+│   └── simulated/              # Generated CSV files (gitignored)
 ├── logs/                       # Execution logs (one file per run)
 ├── config.toml                 # Runtime configuration
 └── pyproject.toml
@@ -131,7 +134,7 @@ interpreter explicitly** (`.venv/bin/python`), which avoids the silent
 ```bash
 make venv      # create .venv with python3.14
 make install   # editable install + dev deps
-make test      # run the 209-test suite
+make test      # run the test suite
 make check     # lint + typecheck + tests (CI parity)
 make help      # list all targets
 ```
@@ -210,7 +213,7 @@ Log files are written automatically to `logs/`.
 
 ## Running the filter
 
-The filter computes $\mathbb{E}[X_n \mid Y_{1:n}]$, $\mathbb{E}[X_nX_n^T \mid Y_{1:n}]$, and $p(R_n \mid Y_{1:n})$ recursively.
+The filter computes $\mathbb{E}[X_n \mid Y_{1:n}]$, $\mathbb{E}[X_nX_n^T \mid Y_{1:n}]$, and $p(R_n \mid Y_{1:n})$ recursively, in time linear in $n$.
 
 ```bash
 # Simulate 1 000 steps and filter in one command
@@ -286,206 +289,6 @@ A, B = compute_AB(C, D, Delta, SV)
 
 # Verify any (A, B, C, D, Σ_U, Δ, Σ_V) satisfies (H5):
 F = compute_h5_residual(A, B, C, D, SU, Delta, SV)  # ‖F‖_F = 0 ⇔ (H5) holds
-```
-
----
-
-## Learning the model from data
-
-Two estimators are available:
-
-- **Supervised** (`prg.learning.supervised`) — when the regime sequence
-  $R_n$ is observed (alongside $X_n$ and $Y_n$): closed-form per-regime
-  OLS, fast, deterministic.
-- **Semi-supervised** (`prg.learning.semi_supervised`) — when only
-  $X_n$ and $Y_n$ are observed and $R_n$ is hidden: Baum-Welch EM with
-  k-means initialisation and multi-start.
-
-Both write a ready-to-use `BaseGSSModel` subclass to `prg/models/`.
-
----
-
-## Supervised learning
-
-The supervised estimator learns all GSS parameters from a fully-observed
-$(R_n, X_n, Y_n)$ CSV (such as those produced by the simulator).
-
-```bash
-# Estimate from a simulated CSV (no constraint)
-python -m prg.learning.supervised data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
-
-# Apply (H5) AB constraint post-hoc and force Δ = 0
-python -m prg.learning.supervised sim.csv --constraint ab --delta-zero
-
-# AB constraint + custom output file
-python -m prg.learning.supervised sim.csv --constraint ab \
-    --output prg/models/model_my_estimated.py --model-name model_my_estimated
-
-# Verbose output (per-regime summaries)
-python -m prg.learning.supervised sim.csv -v
-```
-
-The generated `.py` file is a `BaseGSSModel` subclass and can be used directly:
-
-```bash
-python -m prg.simulate --model model_learned_K2_q1_s1 -N 1000 --seed 42
-python -m prg.filter.main --model model_learned_K2_q1_s1 -N 1000 --seed 42
-```
-
-### CLI options
-
-| Option | Default | Description |
-|---|---|---|
-| `csv` | — | Path to simulation CSV (required) |
-| `--constraint ab` | `None` | Apply (H5) AB constraint post-hoc |
-| `--delta-zero` | `False` | Force Δ(k) = 0 before the projection |
-| `--output PATH` | auto | Destination `.py` file |
-| `--model-name NAME` | auto | File/class base name |
-| `-v` / `--verbose` | `False` | Print per-regime fit summaries |
-
-### Python API
-
-```python
-from prg.learning.supervised import fit_supervised, _read_csv
-import pathlib
-
-rs, xs, ys, K, q, s = _read_csv(pathlib.Path("sim.csv"))
-params = fit_supervised(rs, xs, ys, K, q, s, constraint="ab", delta_zero=True)
-
-# params is a dict ready for GSSParams.from_model() or code generation
-from prg.classes.GSSParams import GSSParams
-gss_params = GSSParams(
-    K=params["K"], q=params["q"], s=params["s"],
-    P=params["P"],
-    A_list=params["A_list"], B_list=params["B_list"],
-    C_list=params["C_list"], D_list=params["D_list"],
-    Sigma_U_list=params["Sigma_U_list"],
-    Delta_list=params["Delta_list"],
-    Sigma_V_list=params["Sigma_V_list"],
-    pi0=params["pi0"],
-    mu_z0_list=params["mu_z0_list"],
-    Sigma_z0_list=params["Sigma_z0_list"],
-    b_list=params["b_list"],
-)
-```
-
-### Estimation approach
-
-For each regime $k$ the model is $Z_{n+1} = F(k)\,Z_n + b(k) + W_{n+1}$.
-
-1. **Free OLS** — collect all pairs $(Z_n, Z_{n+1})$ for which $r_{n+1}=k$,
-   augment with a constant column, and solve the least-squares problem.
-   The noise covariance $\Sigma_W(k)$ is the MLE sample covariance of residuals.
-
-2. **Δ = 0** *(optional)* — zero out the off-diagonal block of $\Sigma_W(k)$.
-
-3. **(H5) AB projection** *(optional)* — recompute $A$ and $B$
-   *jointly* via the closed form $A = \Delta \Sigma_V^{-1} C$,
-   $B = \Delta \Sigma_V^{-1} D$, which makes (H5) hold uniformly in
-   $\Sigma(r_1)$ for every regime pair.
-
-The Markov matrix $P$ is estimated by transition-frequency counts.
-`--delta-zero` is independent and applied before the projection.
-
----
-
-## Semi-supervised learning
-
-When $R_n$ is hidden but $(X_n, Y_n)$ are observed, the regime sequence
-is inferred jointly with the parameters by Baum-Welch EM.
-
-```bash
-# Estimate K=2 regimes from a CSV (the 'r' column is ignored)
-python -m prg.learning.semi_supervised data/simulated/sim.csv -K 2
-
-# 20 random restarts, verbose log-L per iteration
-python -m prg.learning.semi_supervised sim.csv -K 2 \
-    --n-inits 20 --seed 42 -v
-
-# (H5) AB constraint applied once at the end of EM (default — log-lik monotone)
-python -m prg.learning.semi_supervised sim.csv -K 2 \
-    --constraint ab --delta-zero
-
-# Same constraint, but enforced at every M-step (Generalized EM mode)
-python -m prg.learning.semi_supervised sim.csv -K 2 \
-    --constraint ab --delta-zero --constraint-each-iter
-```
-
-### CLI options
-
-| Option | Default | Description |
-|---|---|---|
-| `csv` | — | Input CSV (the `r` column is ignored if present) |
-| `-K`, `--K` | — | Number of regimes (required) |
-| `--constraint ab` | `None` | Apply (H5) AB constraint (post-hoc by default) |
-| `--delta-zero` | `False` | Force Δ(k) = 0 before the projection |
-| `--constraint-each-iter` | `False` | Apply the constraint at every M-step (GEM); otherwise applied once at the end |
-| `--n-inits` | `10` | Number of independent EM restarts |
-| `--max-iter` | `100` | Maximum EM iterations per run |
-| `--tol` | `1e-5` | Convergence threshold on \|Δ log L\| |
-| `--seed` | `None` | Base RNG seed (different k-means seeds derived from it) |
-| `--output` / `--model-name` | auto | Same as supervised |
-| `-v` | `False` | Print per-iteration log-likelihood |
-
-### Algorithm
-
-For each EM iteration:
-
-1. **E-step** — log-domain forward / backward on the HMM with emissions
-   $p(Z_n \mid Z_{n-1}, R_n=k) = \mathcal{N}(F(k) Z_{n-1} + b(k), \Sigma_W(k))$
-   yields posteriors $\gamma_n(k)$ and $\xi_n(j,k)$ and the marginal
-   log-likelihood.
-2. **M-step**:
-   - $\hat P(j,k) = \sum_n \xi_n(j,k) / \sum_n \gamma_n(j)$
-   - $\hat\pi_0(k) = \gamma_0(k)$
-   - $\hat F(k), \hat b(k)$ by **weighted OLS** with weights $\gamma_{n+1}(k)$
-   - $\hat\Sigma_W(k)$ = weighted MLE of residual covariance
-   - Optional AB projection ($A = \Delta \Sigma_V^{-1} C$,
-     $B = \Delta \Sigma_V^{-1} D$) — applied only when
-     `--constraint-each-iter` is set; otherwise applied once after EM
-3. **Convergence** — stop when $|\Delta \log L| < \mathrm{tol}$.
-4. **Post-hoc projection** — if `--constraint` is set without
-   `--constraint-each-iter`, the H5 projection (and $\Delta = 0$) is
-   applied **once** to the converged parameters of the best run.
-
-### Notes & caveats
-
-- **Multi-start is essential.** EM is non-convex; the algorithm runs
-  `--n-inits` independent k-means initialisations and keeps the
-  best-likelihood solution.
-- **Label switching.** After convergence, regimes are reordered by
-  $A(k)[0,0]$ (descending) for reproducibility. Don't expect the
-  estimated regime indices to match a known ground truth without
-  post-hoc alignment.
-- **Constraint timing.** By default the H5 projection is applied **once
-  at the end** of EM, so the iterations remain a standard EM with
-  monotone log-likelihood — the constraint behaves exactly like the
-  supervised post-hoc projection. Pass `--constraint-each-iter` to
-  enforce H5 at every M-step (Generalized EM): the constraint is
-  satisfied throughout the optimisation but log-likelihood
-  monotonicity is no longer guaranteed (convergence is then monitored
-  on $|\Delta \log L|$).
-- **Required N.** With $K=2$ and $q=s=1$, $N \ge 2000$ typically gives
-  $|\hat A - A_{\text{true}}| < 0.05$.
-
-### Python API
-
-```python
-from prg.learning.semi_supervised import fit_semi_supervised
-
-params, info = fit_semi_supervised(
-    xs, ys, K=2,
-    constraint=None,            # 'ab' (AB constraint) | None
-    delta_zero=False,
-    constraint_each_iter=False, # True → GEM; False (default) → post-hoc
-    n_inits=10,
-    max_iter=100,
-    tol=1e-5,
-    seed=42,
-)
-print(info["best_log_lik"])           # log-likelihood of best run
-print(info["all_log_liks"])           # log L of every restart
-print(info["log_lik_history"])        # per-iteration log L of best run
 ```
 
 ---
@@ -602,64 +405,40 @@ Then run with `--model model_my_gss`.
 
 ---
 
-## Reproducing the paper experiments
+## Reproducing the paper figures
 
-The full pipeline for both the simulation study (§6) and the ENSO
-real-data experiment (§7) is in `prg/experiments/`. Each script is
-self-contained, deterministic (fixed seeds), and writes JSON + LaTeX
-tables ready for paper inclusion.
-
-### §6 — Simulation study (Monte-Carlo)
-
-Three reference models (M1, M2, M3) all satisfying (H5). Each script
-takes a few minutes to ~2h depending on the run.
+The LaTeX sources of the current paper version live in
+`docs/wojciech/article_vWojciech_tex/`.
+Its figures are produced by the **jump-filtering study harness**
+`prg/experiments/study.py` — a single, self-contained, deterministic
+(fixed-seed) script that runs a battery of filtering experiments and writes
+one vector PDF per experiment plus a `results.json` summary.
 
 ```bash
-# §6.2 filter benchmark   (~30 min, 1800 trials)
-python -m prg.experiments.run_simulations
-
-# §6.3 supervised OLS MC  (~15 min)
-python -m prg.experiments.run_supervised
-
-# §6.4 semi-supervised EM (~2h, 360 trials)
-python -m prg.experiments.run_em
-
-# Generate all PDF figures + LaTeX tables for §6
-python -m prg.experiments.make_figures
-
-# Fill numerical \ph{} placeholders in paper/sections/06_experiments.tex
-python -m prg.experiments.fill_placeholders
+# Regenerate the candidate figures into the paper's figures/ directory
+python -m prg.experiments.study docs/wojciech/article_vWojciech_tex
 ```
 
-Outputs land in `data/experiments/` (CSV results) and
-`paper/figures/generated/` (PDFs + `.tex` tables).
+This creates `docs/wojciech/article_vWojciech_tex/figures/*.pdf` and
+`docs/wojciech/article_vWojciech_tex/results.json`. The candidate
+experiments — all on the **exact jump filter** — are:
 
-### §7 — ENSO real-data experiment
+| Figure | Experiment |
+|---|---|
+| `e1_exactness.pdf` | E1 — exactness against a brute-force reference filter |
+| `e2_speed.pdf` | E2 — linear-time $O(K^2 N)$ scaling |
+| `e3_value.pdf`, `e3plus_value_sweep.pdf` | E3 / E3′ — filtering gain vs value/regime contrast |
+| `e4_multivariate.pdf` | E4 — multivariate state / observation |
+| `e5_closed_form.pdf` | E5 — closed-form AB constraint check |
+| `e6_robustness.pdf` | E6 — robustness |
+| `e7_rank_deficient.pdf` | E7 — rank-deficient $C$ ($s < q$) |
+| `e8_c_influence.pdf` | E8 — influence of $C$ (regime-identification channel) |
+| `e9_c_mismatch.pdf` | E9 — filtering $C \neq 0$ data with a $C = 0$ filter |
 
-Tests (H5) empirically and applies the framework to NOAA monthly SST
-anomalies (Niño 1+2 as state, Niño 3.4 as observation, ONI-derived
-3-regime label).
-
-```bash
-# Full pipeline E1 (H5 test) + E2 (filter comparison) + E3 (EM variants)
-# (~1 minute total)
-python -m prg.experiments.run_real_data
-
-# Time-series figures (overview + regime trace)
-python -m prg.experiments.make_figures_real
-```
-
-Raw NOAA dumps are in `data/real/{nino34,nino12,oni}.txt`; the unified
-CSV `data/real/enso_sst.csv` is regenerated by the test harness if
-removed (see `scripts/build_enso_csv.py` if you need a clean rebuild).
-
-### Reproducibility checklist
-
-- All scripts accept `--seed` (default 42) and write `*_summary.json`
-  alongside `*.tex` for byte-level reproducibility.
-- The 209-test suite (`pytest`) runs in under a minute and validates
-  the underlying components (filter, EM, AB constraint, GUI badges)
-  on which the paper claims rest.
+> **The figure selection is not fixed yet.** The harness above generates the
+> full candidate set; once the figures retained for the paper are settled,
+> this section will list them — and the exact commands to rebuild just
+> those — explicitly.
 
 ---
 
@@ -667,15 +446,13 @@ removed (see `scripts/build_enso_csv.py` if you need a clean rebuild).
 
 ```bash
 source .venv/bin/activate
-pytest                        # 209 tests, ~45 s
+pytest                        # full suite, ~45 s
 mypy                          # strict typing on prg/utils/h5_constraint.py
 ```
 
-209 tests covering matrix diagnostics, parameter validation, iterator
-protocol, reproducibility, CSV output, statistical sanity, filter
-correctness, H5 constraint computation, supervised OLS estimation, and
-Baum-Welch EM (forward/backward, weighted M-step, multi-start,
-constraint integration).
+The suite covers matrix diagnostics, parameter validation, the
+iterator-based simulator, reproducibility, CSV output, statistical sanity,
+exact-filter correctness, and the (H5) AB constraint computation.
 
 ---
 
@@ -700,11 +477,11 @@ If you use this code or the (H5) framework in your work, please cite:
 
 ```bibtex
 @misc{derrode_exactIMM_2026,
-  author       = {Derrode, St{\'e}phane and Pieczynski, Wojciech},
+  author       = {Derrode, St{\'e}phane and Fernandes, Cl{\'e}ment and Lehmann, Fr{\'e}d{\'e}ric and Pieczynski, Wojciech},
   title        = {{On Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
   howpublished = {\url{https://github.com/SDerrode/exactIMM}},
-  note         = {Software v0.13.1, accompanying paper preprint},
+  note         = {Software accompanying paper preprint},
 }
 ```
 
@@ -714,11 +491,10 @@ A `CITATION.cff` file is also provided at the repo root.
 
 ## Authors
 
-Stéphane Derrode — [stephane.derrode@ec-lyon.fr](mailto:stephane.derrode@ec-lyon.fr)
-([École Centrale de Lyon](https://www.ec-lyon.fr/))
-
-Wojciech Pieczynski — [wojciech.pieczynski@telecom-sudparis.eu](mailto:wojciech.pieczynski@telecom-sudparis.eu)
-([Télécom SudParis](https://www.telecom-sudparis.eu/))
+- **Stéphane Derrode** — [stephane.derrode@ec-lyon.fr](mailto:stephane.derrode@ec-lyon.fr) ([École Centrale de Lyon](https://www.ec-lyon.fr/) — LIRIS, CNRS UMR 5205)
+- **Clément Fernandes** — [Télécom SudParis](https://www.telecom-sudparis.eu/) (SAMOVAR, Institut Polytechnique de Paris)
+- **Frédéric Lehmann** — [Télécom SudParis](https://www.telecom-sudparis.eu/) (SAMOVAR)
+- **Wojciech Pieczynski** — [wojciech.pieczynski@telecom-sudparis.eu](mailto:wojciech.pieczynski@telecom-sudparis.eu) ([Télécom SudParis](https://www.telecom-sudparis.eu/) — SAMOVAR)
 
 ## License
 

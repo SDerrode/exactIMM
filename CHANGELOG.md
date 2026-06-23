@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-06-23
+
+First stable release of the jump-filtering toolkit.
+
+### Changed
+
+- **Documentation**: the README now focuses on the **jump-filtering**
+  pipeline (define a model → simulate → filter exactly); its title and
+  author list are aligned with the accompanying paper. Parameter
+  estimation stays in the codebase but is no longer documented in the
+  README.
+- **(H5)/NGH-MSM**: the ``C ≠ 0`` condition is framed as *family
+  membership* (a genuine NGH-MSM versus a classical CMS-HLM with
+  ``C = 0``), not as a validity error.
+
 ### Fixed
 
 - **Filter**: corrected the pair-conditional innovation covariance in
@@ -27,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Study harness** ``prg/experiments/study.py``: ten jump-filtering
+  experiments (E1–E9) that regenerate the candidate paper figures into
+  the target paper directory.
 - Filter-mode equivalence tests across dimensions (K>2, q,s>1) and a
   joint noise-covariance PSD test after AB-constrained EM.
 

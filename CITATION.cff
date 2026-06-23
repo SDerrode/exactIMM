@@ -34,14 +34,18 @@ keywords:
   - ENSO
   - signal processing
 license: AGPL-3.0
-version: "0.13.1"
-date-released: "2026-05-06"
+version: "1.0.0"
+date-released: "2026-06-23"
 preferred-citation:
   type: generic
   title: "On Fast Optimal Filtering in Gaussian Switching Systems"
   authors:
     - given-names: Stéphane
       family-names: Derrode
+    - given-names: Clément
+      family-names: Fernandes
+    - given-names: Frédéric
+      family-names: Lehmann
     - given-names: Wojciech
       family-names: Pieczynski
   year: 2026

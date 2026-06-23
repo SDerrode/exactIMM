@@ -7,7 +7,7 @@ the math is) and the **software** (this repository).
 
 ```bibtex
 @unpublished{derrode_pieczynski_2026,
-  author       = {Derrode, St{\'e}phane and Pieczynski, Wojciech},
+  author       = {Derrode, St{\'e}phane and Fernandes, Cl{\'e}ment and Lehmann, Fr{\'e}d{\'e}ric and Pieczynski, Wojciech},
   title        = {{On Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
   note         = {Preprint},
@@ -24,7 +24,7 @@ the preprint is accepted.)
   author       = {Derrode, St{\'e}phane and Pieczynski, Wojciech},
   title        = {{exactIMM: Fast Optimal Filtering in Gaussian Switching Systems}},
   year         = {2026},
-  version      = {0.13.1},
+  version      = {1.0.0},
   url          = {https://github.com/SDerrode/exactIMM},
   license      = {AGPL-3.0},
 }

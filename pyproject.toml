@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "exactIMM"
-version = "0.13.1"
+version = "1.0.0"
 description = "Fast optimal filtering in Gaussian switching systems"
 readme = "README.md"
 license = { file = "LICENSE" }

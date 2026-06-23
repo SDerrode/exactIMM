@@ -35,7 +35,10 @@ from prg.classes.GSSSimulator import GSSSimulator
 from prg.experiments.models_paper import get_params
 from prg.experiments.reference_filters import (
     exact_mixture_filter,
+    gpb2_filter,
+    imm_filter,
     oracle_filter,
+    rbpf_filter,
     single_kalman_filter,
     with_stationary_init,
 )
@@ -913,6 +916,95 @@ def exp_c_mismatch(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# E10 — Standard approximate switching filters become exact under the AB constraint
+# ---------------------------------------------------------------------------
+def exp_approx_exactness(outdir: Path) -> dict:
+    """The standard approximate switching filters (IMM, GPB2, RBPF) coincide with
+    — or converge to — the exact K^N filter on the AB-constrained NGH-MSM, because
+    (Prop. 4) the regime-conditional law p(x_n|r_n,y_{1:n}) depends only on the
+    current regime: collapsing the regime history (what GPB2/IMM do) is lossless."""
+    models = [("M1", 9), ("M2", 9), ("M3", 7)]
+    rbpf_M = 4000
+    res: dict = {}
+    for name, N in models:
+        params = _build(name)
+        _, _, ys = _simulate(params, N, seed=11)
+        ExE, _VarE, PiE = exact_mixture_filter(params, ys)
+        ExH, PiH, _ = _run(params, ys, "h5_exact")
+        Eg, _, Pg, llg = gpb2_filter(params, ys)
+        Ei, _, Pim, lli = imm_filter(params, ys)
+        Er, _, Pr, llr = rbpf_filter(params, ys, n_particles=rbpf_M, seed=0)
+        res[name] = {
+            "N": N,
+            "h5": {"dEx": float(np.abs(ExH - ExE).max()), "dpi": float(np.abs(PiH - PiE).max())},
+            "gpb2": {
+                "dEx": float(np.abs(Eg - ExE).max()),
+                "dpi": float(np.abs(Pg - PiE).max()),
+                "loglik": llg,
+            },
+            "imm": {
+                "dEx": float(np.abs(Ei - ExE).max()),
+                "dpi": float(np.abs(Pim - PiE).max()),
+                "loglik": lli,
+            },
+            "rbpf": {
+                "dEx": float(np.abs(Er - ExE).max()),
+                "dpi": float(np.abs(Pr - PiE).max()),
+                "loglik": llr,
+                "n_particles": rbpf_M,
+            },
+        }
+
+    # RBPF convergence vs particle count (M1)
+    pM = _build("M1")
+    _, _, ysM = _simulate(pM, 9, seed=11)
+    ExE1, _, _ = exact_mixture_filter(pM, ysM)
+    Ms = [100, 300, 1000, 3000, 10000, 30000]
+    rb_err = [
+        float(np.abs(rbpf_filter(pM, ysM, n_particles=M, seed=0)[0] - ExE1).max()) for M in Ms
+    ]
+    floor = res["M1"]["gpb2"]["dEx"]
+    res["rbpf_convergence"] = {"n_particles": Ms, "max_dEx": rb_err, "floor": floor}
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.6, 3.4))
+    keys = [
+        ("h5", "h5_exact", _C["h5"]),
+        ("gpb2", "GPB2", _C["exact"]),
+        ("imm", "IMM", _C["imm"]),
+        ("rbpf", f"RBPF ({rbpf_M})", _C["oracle"]),
+    ]
+    x = np.arange(len(models))
+    w = 0.2
+    for i, (fk, fl, col) in enumerate(keys):
+        vals = [max(res[name][fk]["dEx"], 1e-17) for name, _ in models]
+        ax1.bar(x + (i - 1.5) * w, vals, w, label=fl, color=col)
+    ax1.set_yscale("log")
+    ax1.set_ylim(1e-18, 1e-1)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels([m for m, _ in models])
+    ax1.axhline(1e-12, color="grey", ls=":", lw=1)
+    ax1.set_ylabel(r"$\max_n\,|\Delta E[X_n|y]|$ vs exact")
+    ax1.set_title("(a) Agreement with the exact $K^N$ filter")
+    ax1.legend(fontsize=7, ncol=2)
+
+    ax2.loglog(Ms, rb_err, "o-", color=_C["oracle"], ms=4, label="RBPF (M1)")
+    ax2.axhline(max(floor, 1e-17), color="black", ls="--", lw=1, label="GPB2 / h5 floor")
+    guide = rb_err[0] * np.sqrt(Ms[0] / np.array(Ms, dtype=float))
+    ax2.loglog(Ms, guide, ":", color="grey", lw=1, label=r"$\propto 1/\sqrt{M}$")
+    ax2.set_xlabel("RBPF particles $M$")
+    ax2.set_ylabel(r"$\max_n\,|\Delta E[X_n|y]|$ vs exact")
+    ax2.set_title("(b) RBPF converges to the exact filter")
+    ax2.legend(fontsize=7)
+    fig.suptitle(
+        "E10 — approximate switching filters become exact under the AB constraint",
+        fontsize=10,
+    )
+    fig.savefig(outdir / "figures" / "e10_approx_exactness.pdf")
+    plt.close(fig)
+    return res
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 def main(outdir: str | Path) -> dict:
@@ -931,6 +1023,7 @@ def main(outdir: str | Path) -> dict:
         ("E7_rank_deficient", exp_rank_deficient),
         ("E8_c_influence", exp_c_influence),
         ("E9_c_mismatch", exp_c_mismatch),
+        ("E10_approx_exactness", exp_approx_exactness),
     ]:
         print(f"running {key} …", flush=True)
         results[key] = fn(outdir)

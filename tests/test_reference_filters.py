@@ -19,7 +19,10 @@ from prg.classes.GSSSimulator import GSSSimulator
 from prg.experiments.models_paper import get_params
 from prg.experiments.reference_filters import (
     exact_mixture_filter,
+    gpb2_filter,
+    imm_filter,
     oracle_filter,
+    rbpf_filter,
     single_kalman_filter,
     with_stationary_init,
 )
@@ -88,3 +91,58 @@ def test_rank_deficient_model_is_valid_and_exact():
     ExE, _VarE, PiE = exact_mixture_filter(params, ys)
     assert np.abs(ExH - ExE).max() < 1e-9
     assert np.abs(PiH - PiE).max() < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Approximate switching baselines — issue #5 (IMM / GPB2 / RBPF)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("filt", [imm_filter, gpb2_filter, rbpf_filter])
+def test_baseline_output_contract(filt):
+    """Each baseline returns (E_x, Var_x, pi, log_lik) with valid shapes."""
+    params = with_stationary_init(_params_from_dict(get_params("M3")))
+    _, ys = _data(params, N=10, seed=5)
+    E_x, Var_x, pi, ll = filt(params, ys)
+    N, K, q = 10, params.K, params.q
+    assert E_x.shape == (N, q)
+    assert Var_x.shape == (N, q, q)
+    assert pi.shape == (N, K)
+    assert np.allclose(pi.sum(axis=1), 1.0)
+    assert np.all(pi >= -1e-9)
+    assert np.isfinite(ll)
+
+
+@pytest.mark.parametrize("name,N", [("M1", 8), ("M2", 7), ("M3", 7)])
+def test_gpb2_equals_exact_on_ab_model(name, N):
+    """On an AB/(H5) model the regime-conditional posterior depends only on the
+    current regime (marginal Markovianity, Prop. 4), so GPB2's K-hypothesis
+    collapse is lossless: it coincides with the exact Kᴺ filter."""
+    params = with_stationary_init(_params_from_dict(get_params(name)))
+    _, ys = _data(params, N, seed=1)
+    ExE, _VarE, PiE = exact_mixture_filter(params, ys)
+    Eg, _Vg, Pg, llg = gpb2_filter(params, ys)
+    assert np.isfinite(llg)
+    assert np.abs(Eg - ExE).max() < 1e-8
+    assert np.abs(Pg - PiE).max() < 1e-8
+
+
+@pytest.mark.parametrize("name", ["M1", "M2", "M3"])
+def test_imm_close_to_exact(name):
+    """IMM (single moment-matched mixing) tracks the exact filter closely."""
+    params = with_stationary_init(_params_from_dict(get_params(name)))
+    _, ys = _data(params, N=9, seed=2)
+    ExE, _VarE, PiE = exact_mixture_filter(params, ys)
+    Ei, _Vi, Pi_, lli = imm_filter(params, ys)
+    assert np.isfinite(lli)
+    assert np.abs(Ei - ExE).max() < 2e-3
+    assert np.abs(Pi_ - PiE).max() < 2e-2
+
+
+def test_rbpf_close_to_exact():
+    """RBPF (many particles, fixed seed) approaches the exact posterior."""
+    params = with_stationary_init(_params_from_dict(get_params("M1")))
+    _, ys = _data(params, N=9, seed=3)
+    ExE, _VarE, PiE = exact_mixture_filter(params, ys)
+    Er, _Vr, Pr, llr = rbpf_filter(params, ys, n_particles=4000, seed=0)
+    assert np.isfinite(llr)
+    assert np.abs(Er - ExE).max() < 3e-2
+    assert np.abs(Pr - PiE).max() < 5e-2

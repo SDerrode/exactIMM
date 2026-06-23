@@ -7,14 +7,13 @@ Experiment **E2** — Filter comparison at fixed parameters on S&P500 / VIX.
 Parameters are fit by supervised OLS on the training period using label L1
 (VIX-median); the filters are then evaluated on the test period (2019-2024).
 
-Filters compared (extensible — baselines plug in via the FILTERS dict):
+Filters compared (extensible):
     h5_exact        : our filter under (H5) assumption (biased if B≠0)
     imm_general     : our filter, general IMM recursion
     kalman_k1       : single Kalman (K=1, no regime switching)
-
-Additional benchmark baselines (Blom-Bar-Shalom IMM, GPB2,
-Rao-Blackwellised particle filter) are tracked separately:
-https://github.com/SDerrode/exactIMM/issues/5
+    imm_standard    : Blom-Bar-Shalom Interacting Multiple Model
+    gpb2            : Generalized Pseudo-Bayesian order 2
+    rbpf            : Rao-Blackwellised particle filter (seeded)
 
 Outputs
 -------
@@ -51,6 +50,11 @@ from labels import (  # noqa: E402
 )
 from params_utils import params_from_dict  # noqa: E402
 
+from prg.experiments.reference_filters import (  # noqa: E402
+    gpb2_filter,
+    imm_filter,
+    rbpf_filter,
+)
 from prg.filter.gss_filter import GSSFilter  # noqa: E402
 from prg.learning.supervised import fit_supervised  # noqa: E402
 
@@ -96,6 +100,38 @@ def run_filter(
         log_lik=ll_total,
         mse_x=sse / N,
         nll_per_obs=-ll_total / N,
+        time_s=dt,
+    )
+
+
+def run_batch_filter(
+    name: str,
+    batch_fn,
+    params,
+    xs_test: np.ndarray,
+    ys_test: np.ndarray,
+    trace_store: dict[str, np.ndarray] | None = None,
+    **kwargs,
+) -> FilterScore:
+    """Score a batch reference filter ``(params, ys) -> (E_x, Var_x, pi, log_lik)``.
+
+    Adapts the batch baselines in ``prg.experiments.reference_filters`` to the
+    same ``FilterScore`` row as the step-wise filters above.
+    """
+    t0 = time.perf_counter()
+    E_x, _Var, _pi, ll = batch_fn(params, ys_test, **kwargs)
+    dt = time.perf_counter() - t0
+    N = len(ys_test)
+    x_hat = np.asarray(E_x)[:, 0]
+    sse = float(np.sum((xs_test[:, 0] - x_hat) ** 2))
+    if trace_store is not None:
+        trace_store[f"{name}_x_hat"] = x_hat
+    return FilterScore(
+        name=name,
+        N=N,
+        log_lik=float(ll),
+        mse_x=sse / N,
+        nll_per_obs=-float(ll) / N,
         time_s=dt,
     )
 
@@ -175,6 +211,15 @@ def main() -> int:
     # Kalman K=1 — fit on full train regardless of regimes
     kf = SingleKalmanFilter.from_regressed(xs_tr, ys_tr)
     scores.append(run_filter("kalman_k1", kf, xs_te, ys_te, traces))
+
+    # Approximate switching baselines (issue #5), batch interface
+    scores.append(run_batch_filter("imm_standard", imm_filter, params, xs_te, ys_te, traces))
+    scores.append(run_batch_filter("gpb2", gpb2_filter, params, xs_te, ys_te, traces))
+    scores.append(
+        run_batch_filter(
+            "rbpf", rbpf_filter, params, xs_te, ys_te, traces, n_particles=2000, seed=0
+        )
+    )
 
     # ---- print summary ----
     print("")

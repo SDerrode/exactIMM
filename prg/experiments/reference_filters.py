@@ -22,6 +22,16 @@ single_kalman_filter(params, ys)
 oracle_filter(params, rs, ys)
     A Kalman filter that switches with the *known* regime sequence ``rs`` — the
     best achievable X-estimate (regimes given). Lower bound on the error.
+imm_filter(params, ys)
+    Blom-Bar-Shalom Interacting Multiple Model — O(K) Kalman updates/step.
+gpb2_filter(params, ys)
+    Generalized Pseudo-Bayesian order 2 — O(K²) Kalman updates/step.
+rbpf_filter(params, ys, n_particles, seed)
+    Rao-Blackwellised particle filter — converges to the exact posterior.
+
+The three approximate switching baselines (``imm_filter``, ``gpb2_filter``,
+``rbpf_filter``) all return ``(E_x, Var_x, pi, log_lik)`` so they can be scored
+uniformly against the exact filter (see issue #5).
 
 Helpers
 -------
@@ -41,6 +51,9 @@ __all__ = [
     "exact_mixture_filter",
     "single_kalman_filter",
     "oracle_filter",
+    "imm_filter",
+    "gpb2_filter",
+    "rbpf_filter",
     "stationary_moments",
     "with_stationary_init",
 ]
@@ -251,3 +264,225 @@ def oracle_filter(params, rs, ys):
         E_x[n] = z[:q].ravel()
         Var_x[n] = Pc[:q, :q]
     return E_x, Var_x
+
+
+# ---------------------------------------------------------------------------
+# Approximate switching baselines (IMM, GPB2, RBPF) — issue #5
+# ---------------------------------------------------------------------------
+def _logsumexp(a: np.ndarray) -> float:
+    a = np.asarray(a, dtype=float)
+    m = float(a.max())
+    if not np.isfinite(m):
+        return m
+    return m + float(np.log(np.exp(a - m).sum()))
+
+
+def _moments_from_mix(weights, zs, Ps, regimes, q, K):
+    """Collapse a weighted Gaussian Z-mixture to (E_x (q,), Var_x (q,q), pi (K,))."""
+    w = np.asarray(weights, dtype=float)
+    w = w / w.sum()
+    ex = np.zeros((q, 1))
+    for wi, zi in zip(w, zs):
+        ex += wi * zi[:q]
+    vx = np.zeros((q, q))
+    for wi, zi, Pi in zip(w, zs, Ps):
+        d = zi[:q] - ex
+        vx += wi * (Pi[:q, :q] + d @ d.T)
+    pr = np.zeros(K)
+    for wi, ri in zip(w, regimes):
+        pr[int(ri)] += wi
+    return ex.ravel(), vx, pr
+
+
+def _model_arrays(params):
+    """(F, b, Σ_W, μ_z0, Σ_z0, π0, H, K, q, s, dim) extracted from a GSSParams."""
+    K, q, s = params.K, params.q, params.s
+    dim = q + s
+    F = [params.f_matrix.F(k) for k in range(K)]
+    b = [params.b(k).reshape(dim, 1) for k in range(K)]
+    SW = [params.noise_cov.Sigma_W(k) for k in range(K)]
+    mu0 = [params.mu_z0(k).reshape(dim, 1) for k in range(K)]
+    Sig0 = [params.Sigma_z0(k) for k in range(K)]
+    pi0 = params.pi0
+    pi0 = (
+        np.asarray(pi0, dtype=float).ravel()
+        if pi0 is not None
+        else params.stationary_distribution()
+    )
+    return F, b, SW, mu0, Sig0, pi0, _obs_matrix(q, s), K, q, s, dim
+
+
+def imm_filter(params, ys):
+    """Blom-Bar-Shalom Interacting Multiple Model (IMM) filter.
+
+    Keeps one regime-conditional Kalman state and a mode probability per
+    regime; each step mixes the K states (interaction), runs K mode-matched
+    Kalman updates, and re-weights the modes by likelihood. An O(K)-per-step
+    approximation of the exact Kᴺ posterior.
+
+    Returns ``(E_x (N,q), Var_x (N,q,q), pi (N,K), log_lik)``.
+    """
+    F, b, SW, mu0, Sig0, pi0, H, K, q, s, dim = _model_arrays(params)
+    P = params.P
+    ys = np.asarray(ys, dtype=float).reshape(-1, s)
+    N = ys.shape[0]
+    E_x = np.zeros((N, q))
+    Var_x = np.zeros((N, q, q))
+    pis = np.zeros((N, K))
+    loglik = 0.0
+
+    # n = 0 : condition each regime prior on Y_1, weight by π0.
+    y0 = ys[0].reshape(s, 1)
+    z = [_kalman_exact_y_update(mu0[k], Sig0[k], y0, H) for k in range(K)]
+    ll = np.array([h[2] for h in z])
+    z, Pc = [h[0] for h in z], [h[1] for h in z]
+    logmu = np.log(pi0 + 1e-300) + ll
+    lse = _logsumexp(logmu)
+    loglik += lse
+    mu = np.exp(logmu - lse)
+    E_x[0], Var_x[0], pis[0] = _moments_from_mix(mu, z, Pc, range(K), q, K)
+
+    for n in range(1, N):
+        yn = ys[n].reshape(s, 1)
+        cbar = P.T @ mu  # predicted mode prob c_k = Σ_j P[j,k] μ_j
+        z0, P0 = [None] * K, [None] * K
+        for k in range(K):
+            wjk = (
+                np.array([P[j, k] * mu[j] for j in range(K)]) / cbar[k]
+                if cbar[k] > 1e-300
+                else np.full(K, 1.0 / K)
+            )
+            z0k = sum(wjk[j] * z[j] for j in range(K))
+            P0k = sum(wjk[j] * (Pc[j] + (z[j] - z0k) @ (z[j] - z0k).T) for j in range(K))
+            z0[k], P0[k] = z0k, 0.5 * (P0k + P0k.T)
+        ll = np.zeros(K)
+        for k in range(K):
+            z_pred = F[k] @ z0[k] + b[k]
+            P_pred = F[k] @ P0[k] @ F[k].T + SW[k]
+            z[k], Pc[k], ll[k] = _kalman_exact_y_update(z_pred, 0.5 * (P_pred + P_pred.T), yn, H)
+        logmu = np.log(cbar + 1e-300) + ll
+        lse = _logsumexp(logmu)
+        loglik += lse
+        mu = np.exp(logmu - lse)
+        E_x[n], Var_x[n], pis[n] = _moments_from_mix(mu, z, Pc, range(K), q, K)
+
+    return E_x, Var_x, pis, loglik
+
+
+def gpb2_filter(params, ys):
+    """Generalized Pseudo-Bayesian order 2 (GPB2) filter.
+
+    Keeps one Gaussian per current regime; each step expands to the K² regime
+    pairs (previous, current), runs K² Kalman updates, then collapses back to K
+    by merging over the previous regime. More accurate but K× costlier per step
+    than IMM.
+
+    Returns ``(E_x (N,q), Var_x (N,q,q), pi (N,K), log_lik)``.
+    """
+    F, b, SW, mu0, Sig0, pi0, H, K, q, s, dim = _model_arrays(params)
+    P = params.P
+    ys = np.asarray(ys, dtype=float).reshape(-1, s)
+    N = ys.shape[0]
+    E_x = np.zeros((N, q))
+    Var_x = np.zeros((N, q, q))
+    pis = np.zeros((N, K))
+    loglik = 0.0
+
+    y0 = ys[0].reshape(s, 1)
+    z = [_kalman_exact_y_update(mu0[k], Sig0[k], y0, H) for k in range(K)]
+    ll = np.array([h[2] for h in z])
+    z, Pc = [h[0] for h in z], [h[1] for h in z]
+    logmu = np.log(pi0 + 1e-300) + ll
+    lse = _logsumexp(logmu)
+    loglik += lse
+    mu = np.exp(logmu - lse)
+    E_x[0], Var_x[0], pis[0] = _moments_from_mix(mu, z, Pc, range(K), q, K)
+
+    for n in range(1, N):
+        yn = ys[n].reshape(s, 1)
+        zjk, Pjk = {}, {}
+        logw = np.full((K, K), -np.inf)
+        for j in range(K):
+            for k in range(K):
+                z_pred = F[k] @ z[j] + b[k]
+                P_pred = F[k] @ Pc[j] @ F[k].T + SW[k]
+                zk, Pk, lll = _kalman_exact_y_update(z_pred, 0.5 * (P_pred + P_pred.T), yn, H)
+                zjk[(j, k)], Pjk[(j, k)] = zk, Pk
+                logw[j, k] = np.log(mu[j] + 1e-300) + np.log(P[j, k] + 1e-300) + lll
+        loglik += _logsumexp(logw.ravel())
+        w = np.exp(logw - logw.max())
+        w /= w.sum()
+        mu = w.sum(axis=0)  # collapsed current-mode probabilities
+        for k in range(K):
+            sk = w[:, k].sum()
+            wjk = w[:, k] / sk if sk > 1e-300 else np.full(K, 1.0 / K)
+            zk = sum(wjk[j] * zjk[(j, k)] for j in range(K))
+            Pk = sum(
+                wjk[j] * (Pjk[(j, k)] + (zjk[(j, k)] - zk) @ (zjk[(j, k)] - zk).T) for j in range(K)
+            )
+            z[k], Pc[k] = zk, 0.5 * (Pk + Pk.T)
+        E_x[n], Var_x[n], pis[n] = _moments_from_mix(mu, z, Pc, range(K), q, K)
+
+    return E_x, Var_x, pis, loglik
+
+
+def rbpf_filter(params, ys, n_particles=1000, seed=0, resample_threshold=0.5):
+    """Rao-Blackwellised particle filter (Doucet, de Freitas, Murphy & Russell, 2000).
+
+    Particles over the discrete regime path, each carrying an exact
+    regime-conditional Kalman state for Z. Regimes are proposed from the
+    transition prior, weighted by the observation likelihood, and resampled
+    (systematic) when the effective sample size falls below
+    ``resample_threshold × n_particles``. Converges to the exact posterior as
+    ``n_particles → ∞``.
+
+    Returns ``(E_x (N,q), Var_x (N,q,q), pi (N,K), log_lik)``.
+    """
+    F, b, SW, mu0, Sig0, pi0, H, K, q, s, dim = _model_arrays(params)
+    P = params.P
+    ys = np.asarray(ys, dtype=float).reshape(-1, s)
+    N = ys.shape[0]
+    rng = np.random.default_rng(seed)
+    M = int(n_particles)
+
+    E_x = np.zeros((N, q))
+    Var_x = np.zeros((N, q, q))
+    pis = np.zeros((N, K))
+    loglik = 0.0
+
+    # n = 0 : sample r_0 ~ π0, init each particle's Kalman state, weight by Λ.
+    y0 = ys[0].reshape(s, 1)
+    r = rng.choice(K, size=M, p=pi0 / pi0.sum())
+    z, Pc, incr = [None] * M, [None] * M, np.zeros(M)
+    for p in range(M):
+        z[p], Pc[p], incr[p] = _kalman_exact_y_update(mu0[r[p]], Sig0[r[p]], y0, H)
+    loglik += _logsumexp(incr) - np.log(M)  # uniform prior weights 1/M
+    logw = incr - _logsumexp(incr)
+    W = np.exp(logw)
+    E_x[0], Var_x[0], pis[0] = _moments_from_mix(W, z, Pc, r, q, K)
+
+    for n in range(1, N):
+        yn = ys[n].reshape(s, 1)
+        r = np.array([rng.choice(K, p=P[int(r[p])]) for p in range(M)])  # transition prior
+        incr = np.zeros(M)
+        for p in range(M):
+            k = int(r[p])
+            z_pred = F[k] @ z[p] + b[k]
+            P_pred = F[k] @ Pc[p] @ F[k].T + SW[k]
+            z[p], Pc[p], incr[p] = _kalman_exact_y_update(z_pred, 0.5 * (P_pred + P_pred.T), yn, H)
+        loglik += _logsumexp(logw + incr)  # log Σ_p W_{n-1}[p] Λ_p
+        logw = logw + incr
+        logw -= _logsumexp(logw)
+        W = np.exp(logw)
+        E_x[n], Var_x[n], pis[n] = _moments_from_mix(W, z, Pc, r, q, K)
+        # systematic resampling if the effective sample size is too low
+        if 1.0 / np.sum(W**2) < resample_threshold * M:
+            pos = (rng.random() + np.arange(M)) / M
+            idx = np.clip(np.searchsorted(np.cumsum(W), pos), 0, M - 1)
+            z = [z[i].copy() for i in idx]
+            Pc = [Pc[i].copy() for i in idx]
+            r = r[idx]
+            logw = np.full(M, -np.log(M))
+            W = np.exp(logw)
+
+    return E_x, Var_x, pis, loglik

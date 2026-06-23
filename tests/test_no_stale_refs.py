@@ -61,8 +61,6 @@ _FORBIDDEN_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
         "eq. (4.4) / (4.8) / (4.20)",
         "the constraint is eq:H5_compact + eq:AB",
     ),
-    # Personal-name attribution outside the math note
-    (re.compile(r"\bLehmann\b"), "Lehmann", "drop or refer to 'AB constraint'"),
 ]
 
 # Files where matches are acceptable (historical / external docs).

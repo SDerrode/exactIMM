@@ -189,8 +189,9 @@ def test_singular_D_is_flagged():
 
 
 def test_C_zero_is_flagged():
-    # C = 0 (the observation is independent of the state) is the genuine validity
-    # gate that replaced the over-restrictive full-column-rank condition.
+    # C = 0 is flagged as a family-membership boundary: the model is then a classical
+    # CMS-HLM (the (H4) family), not a NGH-MSM. (Mathematically AB is still the NSC at
+    # C = 0; the flag separates the old family from the new, it is not an invalidity.)
     C = [np.array([[0.2]]), np.zeros((1, 1))]  # C(1) = 0
     D = [np.array([[0.5]]), np.array([[0.6]])]
     SU = [np.array([[0.1]]), np.array([[0.2]])]

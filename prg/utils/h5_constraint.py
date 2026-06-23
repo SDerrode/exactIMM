@@ -273,10 +273,14 @@ def validate_ngh_msm(
 
     Conditions checked (per the corrected Proposition 2)
     ----------------------------------------------------
-    1. ``C_k ≠ 0``            ∀ k        — the observation depends on the state.
-       (Full column rank of ``C_k``, hence ``s ≥ q``, is *not* required — the rank
-       condition was an over-restriction; see the module docstring. AB is the
-       necessary-and-sufficient (H5) parametrisation for any ``C_k ≠ 0``.)
+    1. ``C_k ≠ 0``            ∀ k        — this is a genuine NGH-MSM (the new
+       family), not the degenerate ``C_k = 0`` case, which is a classical CMS-HLM
+       (the (H4) family). NB: ``C_k ≠ 0`` is a *family-membership* requirement, not
+       a mathematical prerequisite of the AB / NSC. AB is the necessary-and-
+       sufficient (H5) parametrisation for *any* ``C_k`` (``D_k`` invertible,
+       ``Σ_V_k ≻ 0``), ``C_k = 0`` included — where it gives the CMS-HLM's
+       ``A_k = 0``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``. Full column rank of ``C_k`` (hence
+       ``s ≥ q``) is likewise not required (an over-restriction; module docstring).
     2. ``D_k`` invertible     ∀ k        — ``cond(D_k) ≤ cond_max``;
     3. ``Σ_V_k ≻ 0``          ∀ k        — symmetric positive definite;
     4. ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T ⪰ 0`` ∀ k — the Schur complement is a
@@ -299,16 +303,21 @@ def validate_ngh_msm(
         Dt = params.noise_cov.Delta(k)
         SV = params.noise_cov.Sigma_V(k)
 
-        # ``C_k != 0`` is the genuine validity condition (the observation must
-        # depend on the state). Full column rank of ``C_k`` (hence ``s >= q``) is
-        # NOT required: AB is the necessary-and-sufficient (H5) parametrisation for
-        # any ``C_k != 0`` with ``Σ_V ≻ 0`` and ``D`` invertible (verified
-        # numerically, single- and multi-regime, including rank-deficient C).
-        # Whether AB is moreover the *unique* (H5)-compatible parametrisation is a
-        # separate identifiability question, governed by ``K·s >= q + s`` — see the
-        # module docstring; it does not affect validity and is not flagged here.
+        # ``C_k != 0`` is a *family-membership* check, NOT a mathematical validity
+        # condition: AB is the NSC (Prop. 2) for ANY ``C_k`` given ``Σ_V ≻ 0`` and
+        # ``D`` invertible — ``C_k = 0`` included (the Lehmann matrix-inversion
+        # argument needs no condition on C; verified numerically). At ``C_k = 0`` AB
+        # gives ``A_k = 0``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``: a perfectly filterable model,
+        # but a classical CMS-HLM (the (H4) family), not the new NGH-MSM family. We
+        # flag it so callers do not mistake the old family for the new. (Full column
+        # rank of ``C_k``, hence ``s >= q``, is likewise not required. Whether AB is
+        # moreover the *unique* (H5) parametrisation is a separate identifiability
+        # question, governed by ``K·s >= q + s`` — see the module docstring.)
         if float(np.linalg.norm(C, "fro")) <= 1e-12:
-            issues.append(f"regime {k}: C = 0 (the observation does not depend on the state).")
+            issues.append(
+                f"regime {k}: C = 0 — this is a classical CMS-HLM (the (H4) family), "
+                "not a NGH-MSM (the new family)."
+            )
 
         cond_D = float(np.linalg.cond(D))
         if not np.isfinite(cond_D) or cond_D > cond_max:

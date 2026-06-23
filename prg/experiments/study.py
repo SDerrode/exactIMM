@@ -966,7 +966,29 @@ def exp_approx_exactness(outdir: Path) -> dict:
     floor = res["M1"]["gpb2"]["dEx"]
     res["rbpf_convergence"] = {"n_particles": Ms, "max_dEx": rb_err, "floor": floor}
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.6, 3.4))
+    # per-step wall-time on M1 (reference implementations; see caption)
+    Nt = 200
+    pT = _build("M1")
+    _, _, ysT = _simulate(pT, Nt, seed=11)
+
+    def _us(fn):
+        ts = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            fn()
+            ts.append(time.perf_counter() - t0)
+        return 1e6 * min(ts) / Nt
+
+    cost = {
+        "N": Nt,
+        "h5_exact": _us(lambda: _run(pT, ysT, "h5_exact")),
+        "imm": _us(lambda: imm_filter(pT, ysT)),
+        "gpb2": _us(lambda: gpb2_filter(pT, ysT)),
+        "rbpf": _us(lambda: rbpf_filter(pT, ysT, n_particles=rbpf_M, seed=0)),
+    }
+    res["cost_us_per_step"] = cost
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12.2, 3.4))
     keys = [
         ("h5", "h5_exact", _C["h5"]),
         ("gpb2", "GPB2", _C["exact"]),
@@ -995,10 +1017,16 @@ def exp_approx_exactness(outdir: Path) -> dict:
     ax2.set_ylabel(r"$\max_n\,|\Delta E[X_n|y]|$ vs exact")
     ax2.set_title("(b) RBPF converges to the exact filter")
     ax2.legend(fontsize=7)
-    fig.suptitle(
-        "E10 — approximate switching filters become exact under the AB constraint",
-        fontsize=10,
-    )
+
+    cvals = [cost["h5_exact"], cost["imm"], cost["gpb2"], cost["rbpf"]]
+    ccols = [_C["h5"], _C["imm"], _C["exact"], _C["oracle"]]
+    ax3.bar(range(4), cvals, color=ccols)
+    ax3.set_yscale("log")
+    ax3.set_xticks(range(4))
+    ax3.set_xticklabels(["h5_exact", "IMM", "GPB2", "RBPF"], fontsize=7)
+    ax3.set_ylabel(r"time / step [$\mu$s]")
+    ax3.set_title(r"(c) Per-step cost (M1, $N=200$)")
+    fig.tight_layout()
     fig.savefig(outdir / "figures" / "e10_approx_exactness.pdf")
     plt.close(fig)
     return res

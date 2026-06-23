@@ -4,17 +4,21 @@ prg/experiments/study.py
 ========================
 Simulation study for "On Fast Optimal Filtering in Gaussian Switching Systems".
 
-Runs six experiments (E1–E6) on the reference models M1/M2/M3 and writes
-vector figures + a ``results.json`` to an output directory.
+Runs ten jump-filtering experiments (E1–E9, including E3′) and writes one
+vector figure per experiment + a ``results.json`` to an output directory.
 
-    python -m prg.experiments.study docs/wojciech/rapport_experimental
+    python -m prg.experiments.study docs/wojciech/article_vWojciech_tex
 
 E1  Exactness        h5_exact == brute-force Bayesian filter (all Kᴺ histories)
 E2  Speed            wall-time vs N: linear, as fast as a single Kalman filter
 E3  Value            RMSE / regime accuracy vs naive baselines and the oracle
-E4  Multivariate     M2 (q=s=2) tracking with regime posterior
+E3′ Value sweep      filtering gain across a value-/regime-contrast grid
+E4  Multivariate     q=s=2 tracking with regime posterior
 E5  Closed form      Γ_k constant in n (no Riccati); X slaved to Y
 E6  Robustness       bias of h5_exact off the AB manifold vs the general IMM
+E7  Rank-deficient C C with s<q (rank-deficient observation coupling)
+E8  C influence      role of C as the regime-identification channel
+E9  C mismatch       filtering C≠0 data with a C=0 (CMS-HLM) filter
 """
 
 from __future__ import annotations
@@ -89,6 +93,90 @@ def contrasted_model(p_switch: float = 0.04, m: float = 0.8) -> GSSParams:
         A_list.append(a)
         B_list.append(b)
     fm = FMatrix(K, q, s, A_list, B_list, C, D)
+    nc = GSSNoiseCovariance(K, q, s, SU, Dt, SV)
+    p = GSSParams(
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
+        mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
+    )
+    return with_stationary_init(p)
+
+
+def c_influence_model(C: float, p_switch: float = 0.02) -> GSSParams:
+    """A K=2, q=s=1 AB-constrained model used to sweep the observation coupling C
+    (E8). The two regimes differ only in the sign of the state/observation cross
+    covariance (Delta_0=+d, Delta_1=-d), so the slaved gain M_r=Delta_r Sigma_V^-1
+    flips sign with the regime (the regime matters for the state) while D, Sigma_V,
+    Sigma_U are matched. At C=0 the observation is conditionally autonomous
+    (Y_{n+1}=D Y_n+V, identical across regimes): the regime is hidden and the model
+    is exactly a CMS-HLM (the old condition (H4), C=0). For C!=0 the observation
+    depends on the state, which reveals the regime. AB keeps it fast-exact for every
+    C; stationary init.
+    """
+    from prg.classes.FMatrix import FMatrix
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance
+    from prg.utils.h5_constraint import compute_AB
+
+    K, q, s = 2, 1, 1
+    P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
+    d = 0.30
+    SV = [np.array([[0.50]]), np.array([[0.50]])]
+    SU = [np.array([[0.50]]), np.array([[0.50]])]
+    D = [np.array([[0.50]]), np.array([[0.50]])]
+    Dt = [np.array([[+d]]), np.array([[-d]])]  # Delta flips sign -> M_r flips sign
+    Cm = [np.array([[C]]), np.array([[C]])]
+    A_list, B_list = [], []
+    for k in range(K):
+        a, b = compute_AB(Cm[k], D[k], Dt[k], SV[k])
+        A_list.append(a)
+        B_list.append(b)
+    fm = FMatrix(K, q, s, A_list, B_list, Cm, D)
+    nc = GSSNoiseCovariance(K, q, s, SU, Dt, SV)
+    p = GSSParams(
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
+        mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
+    )
+    return with_stationary_init(p)
+
+
+def c_mismatch_model(C: float, p_switch: float = 0.02) -> GSSParams:
+    """E9 model: K=2, q=s=1 NGH-MSM whose regimes differ in observation volatility
+    (Sigma_V quiet vs volatile) -- so the regime is identifiable even at C=0 -- and
+    in the sign of the slaved gain M_r=Delta_r Sigma_V^-1. The observation coupling
+    C is the swept parameter. Used to filter C!=0 data with an 'old' C=0 (CMS-HLM)
+    model and quantify the cost of ignoring the X->Y coupling. AB-constrained;
+    stationary init."""
+    from prg.classes.FMatrix import FMatrix
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance
+    from prg.utils.h5_constraint import compute_AB
+
+    K, q, s = 2, 1, 1
+    P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
+    SV = [np.array([[0.20]]), np.array([[0.60]])]  # quiet / volatile observation
+    SU = [np.array([[0.25]]), np.array([[0.30]])]
+    D = [np.array([[0.50]]), np.array([[0.50]])]
+    M = [0.6, -0.5]  # slaved gain M_r = Delta_r / Sigma_V (flips sign)
+    Dt = [M[k] * SV[k] for k in range(K)]  # Delta = M Sigma_V
+    Cm = [np.array([[C]]), np.array([[C]])]
+    A_list, B_list = [], []
+    for k in range(K):
+        a, b = compute_AB(Cm[k], D[k], Dt[k], SV[k])
+        A_list.append(a)
+        B_list.append(b)
+    fm = FMatrix(K, q, s, A_list, B_list, Cm, D)
     nc = GSSNoiseCovariance(K, q, s, SU, Dt, SV)
     p = GSSParams(
         K=K,
@@ -665,6 +753,128 @@ def exp_rank_deficient(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# E8 — Influence of C : from CMS-HLM (C=0) to NGH-MSM (C != 0)
+# ---------------------------------------------------------------------------
+def exp_c_influence(outdir: Path) -> dict:
+    """E8 — sweep the observation coupling C. At C=0 the model is a CMS-HLM (the old
+    condition (H4)): the observation is conditionally autonomous and the regime --
+    here carrying the sign of the slaved state -- is hidden, so the exact filter can
+    only average the two opposite couplings (state estimate ~ 0). As C grows the
+    observation measures the state, the regime becomes identifiable, and the exact
+    filter recovers the regime-dependent state, approaching the regime-aware oracle.
+    The regime-conditional state law M_r/Gamma_r is itself C-independent (slaved):
+    C acts purely through regime identifiability."""
+    Cs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    N, seeds = 500, list(range(40))
+    rmse = {"h5_exact": [], "single_kalman": [], "oracle": [], "zero": []}
+    acc = []
+    for C in Cs:
+        eh, ek, eo, ez, ac = [], [], [], [], []
+        params = c_influence_model(C)
+        for sd in seeds:
+            rs, xs, ys = _simulate(params, N, seed=500 + sd)
+            ExH, PiH, _ = _run(params, ys, "h5_exact")
+            ExK, _ = single_kalman_filter(params, ys)
+            ExO, _ = oracle_filter(params, rs, ys)
+            eh.append(_rmse(ExH, xs))
+            ek.append(_rmse(ExK, xs))
+            eo.append(_rmse(ExO, xs))
+            ez.append(_rmse(np.zeros_like(xs), xs))
+            ac.append(float(np.mean(PiH.argmax(axis=1) == rs)))
+        rmse["h5_exact"].append(float(np.mean(eh)))
+        rmse["single_kalman"].append(float(np.mean(ek)))
+        rmse["oracle"].append(float(np.mean(eo)))
+        rmse["zero"].append(float(np.mean(ez)))
+        acc.append(float(np.mean(ac)))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
+    ax1.plot(Cs, acc, "o-", color=_C["h5"])
+    ax1.axhline(0.5, color="grey", ls=":", lw=1, label="chance")
+    ax1.set_xlabel("observation coupling $C$")
+    ax1.set_ylabel("regime accuracy")
+    ax1.set_title("E8a — $C$ opens the regime channel")
+    ax1.legend(fontsize=7)
+    ax1.annotate(
+        "CMS-HLM ($C=0$)", xy=(0.0, acc[0]), xytext=(0.1, 0.62),
+        fontsize=7, arrowprops=dict(arrowstyle="->", lw=0.6),
+    )
+    ax2.plot(Cs, rmse["zero"], "--", color="#bbbbbb", label="zero")
+    ax2.plot(Cs, rmse["single_kalman"], "^-", color=_C["kal"], label="single Kalman")
+    ax2.plot(Cs, rmse["h5_exact"], "o-", color=_C["h5"], label="h5_exact (proposed)")
+    ax2.plot(Cs, rmse["oracle"], "s-", color=_C["oracle"], label="oracle")
+    ax2.set_xlabel("observation coupling $C$")
+    ax2.set_ylabel("state RMSE")
+    ax2.set_title("E8b — state recovered as $C$ grows")
+    ax2.legend(fontsize=7)
+    fig.savefig(outdir / "figures" / "e8_c_influence.pdf")
+    plt.close(fig)
+    recovered = [
+        (rmse["zero"][i] - rmse["h5_exact"][i]) / (rmse["zero"][i] - rmse["oracle"][i])
+        if rmse["zero"][i] > rmse["oracle"][i]
+        else 0.0
+        for i in range(len(Cs))
+    ]
+    return {
+        "C": Cs,
+        "regime_acc": acc,
+        "rmse_mean": rmse,
+        "recovered": recovered,
+        "N": N,
+        "n_seeds": len(seeds),
+    }
+
+
+# ---------------------------------------------------------------------------
+# E9 — Filtering C != 0 data with the old C = 0 (CMS-HLM) filter
+# ---------------------------------------------------------------------------
+def exp_c_mismatch(outdir: Path) -> dict:
+    """E9 — what the old family costs. We generate data from a true NGH-MSM with
+    C != 0 (the observation measures the state) and filter it two ways: with the
+    correct filter (true C), and with the 'old' filter that assumes C = 0, i.e. the
+    exact filter of the CMS-HLM obtained by zeroing C (same regimes, volatilities
+    and slaved gains, but an autonomous observation). The regimes also differ in
+    observation volatility, so the C = 0 filter is not blind -- it still tracks the
+    regime from the volatility -- which makes the comparison non-trivial: the gap is
+    exactly the information carried by the X->Y coupling that the old model discards.
+    """
+    Cs = [0.0, 0.15, 0.3, 0.45, 0.6, 0.7]
+    N, seeds = 500, list(range(40))
+    rmse = {"correct": [], "c0_old": [], "oracle": []}
+    old = c_mismatch_model(0.0)  # the old CMS-HLM model (C = 0)
+    for C in Cs:
+        true = c_mismatch_model(C)
+        ec, eold, eor = [], [], []
+        for sd in seeds:
+            rs, xs, ys = _simulate(true, N, seed=600 + sd)
+            ExC, _, _ = _run(true, ys, "h5_exact")  # correct filter (knows C)
+            ExOld, _, _ = _run(old, ys, "h5_exact")  # old C = 0 filter on the same data
+            ExOr, _ = oracle_filter(true, rs, ys)
+            ec.append(_rmse(ExC, xs))
+            eold.append(_rmse(ExOld, xs))
+            eor.append(_rmse(ExOr, xs))
+        rmse["correct"].append(float(np.mean(ec)))
+        rmse["c0_old"].append(float(np.mean(eold)))
+        rmse["oracle"].append(float(np.mean(eor)))
+    penalty = [rmse["c0_old"][i] - rmse["correct"][i] for i in range(len(Cs))]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
+    ax1.plot(Cs, rmse["c0_old"], "s-", color=_C["imm"], label="old $C{=}0$ filter (CMS-HLM)")
+    ax1.plot(Cs, rmse["correct"], "o-", color=_C["h5"], label="correct filter (NGH-MSM)")
+    ax1.plot(Cs, rmse["oracle"], "^-", color=_C["oracle"], label="oracle")
+    ax1.set_xlabel("true observation coupling $C$")
+    ax1.set_ylabel("state RMSE")
+    ax1.set_title("E9a — old $C{=}0$ model on $C{\\neq}0$ data")
+    ax1.legend(fontsize=7)
+    ax2.plot(Cs, penalty, "o-", color=_C["imm"])
+    ax2.set_xlabel("true observation coupling $C$")
+    ax2.set_ylabel("RMSE penalty of assuming $C{=}0$")
+    ax2.set_title("E9b — cost of the old assumption")
+    fig.savefig(outdir / "figures" / "e9_c_mismatch.pdf")
+    plt.close(fig)
+    return {"C": Cs, "rmse_mean": rmse, "penalty": penalty, "N": N, "n_seeds": len(seeds)}
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 def main(outdir: str | Path) -> dict:
@@ -680,6 +890,8 @@ def main(outdir: str | Path) -> dict:
         ("E5_closed_form", exp_closed_form),
         ("E6_robustness", exp_robustness),
         ("E7_rank_deficient", exp_rank_deficient),
+        ("E8_c_influence", exp_c_influence),
+        ("E9_c_mismatch", exp_c_mismatch),
     ]:
         print(f"running {key} …", flush=True)
         results[key] = fn(outdir)
@@ -692,4 +904,4 @@ def main(outdir: str | Path) -> dict:
 if __name__ == "__main__":
     import sys
 
-    main(sys.argv[1] if len(sys.argv) > 1 else "docs/wojciech/rapport_experimental")
+    main(sys.argv[1] if len(sys.argv) > 1 else "docs/wojciech/article_vWojciech_tex")

@@ -28,10 +28,6 @@ import time
 import warnings
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 from prg.classes.GSSParams import GSSParams
@@ -46,15 +42,35 @@ from prg.experiments.reference_filters import (
 from prg.experiments.run_simulations import _params_from_dict
 from prg.filter.gss_filter import GSSFilter
 
-plt.rcParams.update(
-    {
-        "font.size": 10,
-        "axes.grid": True,
-        "grid.alpha": 0.3,
-        "figure.dpi": 120,
-        "savefig.bbox": "tight",
-    }
-)
+plt = None  # matplotlib.pyplot — imported lazily by _setup_mpl()
+
+
+def _setup_mpl():
+    """Import matplotlib lazily, only when figures are actually generated.
+
+    Keeping matplotlib out of import time lets the model builders below be
+    imported without the optional plotting dependency (e.g. from the test
+    suite, where matplotlib is not installed)."""
+    global plt
+    if plt is None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _plt
+
+        _plt.rcParams.update(
+            {
+                "font.size": 10,
+                "axes.grid": True,
+                "grid.alpha": 0.3,
+                "figure.dpi": 120,
+                "savefig.bbox": "tight",
+            }
+        )
+        plt = _plt
+    return plt
+
+
 _C = {"h5": "#1f77b4", "imm": "#ff7f0e", "kal": "#2ca02c", "exact": "#000000", "oracle": "#9467bd"}
 
 
@@ -477,16 +493,31 @@ def exp_value_sweep(outdir: Path) -> dict:
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
     ax1.errorbar(
-        ms, rmse["single_kalman"], yerr=rstd["single_kalman"], fmt="^-", color=_C["kal"],
-        capsize=2, label="single Kalman",
+        ms,
+        rmse["single_kalman"],
+        yerr=rstd["single_kalman"],
+        fmt="^-",
+        color=_C["kal"],
+        capsize=2,
+        label="single Kalman",
     )
     ax1.errorbar(
-        ms, rmse["h5_exact"], yerr=rstd["h5_exact"], fmt="o-", color=_C["h5"],
-        capsize=2, label="h5_exact (proposed)",
+        ms,
+        rmse["h5_exact"],
+        yerr=rstd["h5_exact"],
+        fmt="o-",
+        color=_C["h5"],
+        capsize=2,
+        label="h5_exact (proposed)",
     )
     ax1.errorbar(
-        ms, rmse["oracle"], yerr=rstd["oracle"], fmt="s-", color=_C["oracle"],
-        capsize=2, label="oracle (regimes known)",
+        ms,
+        rmse["oracle"],
+        yerr=rstd["oracle"],
+        fmt="s-",
+        color=_C["oracle"],
+        capsize=2,
+        label="oracle (regimes known)",
     )
     ax1.set_xlabel("regime contrast: coupling magnitude $m$  ($M_0={+}m,\\ M_1={-}m$)")
     ax1.set_ylabel("state RMSE")
@@ -726,7 +757,11 @@ def exp_rank_deficient(outdir: Path) -> dict:
     for i, ax in enumerate((ax0, ax1)):
         sd = np.sqrt(np.clip(VarH[:, i, i], 0, None))
         ax.fill_between(
-            t, ExH[:, i] - 2 * sd, ExH[:, i] + 2 * sd, color=_C["h5"], alpha=0.2,
+            t,
+            ExH[:, i] - 2 * sd,
+            ExH[:, i] + 2 * sd,
+            color=_C["h5"],
+            alpha=0.2,
             label="h5_exact $\\pm 2\\sigma$",
         )
         ax.plot(t, xs[:, i], "k", lw=1, label="true $X$")
@@ -795,8 +830,11 @@ def exp_c_influence(outdir: Path) -> dict:
     ax1.set_title("E8a — $C$ opens the regime channel")
     ax1.legend(fontsize=7)
     ax1.annotate(
-        "CMS-HLM ($C=0$)", xy=(0.0, acc[0]), xytext=(0.1, 0.62),
-        fontsize=7, arrowprops=dict(arrowstyle="->", lw=0.6),
+        "CMS-HLM ($C=0$)",
+        xy=(0.0, acc[0]),
+        xytext=(0.1, 0.62),
+        fontsize=7,
+        arrowprops=dict(arrowstyle="->", lw=0.6),
     )
     ax2.plot(Cs, rmse["zero"], "--", color="#bbbbbb", label="zero")
     ax2.plot(Cs, rmse["single_kalman"], "^-", color=_C["kal"], label="single Kalman")
@@ -878,6 +916,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
 # Driver
 # ---------------------------------------------------------------------------
 def main(outdir: str | Path) -> dict:
+    _setup_mpl()
     outdir = Path(outdir)
     (outdir / "figures").mkdir(parents=True, exist_ok=True)
     results = {}

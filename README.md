@@ -23,7 +23,11 @@ The project targets **Gaussian Switching Systems (GSS)**, a class of hidden Mark
 
 $$Z_{n+1} = F(R_{n+1})\,Z_n + W_{n+1}, \qquad Z_n = \begin{bmatrix}X_n \\ Y_n\end{bmatrix}$$
 
-with $F(k) = \begin{bmatrix}A_k & B_k \\ C_k & D_k\end{bmatrix}$ and $W_{n+1}\mid R_{n+1}=k \sim \mathcal{N}(0,\Sigma_W(k))$.
+with $F(k) = \begin{bmatrix}A_k & B_k \\ C_k & D_k\end{bmatrix}$ and a regime-dependent Gaussian noise $W_{n+1}\mid R_{n+1}=k \sim \mathcal{N}(0,\Sigma_W(k))$ whose covariance splits into blocks aligned with $(X_n, Y_n)$:
+
+$$\Sigma_W(k) = \begin{bmatrix}\Sigma_U(k) & \Delta(k) \\ \Delta(k)^{\top} & \Sigma_V(k)\end{bmatrix},$$
+
+so that $\Sigma_U(k)$ is the state-noise covariance, $\Sigma_V(k)$ the observation-noise covariance, and $\Delta(k)$ the cross-covariance between the state and observation noises.
 
 The central objective is to compute $\mathbb{E}[X_n \mid Y_{1:n}]$ efficiently (fast optimal filter).
 
@@ -70,53 +74,21 @@ switching models ($C = 0$); it is checked at model-build time.
 
 ---
 
-## Project structure
-
-```
-exactIMM/
-├── prg/
-│   ├── utils/
-│   │   ├── exceptions.py       # GSSError hierarchy
-│   │   ├── matrix_checks.py    # CovarianceMatrix, StochasticMatrix diagnostics
-│   │   └── h5_constraint.py    # (H5) AB constraint closed form: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D
-│   ├── models/
-│   │   ├── base_gss_model.py   # BaseGSSModel (abstract)
-│   │   └── model_gss_K2_q1_s1.py  # Example: K=2, q=1, s=1
-│   ├── classes/
-│   │   ├── FMatrix.py          # Block transition matrix F(k)
-│   │   ├── NoiseCovariance.py  # Block noise covariance Sigma_W(k)
-│   │   ├── GSSParams.py        # Aggregates all model parameters
-│   │   └── GSSSimulator.py     # Iterator-based simulator
-│   ├── filter/
-│   │   ├── gss_filter.py       # GSSFilter — fast exact optimal filter
-│   │   └── main.py             # CLI entry point for the filter
-│   ├── experiments/
-│   │   └── study.py            # Jump-filtering study (E1–E9) → paper figures
-│   ├── simulate.py             # CLI entry point for the simulator
-│   └── gui/                    # Optional PyQt6 graphical interface
-├── docs/wojciech/
-│   └── article_vWojciech_tex/  # LaTeX sources of the current paper version
-├── tests/                      # pytest suite
-├── data/
-│   └── simulated/              # Generated CSV files (gitignored)
-├── logs/                       # Execution logs (one file per run)
-├── config.toml                 # Runtime configuration
-└── pyproject.toml
-```
-
----
-
 ## Installation
 
 Python **3.14** is required (declared in `pyproject.toml`).  
-**Use a project virtual environment** — the system-wide Homebrew installation of NumPy does not load correctly on this platform.
+The package is **not on PyPI** — install it from a clone of the repository. A project virtual environment is recommended (the system-wide Homebrew NumPy does not load correctly on this platform).
 
 ```bash
+# Clone the repository
+git clone https://github.com/SDerrode/exactIMM.git
+cd exactIMM
+
 # Create and activate the venv (must point to Python 3.14)
 python3.14 -m venv .venv
 source .venv/bin/activate
 
-# Core + dev dependencies
+# Install the package (editable) + dev dependencies
 pip install -e ".[dev]"
 
 # Optional: GUI dependencies (PyQt6 + matplotlib)

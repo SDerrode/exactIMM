@@ -455,6 +455,27 @@ class TestJosephForm:
 class TestStationaryMoments:
     """The pre-computed stationary moments satisfy the fixed-point equation."""
 
+    def test_closed_form_moments_equal_fixed_point(self):
+        """Proposition 4 (direct form): for an AB-constrained model the closed-form
+        regime gain ``M_k = Δ_k Σ_V_k⁻¹`` and covariance
+        ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T`` — used by ``mode='h5_exact'`` for a
+        validated NGH-MSM (:mod:`prg.filter.gss_filter`) — coincide with the gain
+        and posterior built from the fixed-point stationary moments,
+        ``K_k = Σ_XY(k) Σ_YY(k)⁻¹`` and ``Σ_XX(k) − K_k Σ_YY(k) K_k^T``. This is
+        the numerical check that the Riccati fixed-point machinery is redundant
+        under the AB constraint, so the closed forms can replace it exactly.
+        """
+        from prg.utils.h5_constraint import apply_AB_constraint
+
+        ab = apply_AB_constraint(GSSParams.from_model(ModelGssK2Q1S1()))
+        f = GSSFilter(ab, mode="h5_exact")
+        for k in range(ab.K):
+            Sxy, Syy, Sxx = f._S_XY[k], f._S_YY[k], f._S_XX[k]
+            Kg = Sxy @ np.linalg.inv(Syy)  # fixed-point Kalman gain
+            Ppost = Sxx - Kg @ Syy @ Kg.T  # fixed-point posterior covariance
+            np.testing.assert_allclose(ab.noise_cov.M(k), Kg, rtol=1e-6, atol=1e-9)
+            np.testing.assert_allclose(ab.noise_cov.Gamma(k), Ppost, rtol=1e-6, atol=1e-9)
+
     def test_stationary_distribution_exposed(self, params):
         filt = GSSFilter(params, mode="h5_exact")
         pi_inf = filt.stationary_distribution

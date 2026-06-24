@@ -7,15 +7,17 @@ closed-form regime-conditional moments.
 
 Coverage
 --------
-- Every GUI preset is a *valid* NGH-MSM (AB constraint + C ≠ 0, D invertible,
-  Σ_V ≻ 0, Γ ⪰ 0).  This would fail on the pre-fix presets, which all violated
+- Every GUI preset is a *valid* NGH-MSM (AB constraint + C ≠ 0, Σ_V ≻ 0,
+  Γ ⪰ 0).  This would fail on the pre-fix presets, which all violated
   the AB constraint — it is the regression guard for P0.
 - Full column rank of C (s ≥ q) is *not* required: an AB-constrained s < q model
   is a valid NGH-MSM (the rank condition was an over-restriction).
 - ``NoiseCovariance.M`` / ``Gamma`` match the closed forms, and under AB
   ``A = M C``, ``B = M D``.
 - ``validate_ngh_msm`` / ``GSSParams.check_ngh_msm`` flag each violated
-  condition (AB residual, singular D, C = 0).
+  condition (AB residual, C = 0).
+- D-invertibility is *not* required (corrected Proposition 2 needs only Σ_V ≻ 0):
+  an AB-constrained model with a singular D is a valid NGH-MSM.
 """
 
 from __future__ import annotations
@@ -171,8 +173,9 @@ def test_non_ab_model_is_flagged():
     assert any("AB / (H5) constraint violated" in m for m in issues)
 
 
-def test_singular_D_is_flagged():
-    # Valid AB blocks but D(0) singular → D-invertibility violated.
+def test_singular_D_is_now_valid():
+    # D-invertibility is no longer required (corrected Proposition 2 needs only
+    # Σ_V ≻ 0): an AB-constrained model with D(0) singular is a valid NGH-MSM.
     C = [np.array([[0.2]]), np.array([[0.1]])]
     D = [np.array([[0.0]]), np.array([[0.6]])]  # D(0) singular
     SU = [np.array([[0.1]]), np.array([[0.2]])]
@@ -184,8 +187,7 @@ def test_singular_D_is_flagged():
         A.append(Ak)
         B.append(Bk)
     params = _params(A, B, C, D, SU, Dt, SV)
-    issues = validate_ngh_msm(params)
-    assert any("D is singular" in m for m in issues)
+    assert validate_ngh_msm(params) == []
 
 
 def test_C_zero_is_flagged():
@@ -262,25 +264,27 @@ class TestNGHMSMParams:
         assert isinstance(p, NGHMSMParams)
         assert is_ngh_msm(p)
 
-    def test_from_free_blocks_rejects_singular_D(self):
-        # compute_AB succeeds with D=0 (B=0); __init__ validation catches it.
+    def test_from_free_blocks_accepts_singular_D(self):
+        # D-invertibility is no longer required: compute_AB succeeds with D=0
+        # (B=0) and construction yields a valid NGH-MSM (only Σ_V ≻ 0 is needed).
         C, D, SU, Dt, SV = _free_blocks()
         D = [np.array([[0.0]]), D[1]]  # D(0) singular
-        with pytest.raises(ParamError, match="D is singular"):
-            NGHMSMParams.from_free_blocks(
-                K=2,
-                q=1,
-                s=1,
-                P=np.full((2, 2), 0.5),
-                C_list=C,
-                D_list=D,
-                Sigma_U_list=SU,
-                Delta_list=Dt,
-                Sigma_V_list=SV,
-                pi0=None,
-                mu_z0_list=[np.zeros((2, 1))] * 2,
-                Sigma_z0_list=[np.eye(2)] * 2,
-            )
+        p = NGHMSMParams.from_free_blocks(
+            K=2,
+            q=1,
+            s=1,
+            P=np.full((2, 2), 0.5),
+            C_list=C,
+            D_list=D,
+            Sigma_U_list=SU,
+            Delta_list=Dt,
+            Sigma_V_list=SV,
+            pi0=None,
+            mu_z0_list=[np.zeros((2, 1))] * 2,
+            Sigma_z0_list=[np.eye(2)] * 2,
+        )
+        assert isinstance(p, NGHMSMParams)
+        assert is_ngh_msm(p)
 
     def test_init_rejects_off_manifold_AB(self):
         # An assembled FMatrix with hand-set A, B off the AB manifold is rejected.

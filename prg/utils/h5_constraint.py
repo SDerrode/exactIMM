@@ -262,7 +262,6 @@ def validate_ngh_msm(
     params: GSSParams,
     *,
     tol: float = NGH_MSM_RESID_TOL,
-    cond_max: float = 1e12,
 ) -> list[str]:
     """List the ways ``params`` violates the corrected NGH-MSM condition (Prop. 2).
 
@@ -277,18 +276,18 @@ def validate_ngh_msm(
        family), not the degenerate ``C_k = 0`` case, which is a classical CMS-HLM
        (the (H4) family). NB: ``C_k ≠ 0`` is a *family-membership* requirement, not
        a mathematical prerequisite of the AB / NSC. AB is the necessary-and-
-       sufficient (H5) parametrisation for *any* ``C_k`` (``D_k`` invertible,
-       ``Σ_V_k ≻ 0``), ``C_k = 0`` included — where it gives the CMS-HLM's
-       ``A_k = 0``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``. Full column rank of ``C_k`` (hence
-       ``s ≥ q``) is likewise not required (an over-restriction; module docstring).
-    2. ``D_k`` invertible     ∀ k        — ``cond(D_k) ≤ cond_max``;
-    3. ``Σ_V_k ≻ 0``          ∀ k        — symmetric positive definite;
-    4. ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T ⪰ 0`` ∀ k — the Schur complement is a
+       sufficient (H5) parametrisation for *any* ``C_k`` given only ``Σ_V_k ≻ 0``,
+       ``C_k = 0`` included — where it gives the CMS-HLM's ``A_k = 0``,
+       ``B_k = Δ_k Σ_V_k⁻¹ D_k``. Full column rank of ``C_k`` (hence ``s ≥ q``) and
+       invertibility of ``D_k`` are likewise *not* required: the corrected
+       Proposition 2 needs only ``Σ_V_k ≻ 0`` (see the module docstring).
+    2. ``Σ_V_k ≻ 0``          ∀ k        — symmetric positive definite;
+    3. ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T ⪰ 0`` ∀ k — the Schur complement is a
        genuine covariance (⇔ the joint noise covariance Σ_W(k) is PSD);
-    5. AB / (H5) constraint   — ``max`` relative pairwise residual ``≤ tol``,
+    4. AB / (H5) constraint   — ``max`` relative pairwise residual ``≤ tol``,
        i.e. ``A_k = Δ_k Σ_V_k⁻¹ C_k`` and ``B_k = Δ_k Σ_V_k⁻¹ D_k`` (up to tol).
 
-    Conditions (1)–(6) are exactly what makes the exact fast filter of
+    Conditions (1)–(4) are exactly what makes the exact fast filter of
     Proposition 4 (closed form ``M_k = Δ_k Σ_V_k⁻¹``, ``Γ_k`` constant in n)
     applicable. They are *not* imposed at ``GSSParams`` construction, because the
     same class also serves non-(H5) models handled by ``mode="imm_general"``.
@@ -298,15 +297,14 @@ def validate_ngh_msm(
 
     for k in range(K):
         C = params.f_matrix.C(k)
-        D = params.f_matrix.D(k)
         SU = params.noise_cov.Sigma_U(k)
         Dt = params.noise_cov.Delta(k)
         SV = params.noise_cov.Sigma_V(k)
 
         # ``C_k != 0`` is a *family-membership* check, NOT a mathematical validity
-        # condition: AB is the NSC (Prop. 2) for ANY ``C_k`` given ``Σ_V ≻ 0`` and
-        # ``D`` invertible — ``C_k = 0`` included (the Lehmann matrix-inversion
-        # argument needs no condition on C; verified numerically). At ``C_k = 0`` AB
+        # condition: AB is the NSC (Prop. 2) for ANY ``C_k`` given only ``Σ_V ≻ 0``
+        # — ``C_k = 0`` included (the Lehmann matrix-inversion argument needs no
+        # condition on C, and none on D; verified numerically). At ``C_k = 0`` AB
         # gives ``A_k = 0``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``: a perfectly filterable model,
         # but a classical CMS-HLM (the (H4) family), not the new NGH-MSM family. We
         # flag it so callers do not mistake the old family for the new. (Full column
@@ -318,10 +316,6 @@ def validate_ngh_msm(
                 f"regime {k}: C = 0 — this is a classical CMS-HLM (the (H4) family), "
                 "not a NGH-MSM (the new family)."
             )
-
-        cond_D = float(np.linalg.cond(D))
-        if not np.isfinite(cond_D) or cond_D > cond_max:
-            issues.append(f"regime {k}: D is singular / ill-conditioned (cond = {cond_D:.3e}).")
 
         ev_SV = _min_eig_sym(SV)
         if ev_SV <= 0.0:
@@ -436,11 +430,11 @@ def apply_AB_constraint(
         A *new* object with updated A, B blocks. Because the result satisfies
         the AB constraint by construction, it is returned as the stronger type
         :class:`~prg.classes.GSSParams.NGHMSMParams` **when** the structural
-        CNS also holds (s ≥ q, rank(C_k) = q, D_k invertible, Σ_V_k ≻ 0,
-        Γ_k ⪰ 0). If a structural condition fails (e.g. a rank-deficient C or a
-        non-PSD Schur complement — the projected model then has no valid exact
-        filter), a base :class:`GSSParams` is returned and a warning is logged,
-        preserving the "project what you can" contract for CLI/script paths.
+        conditions also hold (C_k ≠ 0, Σ_V_k ≻ 0, Γ_k ⪰ 0). If one fails (e.g.
+        C_k = 0 — the degenerate CMS-HLM family — or a non-PSD Schur complement,
+        for which the projected model has no valid exact filter), a base
+        :class:`GSSParams` is returned and a warning is logged, preserving the
+        "project what you can" contract for CLI/script paths.
 
     Raises
     ------

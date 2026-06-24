@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **(H5)/NGH-MSM**: the ``D_k`` invertibility hypothesis is **dropped**. Per the
+  corrected necessary-and-sufficient Proposition 2, the only surviving structural
+  conditions are ``Σ_V_k ≻ 0`` and ``Γ_k ⪰ 0`` (plus the AB equalities; ``C_k ≠ 0``
+  stays a *family-membership* flag, not a validity error). ``validate_ngh_msm`` no
+  longer rejects a singular / ill-conditioned ``D_k`` — the exact filter inverts
+  only ``Σ_V``, never ``D`` — and its ``cond_max`` parameter is removed.
+
 ## [1.0.0] — 2026-06-23
 
 First stable release of the jump-filtering toolkit.

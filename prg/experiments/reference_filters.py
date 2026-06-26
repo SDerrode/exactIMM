@@ -17,8 +17,8 @@ exact_mixture_filter(params, ys)
     histories (no pruning), each a conditional Kalman filter, recombined by
     posterior weight. Ground truth for short sequences (cost ~Kᴺ).
 single_kalman_filter(params, ys)
-    A single Kalman filter on the π-stationary-averaged linear model — the
-    natural "ignore the switching" baseline.
+    A pairwise (coupled) Kalman filter on the π-stationary-averaged model — the
+    regime-blind "ignore the switching" baseline (a Kalman couple on Z=[X;Y]).
 oracle_filter(params, rs, ys)
     A Kalman filter that switches with the *known* regime sequence ``rs`` — the
     best achievable X-estimate (regimes given). Lower bound on the error.
@@ -198,13 +198,15 @@ def exact_mixture_filter(params, ys):
 
 
 # ---------------------------------------------------------------------------
-# Single Kalman on the π-averaged model ("ignore the switching")
+# Pairwise (coupled) Kalman on the π-averaged model ("ignore the switching")
 # ---------------------------------------------------------------------------
 def single_kalman_filter(params, ys):
-    """Kalman filter on the stationary-π-averaged linear model.
+    """Pairwise (coupled) Kalman filter on the stationary-π-averaged model.
 
     Uses F̄ = Σ_k π_k F_k, Σ̄_W = Σ_k π_k Σ_W(k), b̄ = Σ_k π_k b(k), started from
-    the averaged stationary moment — a fair "no regime modelling" baseline.
+    the averaged stationary moment — a fair regime-blind baseline. It runs on the
+    couple Z=[X;Y] with the full averaged coupling F̄=[[A,B],[C,D]] (a Kalman
+    *couple*, not a traditional reduced-state filter; name kept for compatibility).
     Returns ``(E_x, Var_x)`` of shapes ``(N, q)``, ``(N, q, q)``.
     """
     K, q, s = params.K, params.q, params.s

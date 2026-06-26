@@ -10,7 +10,7 @@ vector figure per experiment + a ``results.json`` to an output directory.
     python -m prg.experiments.study docs/wojciech/article_vWojciech_tex
 
 E1  Exactness        h5_exact == brute-force Bayesian filter (all Kᴺ histories)
-E2  Speed            wall-time vs N: linear, as fast as a single Kalman filter
+E2  Speed            wall-time vs N: linear, as fast as a single pairwise Kalman filter
 E3  Value            RMSE / regime accuracy vs naive baselines and the oracle
 E3′ Value sweep      filtering gain across a value-/regime-contrast grid
 E4  Multivariate     q=s=2 tracking with regime posterior
@@ -306,8 +306,8 @@ def exp_exactness(outdir: Path) -> dict:
         ax.semilogy(Ns_m, errsP, mark + "--", color=ax.lines[-1].get_color(), alpha=0.6, ms=4)
     ax.axhline(1e-10, color="grey", ls=":", lw=1)
     ax.set_xlabel("sequence length $N$")
-    ax.set_ylabel("max abs. difference  (h5_exact vs exact)")
-    ax.set_title("E1 — h5_exact equals the exact Bayesian filter")
+    ax.set_ylabel("max abs. difference  (NGH-MSM-KF vs exact)")
+    ax.set_title("E1 — NGH-MSM-KF equals the exact Bayesian filter")
     ax.legend(fontsize=7, ncol=1)
     fig.savefig(outdir / "figures" / "e1_exactness.pdf")
     plt.close(fig)
@@ -356,7 +356,7 @@ def exp_speed(outdir: Path) -> dict:
         t_ex.append(time.perf_counter() - t0)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    ax1.loglog(Ns, series["h5_exact"], "o-", color=_C["h5"], label="h5_exact (proposed)", ms=4)
+    ax1.loglog(Ns, series["h5_exact"], "o-", color=_C["h5"], label="NGH-MSM-KF (proposed)", ms=4)
     ax1.loglog(
         Ns, series["imm_general"], "s-", color=_C["imm"], label="imm_general (Riccati/step)", ms=4
     )
@@ -365,7 +365,7 @@ def exp_speed(outdir: Path) -> dict:
         series["single_kalman"],
         "^-",
         color=_C["kal"],
-        label="single Kalman (no switching)",
+        label="pairwise Kalman (no switching)",
         ms=4,
     )
     ax1.set_xlabel("$N$")
@@ -415,8 +415,8 @@ def exp_value(outdir: Path) -> dict:
     order = ["zero", "single_kalman", "h5_exact", "oracle"]
     labels = [
         "zero\npredictor",
-        "single\nKalman",
-        "h5_exact\n(proposed)",
+        "pairwise\nKalman",
+        "NGH-MSM-KF\n(proposed)",
         "oracle\n(regimes known)",
     ]
     cols = ["#bbbbbb", _C["kal"], _C["h5"], _C["oracle"]]
@@ -502,7 +502,7 @@ def exp_value_sweep(outdir: Path) -> dict:
         fmt="^-",
         color=_C["kal"],
         capsize=2,
-        label="single Kalman",
+        label="pairwise Kalman",
     )
     ax1.errorbar(
         ms,
@@ -511,7 +511,7 @@ def exp_value_sweep(outdir: Path) -> dict:
         fmt="o-",
         color=_C["h5"],
         capsize=2,
-        label="h5_exact (proposed)",
+        label="NGH-MSM-KF (proposed)",
     )
     ax1.errorbar(
         ms,
@@ -562,7 +562,7 @@ def exp_multivariate(outdir: Path) -> dict:
             ExH[:, i] + 2 * sd,
             color=_C["h5"],
             alpha=0.2,
-            label="h5_exact $\\pm 2\\sigma$",
+            label="NGH-MSM-KF $\\pm 2\\sigma$",
         )
         ax.plot(t, xs[:, i], color="k", lw=1, label="true $X$")
         ax.plot(t, ExH[:, i], color=_C["h5"], lw=1.2, label="$E[X|y]$")
@@ -701,11 +701,11 @@ def exp_robustness(outdir: Path) -> dict:
         rmse_imm.append(float(np.mean(ei)))
 
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
-    ax.plot(used, rmse_h5, "o-", color=_C["h5"], label="h5_exact (assumes AB)")
+    ax.plot(used, rmse_h5, "o-", color=_C["h5"], label="NGH-MSM-KF (assumes AB)")
     ax.plot(used, rmse_imm, "s-", color=_C["imm"], label="imm_general (general)")
     ax.set_xlabel("AB perturbation $\\varepsilon$ (added to $A$)")
     ax.set_ylabel("RMSE vs exact filter")
-    ax.set_title("E6 — h5_exact degrades gracefully off the AB family")
+    ax.set_title("E6 — NGH-MSM-KF degrades gracefully off the AB family")
     ax.legend(fontsize=8)
     fig.savefig(outdir / "figures" / "e6_robustness.pdf")
     plt.close(fig)
@@ -750,7 +750,7 @@ def exp_rank_deficient(outdir: Path) -> dict:
     axA.semilogy(Ns, errsP, "s--", color=_C["imm"], ms=4, label="$|\\Delta p(r|y)|$")
     axA.axhline(1e-10, color="grey", ls=":", lw=1)
     axA.set_xlabel("sequence length $N$")
-    axA.set_ylabel("h5_exact vs exact")
+    axA.set_ylabel("NGH-MSM-KF vs exact")
     axA.set_title(
         f"E7a — exact despite rank-deficient $C$ "
         f"($\\mathrm{{rank}}\\,C_r={rank_C}$, $q={params.q}>s={params.s}$)"
@@ -765,7 +765,7 @@ def exp_rank_deficient(outdir: Path) -> dict:
             ExH[:, i] + 2 * sd,
             color=_C["h5"],
             alpha=0.2,
-            label="h5_exact $\\pm 2\\sigma$",
+            label="NGH-MSM-KF $\\pm 2\\sigma$",
         )
         ax.plot(t, xs[:, i], "k", lw=1, label="true $X$")
         ax.plot(t, ExH[:, i], color=_C["h5"], lw=1.2, label="$E[X|y]$")
@@ -805,6 +805,7 @@ def exp_c_influence(outdir: Path) -> dict:
     Cs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
     N, seeds = 500, list(range(40))
     rmse = {"h5_exact": [], "single_kalman": [], "oracle": [], "zero": []}
+    rstd = {"h5_exact": [], "single_kalman": [], "oracle": [], "zero": []}
     acc = []
     for C in Cs:
         eh, ek, eo, ez, ac = [], [], [], [], []
@@ -819,30 +820,35 @@ def exp_c_influence(outdir: Path) -> dict:
             eo.append(_rmse(ExO, xs))
             ez.append(_rmse(np.zeros_like(xs), xs))
             ac.append(float(np.mean(PiH.argmax(axis=1) == rs)))
-        rmse["h5_exact"].append(float(np.mean(eh)))
-        rmse["single_kalman"].append(float(np.mean(ek)))
-        rmse["oracle"].append(float(np.mean(eo)))
-        rmse["zero"].append(float(np.mean(ez)))
+        for key, vals in (("h5_exact", eh), ("single_kalman", ek), ("oracle", eo), ("zero", ez)):
+            rmse[key].append(float(np.mean(vals)))
+            rstd[key].append(float(np.std(vals)))
         acc.append(float(np.mean(ac)))
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    ax1.plot(Cs, acc, "o-", color=_C["h5"])
-    ax1.axhline(0.5, color="grey", ls=":", lw=1, label="chance")
+    ax1.plot(Cs, acc, "o-", color=_C["h5"], ms=4)  # NGH-MSM-KF regime accuracy (its usual colour)
+    ax1.axhline(0.5, color="black", ls=":", lw=1)
+    ax1.text(Cs[-1], 0.508, "chance", fontsize=7, color="black", ha="right", va="bottom")
     ax1.set_xlabel("observation coupling $C$")
     ax1.set_ylabel("regime accuracy")
     ax1.set_title("E8a — $C$ opens the regime channel")
-    ax1.legend(fontsize=7)
     ax1.annotate(
-        "CMS-HLM ($C=0$)",
+        "CMS-HLM ($C{=}0$)",
         xy=(0.0, acc[0]),
-        xytext=(0.1, 0.62),
+        xytext=(0.16, 0.585),
         fontsize=7,
-        arrowprops=dict(arrowstyle="->", lw=0.6),
+        ha="left",
+        va="center",
+        color="black",
+        arrowprops=dict(arrowstyle="-|>", lw=1.2, color="black", mutation_scale=18, shrinkB=4),
     )
     ax2.plot(Cs, rmse["zero"], "--", color="#bbbbbb", label="zero")
-    ax2.plot(Cs, rmse["single_kalman"], "^-", color=_C["kal"], label="single Kalman")
-    ax2.plot(Cs, rmse["h5_exact"], "o-", color=_C["h5"], label="h5_exact (proposed)")
-    ax2.plot(Cs, rmse["oracle"], "s-", color=_C["oracle"], label="oracle")
+    ax2.errorbar(Cs, rmse["single_kalman"], yerr=rstd["single_kalman"], fmt="^-",
+                 color=_C["kal"], capsize=2, label="pairwise Kalman")
+    ax2.errorbar(Cs, rmse["h5_exact"], yerr=rstd["h5_exact"], fmt="o-",
+                 color=_C["h5"], capsize=2, label="NGH-MSM-KF (proposed)")
+    ax2.errorbar(Cs, rmse["oracle"], yerr=rstd["oracle"], fmt="s-",
+                 color=_C["oracle"], capsize=2, label="oracle")
     ax2.set_xlabel("observation coupling $C$")
     ax2.set_ylabel("state RMSE")
     ax2.set_title("E8b — state recovered as $C$ grows")
@@ -859,6 +865,7 @@ def exp_c_influence(outdir: Path) -> dict:
         "C": Cs,
         "regime_acc": acc,
         "rmse_mean": rmse,
+        "rmse_std": rstd,
         "recovered": recovered,
         "N": N,
         "n_seeds": len(seeds),
@@ -881,6 +888,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
     Cs = [0.0, 0.15, 0.3, 0.45, 0.6, 0.7]
     N, seeds = 500, list(range(40))
     rmse = {"correct": [], "c0_old": [], "oracle": []}
+    rstd = {"correct": [], "c0_old": [], "oracle": []}
     old = c_mismatch_model(0.0)  # the old CMS-HLM model (C = 0)
     for C in Cs:
         true = c_mismatch_model(C)
@@ -893,15 +901,18 @@ def exp_c_mismatch(outdir: Path) -> dict:
             ec.append(_rmse(ExC, xs))
             eold.append(_rmse(ExOld, xs))
             eor.append(_rmse(ExOr, xs))
-        rmse["correct"].append(float(np.mean(ec)))
-        rmse["c0_old"].append(float(np.mean(eold)))
-        rmse["oracle"].append(float(np.mean(eor)))
+        for key, vals in (("correct", ec), ("c0_old", eold), ("oracle", eor)):
+            rmse[key].append(float(np.mean(vals)))
+            rstd[key].append(float(np.std(vals)))
     penalty = [rmse["c0_old"][i] - rmse["correct"][i] for i in range(len(Cs))]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    ax1.plot(Cs, rmse["c0_old"], "s-", color=_C["imm"], label="old $C{=}0$ filter (CMS-HLM)")
-    ax1.plot(Cs, rmse["correct"], "o-", color=_C["h5"], label="correct filter (NGH-MSM)")
-    ax1.plot(Cs, rmse["oracle"], "^-", color=_C["oracle"], label="oracle")
+    ax1.errorbar(Cs, rmse["c0_old"], yerr=rstd["c0_old"], fmt="s-", color=_C["imm"],
+                 capsize=2, label="old $C{=}0$ filter (CMS-HLM)")
+    ax1.errorbar(Cs, rmse["correct"], yerr=rstd["correct"], fmt="o-", color=_C["h5"],
+                 capsize=2, label="correct filter (NGH-MSM)")
+    ax1.errorbar(Cs, rmse["oracle"], yerr=rstd["oracle"], fmt="^-", color=_C["oracle"],
+                 capsize=2, label="oracle")
     ax1.set_xlabel("true observation coupling $C$")
     ax1.set_ylabel("state RMSE")
     ax1.set_title("E9a — old $C{=}0$ model on $C{\\neq}0$ data")
@@ -912,7 +923,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
     ax2.set_title("E9b — cost of the old assumption")
     fig.savefig(outdir / "figures" / "e9_c_mismatch.pdf")
     plt.close(fig)
-    return {"C": Cs, "rmse_mean": rmse, "penalty": penalty, "N": N, "n_seeds": len(seeds)}
+    return {"C": Cs, "rmse_mean": rmse, "rmse_std": rstd, "penalty": penalty, "N": N, "n_seeds": len(seeds)}
 
 
 # ---------------------------------------------------------------------------
@@ -960,11 +971,23 @@ def exp_approx_exactness(outdir: Path) -> dict:
     _, _, ysM = _simulate(pM, 9, seed=11)
     ExE1, _, _ = exact_mixture_filter(pM, ysM)
     Ms = [100, 300, 1000, 3000, 10000, 30000]
-    rb_err = [
-        float(np.abs(rbpf_filter(pM, ysM, n_particles=M, seed=0)[0] - ExE1).max()) for M in Ms
-    ]
+    conv_seeds = list(range(20))  # average the Monte-Carlo error over many particle seeds
+    rb_err, rb_std = [], []
+    for M in Ms:
+        e = [
+            float(np.abs(rbpf_filter(pM, ysM, n_particles=M, seed=sd)[0] - ExE1).max())
+            for sd in conv_seeds
+        ]
+        rb_err.append(float(np.mean(e)))
+        rb_std.append(float(np.std(e)))
     floor = res["M1"]["gpb2"]["dEx"]
-    res["rbpf_convergence"] = {"n_particles": Ms, "max_dEx": rb_err, "floor": floor}
+    res["rbpf_convergence"] = {
+        "n_particles": Ms,
+        "max_dEx": rb_err,
+        "max_dEx_std": rb_std,
+        "n_seeds": len(conv_seeds),
+        "floor": floor,
+    }
 
     # per-step wall-time on M1 (reference implementations; see caption)
     Nt = 200
@@ -990,7 +1013,7 @@ def exp_approx_exactness(outdir: Path) -> dict:
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12.2, 3.4))
     keys = [
-        ("h5", "h5_exact", _C["h5"]),
+        ("h5", "NGH-MSM-KF", _C["h5"]),
         ("gpb2", "GPB2", _C["exact"]),
         ("imm", "IMM", _C["imm"]),
         ("rbpf", f"RBPF ({rbpf_M})", _C["oracle"]),
@@ -1009,10 +1032,15 @@ def exp_approx_exactness(outdir: Path) -> dict:
     ax1.set_title("(a) Agreement with the exact $K^N$ filter")
     ax1.legend(fontsize=7, ncol=2)
 
-    ax2.loglog(Ms, rb_err, "o-", color=_C["oracle"], ms=4, label="RBPF (M1)")
+    ax2.errorbar(
+        Ms, rb_err, yerr=rb_std, fmt="o-", color=_C["oracle"], ms=4, capsize=2,
+        label="RBPF (M1, mean $\\pm$ s.d., 20 seeds)",
+    )
+    ax2.set_xscale("log")
+    ax2.set_yscale("log")
     ax2.axhline(max(floor, 1e-17), color="black", ls="--", lw=1, label="GPB2 / h5 floor")
     guide = rb_err[0] * np.sqrt(Ms[0] / np.array(Ms, dtype=float))
-    ax2.loglog(Ms, guide, ":", color="grey", lw=1, label=r"$\propto 1/\sqrt{M}$")
+    ax2.plot(Ms, guide, ":", color="grey", lw=1, label=r"$\propto 1/\sqrt{M}$")
     ax2.set_xlabel("RBPF particles $M$")
     ax2.set_ylabel(r"$\max_n\,|\Delta E[X_n|y]|$ vs exact")
     ax2.set_title("(b) RBPF converges to the exact filter")
@@ -1023,7 +1051,7 @@ def exp_approx_exactness(outdir: Path) -> dict:
     ax3.bar(range(4), cvals, color=ccols)
     ax3.set_yscale("log")
     ax3.set_xticks(range(4))
-    ax3.set_xticklabels(["h5_exact", "IMM", "GPB2", "RBPF"], fontsize=7)
+    ax3.set_xticklabels(["NGH-MSM-KF", "IMM", "GPB2", "RBPF"], fontsize=7)
     ax3.set_ylabel(r"time / step [$\mu$s]")
     ax3.set_title(r"(c) Per-step cost (M1, $N=200$)")
     fig.tight_layout()

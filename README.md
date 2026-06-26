@@ -229,10 +229,10 @@ Output CSV columns: `n, E_x_0, …, E_x_{q-1}, V_x_0, …, V_x_{q-1}, p_r_0, …
 
 ```python
 from prg.classes.GSSParams import GSSParams
-from prg.models.model_gss_K2_q1_s1 import ModelGss_K2_q1_s1
+from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
 from prg.filter import GSSFilter
 
-params = GSSParams.from_model(ModelGss_K2_q1_s1())
+params = GSSParams.from_model(ModelGssK2Q1S1())
 filt   = GSSFilter(params)
 
 # Step by step
@@ -245,6 +245,10 @@ for y in observations:          # y shape (s,) or (s, 1)
 # Or in one call
 sim_path, df = filt.run(N=1000, seed=42, output_dir="data/simulated")
 ```
+
+> **Worked examples:** runnable filtering notebooks are in
+> [`notebooks/`](notebooks/) — a quickstart (`01_filtering_quickstart.ipynb`) and
+> a filter comparison (`02_filters_comparison.ipynb`).
 
 ### (H5) AB constraint API
 

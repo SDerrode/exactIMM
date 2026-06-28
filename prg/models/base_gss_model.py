@@ -58,6 +58,16 @@ class BaseGSSModel(ABC):
     b_list : list[(q+s, 1)]  — regime-dependent bias b(k) in eq (7bis).
                                If absent or None, b(k) = 0 for all k.
 
+    Exogenous input / "consigne" (optional — defaults to autonomous)
+    ----------------------------------------------------------------
+    G_list : list[(q+s, p)]  — regime-dependent input gain G(k) in the
+                               transition Z_{n+1} = F(k) Z_n + b(k)
+                               + G(k) u_n + W_{n+1}, where u_n in R^p is a
+                               known ("observed") input.  If absent or None the
+                               model is autonomous (p = 0).  Add it to
+                               get_params() under the key "G_list" to enable a
+                               consigne.
+
     Initial conditions
     ------------------
     pi0           : ndarray (K,) or None
@@ -127,6 +137,9 @@ class BaseGSSModel(ABC):
         A_list, B_list, C_list, D_list,
         Sigma_U_list, Delta_list, Sigma_V_list,
         pi0, mu_z0_list, Sigma_z0_list
+
+        Optional keys: ``b_list`` (drift bias), ``G_list`` (exogenous-input
+        gains; enables a consigne, ``params.p > 0``).
         """
         ...
 

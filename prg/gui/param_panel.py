@@ -90,11 +90,13 @@ class _StateTab(QWidget):
         "QCheckBox::indicator:unchecked { border: 2px solid #155399; }"
     )
 
-    def __init__(self, k: int, q: int, s: int, parent=None):
+    def __init__(self, k: int, q: int, s: int, p: int = 0, parent=None):
         super().__init__(parent)
         self._k = k
         self._q = q
         self._s = s
+        self._p = p  # exogenous-input dimension (0 ⇒ autonomous, no G_r widget)
+        self._g_widget: MatrixTableWidget | None = None
         self._updating = False  # re-entrancy guard
 
         # Saved A, B blocks of F(k) — restored when the constraint is unchecked
@@ -201,9 +203,18 @@ class _StateTab(QWidget):
             _col.addWidget(w)
             _col.addStretch()
             widgets_row.addLayout(_col)
+        # Keep a handle on the widgets row + the index of the trailing stretch so
+        # that the optional G_r(k) gain editor can be inserted/removed at runtime
+        # (set_input_dim) without rebuilding the whole tab.
+        self._widgets_row = widgets_row
+        self._g_col_index = widgets_row.count()  # G_r column will be inserted here
         widgets_row.addStretch()  # prevent horizontal expansion
         layout.addLayout(widgets_row)
         layout.addStretch()  # push everything to the top
+
+        # Build the G_r(k) editor now if the model already has an input dim.
+        if self._p > 0:
+            self._build_g_widget()
 
         # ── Signal connections ──────────────────────────────────────────
         for w in (
@@ -252,6 +263,73 @@ class _StateTab(QWidget):
             return None
         return np.vstack([bx, by])
 
+    def get_G_r(self) -> np.ndarray | None:
+        """Return the (q+s, p) input-gain G_r(k), or None when p=0 or invalid."""
+        if self._p <= 0 or self._g_widget is None:
+            return None
+        return self._g_widget.get_matrix()
+
+    def set_G_r(self, mat: np.ndarray) -> None:
+        """Set G_r(k); no-op when the tab has no input-gain editor (p=0)."""
+        if self._g_widget is not None:
+            self._g_widget.set_matrix(np.asarray(mat, dtype=float))
+
+    # ------------------------------------------------------------------
+    # Optional exogenous-input gain  G_r(k)  (shape (q+s, p))
+    # ------------------------------------------------------------------
+
+    def _build_g_widget(self) -> None:
+        """Create the G_r(k) editor (q+s rows × p cols), initialised to zeros."""
+        if self._p <= 0 or self._g_widget is not None:
+            return
+        # NOT a covariance — same numeric/no-SPD flags F(k) uses; q+s rows, p cols.
+        self._g_widget = MatrixTableWidget(
+            self._q,
+            self._s,
+            cols=self._p,
+            is_covariance=False,
+            title=f"<i>G</i><sub>r</sub>({self._k})",
+            default_value=0.0,
+        )
+        self._g_widget.set_matrix(np.zeros((self._q + self._s, self._p)))
+        self._g_widget.validity_changed.connect(self._on_child_validity)
+        self._g_widget.value_changed.connect(self.value_changed)
+
+        _col = QVBoxLayout()
+        _col.setContentsMargins(0, 0, 0, 0)
+        _col.setSpacing(2)
+        _col.addWidget(self._g_widget)
+        _col.addStretch()
+        # Insert just before the trailing stretch so G_r sits at the row's end.
+        self._widgets_row.insertLayout(self._g_col_index, _col)
+
+    def _remove_g_widget(self) -> None:
+        """Tear down the G_r(k) editor (autonomous model again)."""
+        if self._g_widget is None:
+            return
+        item = self._widgets_row.takeAt(self._g_col_index)
+        if item is not None:
+            sub = item.layout()
+            if sub is not None:
+                while sub.count():
+                    child = sub.takeAt(0)
+                    w = child.widget()
+                    if w is not None:
+                        w.deleteLater()
+                sub.deleteLater()
+        self._g_widget = None
+
+    def set_input_dim(self, p: int) -> None:
+        """Change the exogenous-input dimension p, rebuilding the G_r(k) editor."""
+        p = int(p)
+        if p == self._p:
+            return
+        self._p = p
+        self._remove_g_widget()
+        if p > 0:
+            self._build_g_widget()
+        self.validity_changed.emit(self.is_valid())
+
     def set_F(self, mat: np.ndarray) -> None:
         self._f_widget.set_matrix(mat)
         self._update_stability_badges()
@@ -275,6 +353,7 @@ class _StateTab(QWidget):
             and self._mu_widget.is_valid()
             and self._bx_widget.is_valid()
             and self._by_widget.is_valid()
+            and (self._g_widget is None or self._g_widget.is_valid())
         )
 
     # ------------------------------------------------------------------
@@ -571,11 +650,12 @@ class ParamPanel(QWidget):
     value_changed = pyqtSignal()  # forwarded from any _StateTab cell edit
     constraint_toggled = pyqtSignal()  # forwarded from any _StateTab
 
-    def __init__(self, K: int, q: int, s: int, parent=None):
+    def __init__(self, K: int, q: int, s: int, p: int = 0, parent=None):
         super().__init__(parent)
         self._K = K
         self._q = q
         self._s = s
+        self._p = p  # exogenous-input dimension (0 ⇒ autonomous)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -597,7 +677,7 @@ class ParamPanel(QWidget):
 
         self._state_tabs: list[_StateTab] = []
         for k in range(K):
-            tab = _StateTab(k, q, s)
+            tab = _StateTab(k, q, s, p)
             tab.validity_changed.connect(self._on_tab_validity)
             tab.value_changed.connect(self.value_changed)  # forward upward
             tab.constraint_toggled.connect(self.constraint_toggled)
@@ -685,6 +765,33 @@ class ParamPanel(QWidget):
             result.append(vec)
         return result
 
+    def get_G_r_list(self) -> list[np.ndarray] | None:
+        """Return list of K input-gain G_r(k) arrays (q+s, p).
+
+        Returns ``None`` when the model is autonomous (p=0) or when any G_r(k)
+        cell is invalid — so callers can pass it straight to ``GSSParams(...,
+        G_list=...)`` (``None`` ⇒ autonomous, exactly today's behaviour).
+        """
+        if self._p <= 0:
+            return None
+        result = []
+        for tab in self._state_tabs:
+            mat = tab.get_G_r()
+            if mat is None:
+                return None
+            result.append(mat)
+        return result
+
+    def set_input_dim(self, p: int) -> None:
+        """Set the exogenous-input dimension p; rebuild the G_r editors on every tab."""
+        p = int(p)
+        if p == self._p:
+            return
+        self._p = p
+        for tab in self._state_tabs:
+            tab.set_input_dim(p)
+        self.validity_changed.emit(self.is_valid())
+
     def set_state_params(
         self,
         k: int,
@@ -692,6 +799,7 @@ class ParamPanel(QWidget):
         Sigma_W: np.ndarray,
         mu_z0: np.ndarray | None = None,
         b: np.ndarray | None = None,
+        G_r: np.ndarray | None = None,
     ) -> None:
         """Load pre-built matrices/vector into tab k."""
         self._state_tabs[k].set_F(F)
@@ -700,6 +808,8 @@ class ParamPanel(QWidget):
             self._state_tabs[k].set_mu_z0(mu_z0)
         if b is not None:
             self._state_tabs[k].set_b(b)
+        if G_r is not None:
+            self._state_tabs[k].set_G_r(G_r)
 
     def is_valid(self) -> bool:
         return all(tab.is_valid() for tab in self._state_tabs)

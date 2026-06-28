@@ -42,14 +42,23 @@ _PILL_ERR = (
 
 class MatrixTableWidget(QWidget):
     """
-    Editable (q+s) × (q+s) table.
+    Editable matrix table.
+
+    By default the table is the square ``(q+s) × (q+s)`` matrix used by F(k) /
+    Σ_W(k). Passing ``cols`` makes it a rectangular ``(q+s) × cols`` table — used
+    for the per-regime exogenous-input gain G_r(k) of shape ``(q+s, p)``. The
+    block-colouring split (top rows = hidden) still uses ``q``.
 
     Parameters
     ----------
     q, s:
-        Dimensions of the hidden / observed parts.
+        Dimensions of the hidden / observed parts. The table has ``q+s`` rows.
+    cols:
+        Number of columns. ``None`` (default) ⇒ square ``q+s`` columns (legacy
+        F / Σ_W behaviour). An explicit integer ⇒ rectangular ``(q+s) × cols``.
     is_covariance:
         If True, validate the full matrix for SPD and show a status label.
+        Only meaningful for the square case.
     title:
         Optional label displayed above the table.
     default_value:
@@ -64,6 +73,7 @@ class MatrixTableWidget(QWidget):
         q: int,
         s: int,
         *,
+        cols: int | None = None,
         is_covariance: bool = False,
         title: str = "",
         default_value: float = 0.0,
@@ -72,7 +82,9 @@ class MatrixTableWidget(QWidget):
         super().__init__(parent)
         self._q = q
         self._s = s
-        self._n = q + s
+        self._n = q + s  # number of rows (legacy name, kept for compatibility)
+        self._rows = q + s
+        self._cols = (q + s) if cols is None else int(cols)
         self._is_covariance = is_covariance
         self._building = False  # guard against recursive itemChanged
         self._valid = True
@@ -87,20 +99,20 @@ class MatrixTableWidget(QWidget):
             lbl.setStyleSheet("font-weight: bold;")
             layout.addWidget(lbl)
 
-        self._table = QTableWidget(self._n, self._n)
+        self._table = QTableWidget(self._rows, self._cols)
         self._table.horizontalHeader().setVisible(False)
         self._table.verticalHeader().setVisible(False)
-        self._table.setMinimumSize(self._n * 46, self._n * 26)
-        self._table.setMaximumWidth(self._n * 58)
-        self._table.setMaximumHeight(self._n * 26 + 4)
-        for col in range(self._n):
+        self._table.setMinimumSize(self._cols * 46, self._rows * 26)
+        self._table.setMaximumWidth(self._cols * 58)
+        self._table.setMaximumHeight(self._rows * 26 + 4)
+        for col in range(self._cols):
             self._table.setColumnWidth(col, 52)
-        for row in range(self._n):
+        for row in range(self._rows):
             self._table.setRowHeight(row, 24)
         layout.addWidget(self._table)
 
         # Constrain width and prevent vertical expansion beyond content
-        self.setMaximumWidth(self._n * 58 + 12)
+        self.setMaximumWidth(self._cols * 58 + 12)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         if is_covariance:
@@ -124,10 +136,10 @@ class MatrixTableWidget(QWidget):
     # ------------------------------------------------------------------
 
     def get_matrix(self) -> np.ndarray | None:
-        """Return the current (n×n) numpy array, or None if any cell is invalid."""
-        mat = np.zeros((self._n, self._n))
-        for r in range(self._n):
-            for c in range(self._n):
+        """Return the current (rows×cols) numpy array, or None if any cell is invalid."""
+        mat = np.zeros((self._rows, self._cols))
+        for r in range(self._rows):
+            for c in range(self._cols):
                 item = self._table.item(r, c)
                 if item is None:
                     return None
@@ -141,8 +153,8 @@ class MatrixTableWidget(QWidget):
         """Fill the table from a numpy array (silent, no signal spam)."""
         self._building = True
         try:
-            for r in range(self._n):
-                for c in range(self._n):
+            for r in range(self._rows):
+                for c in range(self._cols):
                     item = QTableWidgetItem(f"{mat[r, c]:.6g}")
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
@@ -222,6 +234,10 @@ class MatrixTableWidget(QWidget):
 
     def _cell_bg(self, r: int, c: int) -> str:
         """Normal background colour for cell (r, c)."""
+        if self._rows != self._cols:
+            # Rectangular (e.g. G_r): no covariance / block-colour split on columns;
+            # tint the hidden rows lightly so the (q | s) row split stays legible.
+            return "#eef5fb" if r < self._q else "white"
         if self._is_covariance:
             # Σ_U block (top-left) gets a light purple tint matching the checkbox
             if r < self._q and c < self._q:
@@ -231,6 +247,8 @@ class MatrixTableWidget(QWidget):
 
     def _cell_computed_bg(self, r: int, c: int) -> str:
         """Saturated background colour for a locked / auto-computed cell."""
+        if self._rows != self._cols:
+            return "#cfe2f3" if r < self._q else "#e0e0e0"
         if self._is_covariance:
             if r < self._q and c < self._q:
                 return "#c9a8e8"  # saturated purple — computed Σ_U
@@ -239,10 +257,10 @@ class MatrixTableWidget(QWidget):
 
     def _populate(self, default_value: float) -> None:
         """Initial fill: identity×default_value for covariance, else default_value."""
-        if self._is_covariance:
-            mat = np.eye(self._n) * default_value
+        if self._is_covariance and self._rows == self._cols:
+            mat = np.eye(self._rows) * default_value
         else:
-            mat = np.full((self._n, self._n), default_value)
+            mat = np.full((self._rows, self._cols), default_value)
         self.set_matrix(mat)
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
@@ -282,8 +300,8 @@ class MatrixTableWidget(QWidget):
         """Re-check all cells; if covariance, also check SPD. Emit if changed."""
         # Check all cells parseable
         all_float = True
-        for r in range(self._n):
-            for c in range(self._n):
+        for r in range(self._rows):
+            for c in range(self._cols):
                 item = self._table.item(r, c)
                 if item is None or not self._validate_cell(item):
                     all_float = False

@@ -51,6 +51,7 @@ from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -111,6 +112,7 @@ from prg.gui.plot_panel import PlotPanel, PredYPanel
 from prg.gui.session_state import _SessionState
 from prg.gui.workers import _FilterWorker, _SimWorker
 from prg.models.presets import PRESETS
+from prg.utils.input_signal import INPUT_GENERATORS, make_input
 
 # ---------------------------------------------------------------------------
 # Main window
@@ -240,6 +242,10 @@ class GSSMainWindow(QMainWindow):
         )  # A1: not per-keystroke
         seed_row.addWidget(self._seed_edit)
         left_layout.addLayout(seed_row)
+
+        # ── Exogenous input ("consigne" uₙ) controls ──────────────────
+        # input dim p row: p=0 ⇒ autonomous (everything below hidden).
+        self._build_input_controls(left_layout)
 
         # Auto-filter row
         auto_row = QHBoxLayout()
@@ -743,7 +749,18 @@ class GSSMainWindow(QMainWindow):
         N = self._n_spin.value()
         seed = self._parse_seed()
 
+        # Build the exogenous input uₙ (None for an autonomous model / p=0).
+        # A non-autonomous model with an unbuildable signal aborts the simulate.
+        u = self._get_input_signal(N)
+        if (
+            self._input_dim_spin.value() > 0
+            and u is None
+            and self._input_mode_combo.currentData() != "none"
+        ):
+            return
+
         self._state.begin_simulation(params, self._params_signature())
+        self._state.u = u  # keep the input around for the filter / plots
         self._refresh_filter_button_drift_indicator()
         self._btn_simulate.setEnabled(False)
         self._btn_save.setEnabled(False)
@@ -760,7 +777,7 @@ class GSSMainWindow(QMainWindow):
         self._wait_dlg = _WaitDialog(f"Simulating  N = {N}…", on_cancel=self._on_reset, parent=self)
         self._wait_dlg.show()
 
-        self._worker = _SimWorker(params, N, seed, parent=self)
+        self._worker = _SimWorker(params, N, seed, u=u, parent=self)
         self._worker.finished.connect(self._on_sim_finished)
         self._worker.error.connect(self._on_sim_error)
         self._worker.start()
@@ -781,8 +798,9 @@ class GSSMainWindow(QMainWindow):
             self._wait_dlg = None
 
         seed = self._parse_seed()
-        self._state.store_data(ns, rs, xs, ys, seed)
-        self._plot_panel.update_plots(ns, rs, xs, ys, self._K)
+        u = self._state.u
+        self._state.store_data(ns, rs, xs, ys, seed, u=u)
+        self._plot_panel.update_plots(ns, rs, xs, ys, self._K, u=u)
 
         self._btn_save.setEnabled(True)
         self._btn_filter.setEnabled(True)
@@ -882,6 +900,7 @@ class GSSMainWindow(QMainWindow):
             ys,
             joseph=self._joseph_check.isChecked(),
             mode=self._mode_combo.currentData(),
+            u=self._state.u,
             parent=self,
         )
         self._filter_worker.finished.connect(self._on_filter_finished)  # type: ignore[arg-type]
@@ -2011,6 +2030,205 @@ class GSSMainWindow(QMainWindow):
         except ValueError:
             return None
 
+    # ------------------------------------------------------------------
+    # Exogenous input ("consigne" uₙ)
+    # ------------------------------------------------------------------
+
+    def _build_input_controls(self, parent_layout) -> None:
+        """Build the input-dim spinbox + consigne signal panel in the left panel.
+
+        With ``p=0`` (default) the consigne panel is hidden and the model is
+        autonomous — the GUI behaves exactly as before.
+        """
+        # input dim p row
+        p_row = QHBoxLayout()
+        p_row.addWidget(QLabel("input dim p:"))
+        self._input_dim_spin = QSpinBox()
+        self._input_dim_spin.setRange(0, 16)
+        self._input_dim_spin.setValue(0)
+        self._input_dim_spin.setToolTip(
+            "Exogenous-input dimension p of the consigne uₙ.\n"
+            "p = 0 ⇒ autonomous model (no input gain G_r, identical to before).\n"
+            "p > 0 ⇒ per-regime input gains G_r(k) and a u-signal selector appear."
+        )
+        self._input_dim_spin.valueChanged.connect(self._on_input_dim_changed)
+        p_row.addWidget(self._input_dim_spin)
+        p_row.addStretch()
+        parent_layout.addLayout(p_row)
+
+        # Consigne signal panel (hidden when p=0)
+        self._consigne_frame = QFrame()
+        self._consigne_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        cf_layout = QVBoxLayout(self._consigne_frame)
+        cf_layout.setContentsMargins(8, 6, 8, 6)
+        cf_layout.setSpacing(4)
+
+        title = QLabel("Input signal  uₙ  (consigne)")
+        title.setStyleSheet("font-size: 10px; font-weight: bold;")
+        cf_layout.addWidget(title)
+
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("mode:"))
+        self._input_mode_combo = QComboBox()
+        # (label, kind) — kind drives _get_input_signal
+        self._input_mode_combo.addItem("None (autonomous)", "none")
+        for gen in INPUT_GENERATORS:
+            self._input_mode_combo.addItem(f"Generator: {gen}", f"gen:{gen}")
+        self._input_mode_combo.addItem("Constant", "const")
+        self._input_mode_combo.addItem("Load CSV…", "csv")
+        self._input_mode_combo.setToolTip(
+            "Choose how the input sequence uₙ (N×p) is built:\n"
+            "  None        — autonomous (uₙ = 0, no injection)\n"
+            "  Generator   — zeros/ones/gaussian/step/ramp/sin/square,\n"
+            "                optionally parameterised in the field below\n"
+            "                (e.g. step → n0, sin → period, gaussian → std)\n"
+            "  Constant    — a constant vector of length p (one box per channel)\n"
+            "  Load CSV    — read uₙ from a CSV with p columns (≥ N rows)"
+        )
+        self._input_mode_combo.currentIndexChanged.connect(self._on_input_mode_changed)
+        mode_row.addWidget(self._input_mode_combo, stretch=1)
+        cf_layout.addLayout(mode_row)
+
+        # Generator parameter field (e.g. step n0, sin period, gaussian std)
+        self._input_param_row = QWidget()
+        ip_layout = QHBoxLayout(self._input_param_row)
+        ip_layout.setContentsMargins(0, 0, 0, 0)
+        ip_layout.addWidget(QLabel("param:"))
+        self._input_param_edit = QLineEdit()
+        self._input_param_edit.setPlaceholderText("e.g. 20  (step n0 / sin period / gaussian std)")
+        ip_layout.addWidget(self._input_param_edit)
+        cf_layout.addWidget(self._input_param_row)
+
+        # Constant-vector row (one spinbox per channel; rebuilt on p change)
+        self._input_const_row = QWidget()
+        self._input_const_layout = QHBoxLayout(self._input_const_row)
+        self._input_const_layout.setContentsMargins(0, 0, 0, 0)
+        self._input_const_layout.addWidget(QLabel("const:"))
+        self._input_const_spins: list[QDoubleSpinBox] = []
+        cf_layout.addWidget(self._input_const_row)
+
+        # CSV picker row
+        self._input_csv_row = QWidget()
+        csv_layout = QHBoxLayout(self._input_csv_row)
+        csv_layout.setContentsMargins(0, 0, 0, 0)
+        self._input_csv_edit = QLineEdit()
+        self._input_csv_edit.setPlaceholderText("CSV path (p columns, ≥ N rows)")
+        self._input_csv_edit.setReadOnly(True)
+        csv_layout.addWidget(self._input_csv_edit, stretch=1)
+        self._btn_input_csv = QPushButton("Browse…")
+        self._btn_input_csv.clicked.connect(self._on_browse_input_csv)
+        csv_layout.addWidget(self._btn_input_csv)
+        cf_layout.addWidget(self._input_csv_row)
+
+        self._consigne_frame.setVisible(False)
+        parent_layout.addWidget(self._consigne_frame)
+
+        self._rebuild_const_spins(0)
+        self._on_input_mode_changed()
+
+    def _rebuild_const_spins(self, p: int) -> None:
+        """Recreate the p constant-vector spinboxes."""
+        for spin in self._input_const_spins:
+            self._input_const_layout.removeWidget(spin)
+            spin.deleteLater()
+        self._input_const_spins = []
+        for _ in range(p):
+            spin = QDoubleSpinBox()
+            spin.setRange(-1e6, 1e6)
+            spin.setDecimals(4)
+            spin.setValue(0.0)
+            spin.setMaximumWidth(80)
+            self._input_const_layout.addWidget(spin)
+            self._input_const_spins.append(spin)
+        self._input_const_layout.addStretch()
+
+    def _on_input_dim_changed(self, p: int) -> None:
+        """React to the input-dim spinbox: rebuild G_r editors + consigne panel."""
+        self._param_panel.set_input_dim(p)
+        self._plot_panel.set_input_dim(p)
+        self._rebuild_const_spins(p)
+        self._consigne_frame.setVisible(p > 0)
+        if p == 0:
+            # Force autonomous mode so a stale generator selection does not leak.
+            idx_none = self._input_mode_combo.findData("none")
+            if idx_none >= 0:
+                self._input_mode_combo.setCurrentIndex(idx_none)
+        self._on_input_mode_changed()
+        # Changing p changes the GSSParams shape → invalidate captured results.
+        self._refresh_simulate_button()
+        self._refresh_filter_button_drift_indicator()
+        if self._state.has_data():
+            self._on_reset()
+
+    def _on_input_mode_changed(self, *_args) -> None:
+        """Show only the sub-controls relevant to the selected input mode."""
+        kind = (
+            self._input_mode_combo.currentData() if hasattr(self, "_input_mode_combo") else "none"
+        )
+        is_gen = isinstance(kind, str) and kind.startswith("gen:")
+        self._input_param_row.setVisible(is_gen)
+        self._input_const_row.setVisible(kind == "const")
+        self._input_csv_row.setVisible(kind == "csv")
+
+    def _on_browse_input_csv(self) -> None:
+        """Pick a CSV file for the input signal."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select input-signal CSV",
+            str(pathlib.Path("data")),
+            "CSV files (*.csv);;All files (*)",
+        )
+        if path:
+            self._input_csv_edit.setText(path)
+
+    def _input_spec(self):
+        """Build the ``spec`` argument for ``make_input`` from the consigne UI.
+
+        Returns ``None`` for autonomous mode (no input), otherwise a value
+        accepted by :func:`prg.utils.input_signal.make_input` (a generator
+        string, a 'const(...)' string, a 'gaussian(std)'-style string, or a
+        CSV path). Raises ``ValueError`` on a malformed CSV selection.
+        """
+        kind = self._input_mode_combo.currentData()
+        if kind == "none":
+            return None
+        if isinstance(kind, str) and kind.startswith("gen:"):
+            name = kind.split(":", 1)[1]
+            arg = self._input_param_edit.text().strip()
+            return f"{name}({arg})" if arg else name
+        if kind == "const":
+            vals = ", ".join(f"{spin.value():g}" for spin in self._input_const_spins)
+            return f"const({vals})"
+        if kind == "csv":
+            path = self._input_csv_edit.text().strip()
+            if not path:
+                raise ValueError("No CSV file selected for the input signal.")
+            return path
+        return None
+
+    def _get_input_signal(self, N: int) -> np.ndarray | None:
+        """Return the exogenous input uₙ as an (N, p) array, or None if autonomous.
+
+        Shows a QMessageBox and returns None when the chosen signal cannot be
+        built (e.g. a bad CSV or a generator argument that does not parse).
+        """
+        p = self._input_dim_spin.value()
+        if p <= 0:
+            return None
+        try:
+            spec = self._input_spec()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Input signal", str(exc))
+            return None
+        if spec is None:
+            return None
+        try:
+            seed = self._parse_seed()
+            return make_input(spec, N, p, seed=seed)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self, "Input signal", f"Could not build input uₙ:\n{exc}")
+            return None
+
     def _params_signature(self) -> tuple | None:
         """Compact byte-level signature of the GUI parameters.
 
@@ -2025,14 +2243,18 @@ class GSSMainWindow(QMainWindow):
         S = self._param_panel.get_Sigma_W_list()
         mu = self._param_panel.get_mu_z0_list()
         b = self._param_panel.get_b_list()
+        G = self._param_panel.get_G_r_list()  # None when autonomous (p=0)
         P = self._p_widget.get_matrix()
         if any(x is None for x in (F, S, mu, b, P)):
             return None
+        if self._input_dim_spin.value() > 0 and G is None:
+            return None  # p>0 but a G_r cell is invalid
         return (
             tuple(np.ascontiguousarray(m).tobytes() for m in F),
             tuple(np.ascontiguousarray(m).tobytes() for m in S),
             tuple(np.ascontiguousarray(m).tobytes() for m in mu),
             tuple(np.ascontiguousarray(m).tobytes() for m in b),
+            (() if G is None else tuple(np.ascontiguousarray(m).tobytes() for m in G)),
             np.ascontiguousarray(P).tobytes(),
         )
 
@@ -2044,6 +2266,9 @@ class GSSMainWindow(QMainWindow):
         Sigma_W_list = self._param_panel.get_Sigma_W_list()
         mu_z0_list = self._param_panel.get_mu_z0_list()
         b_list = self._param_panel.get_b_list()
+        # G_list is None for an autonomous model (p=0) — identical to before.
+        # When p>0 it is None only if a G_r(k) cell is currently invalid.
+        G_list = self._param_panel.get_G_r_list()
         P = self._p_widget.get_matrix()
         if (
             F_list is None
@@ -2051,6 +2276,7 @@ class GSSMainWindow(QMainWindow):
             or mu_z0_list is None
             or b_list is None
             or P is None
+            or (self._input_dim_spin.value() > 0 and G_list is None)
         ):
             self._set_status("Invalid parameter(s).", error=True)
             return None
@@ -2087,6 +2313,7 @@ class GSSMainWindow(QMainWindow):
                 mu_z0_list=mu_z0_list,  # from GUI
                 Sigma_z0_list=Sigma_z0_list,
                 b_list=b_list,  # from GUI
+                G_list=G_list,  # exogenous-input gains (None ⇒ autonomous)
             )
         except Exception as exc:  # noqa: BLE001
             self._set_status(f"Parameter error: {exc}", error=True)
@@ -2242,12 +2469,27 @@ class GSSMainWindow(QMainWindow):
             nc = GSSNoiseCovariance(K, q, s, p["Sigma_U_list"], p["Delta_list"], p["Sigma_V_list"])
             fm = FMatrix(K, q, s, p["A_list"], p["B_list"], p["C_list"], p["D_list"])
 
+            # Exogenous-input gains (G_list): set the input dim FIRST so the
+            # G_r editors exist before set_state_params populates them. None /
+            # absent ⇒ autonomous (p=0), exactly as before.
+            G_list = p.get("G_list")
+            p_in = 0 if G_list is None else int(np.asarray(G_list[0]).shape[1])
+            blocked = self._input_dim_spin.blockSignals(True)
+            self._input_dim_spin.setValue(p_in)
+            self._input_dim_spin.blockSignals(blocked)
+            self._param_panel.set_input_dim(p_in)
+            self._plot_panel.set_input_dim(p_in)
+            self._rebuild_const_spins(p_in)
+            self._consigne_frame.setVisible(p_in > 0)
+            self._on_input_mode_changed()
+
             mu_list = p.get("mu_z0_list")
             b_list = p.get("b_list")
             for k in range(K):
                 mu = np.asarray(mu_list[k]) if mu_list is not None else None
                 b = np.asarray(b_list[k]) if b_list is not None else None
-                self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu, b)
+                G_r = np.asarray(G_list[k]) if G_list is not None else None
+                self._param_panel.set_state_params(k, fm.F(k), nc.Sigma_W(k), mu, b, G_r)
 
             if p.get("P") is not None:
                 self._P = np.asarray(p["P"])

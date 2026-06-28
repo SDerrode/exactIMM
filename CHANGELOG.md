@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Exogenous input ("consigne")**: the NGH-MSM and its fast exact filter now
+  support a known input ``u_n`` driving the state,
+  ``Z_{n+1} = F_r Z_n + G_r u_n + W``. ``GSSParams`` carries per-regime input gains
+  ``G_list`` with accessors ``.G(k)``, ``.p`` and the slaving read-out gain
+  ``.N(k) = G^X_k − Δ_k Σ_V_k⁻¹ G^Y_k``; ``GSSSimulator`` and
+  ``GSSFilter.step(y, u=…)`` thread the input — the exact ``h5_exact`` filter stays
+  bit-exact (matches the brute-force Kᴺ filter to ~1e-15). The reference filters, an
+  ``--input`` CLI flag (``simulate``, ``filter.main``), the shared signal helper
+  ``prg/utils/input_signal.py`` and the PyQt6 GUI all handle it. **Backward
+  compatible**: with no input the behaviour is unchanged. New synthetic experiment
+  ``exp_consigne`` (``study.py``), a demo model ``model_gss_K2_q1_s1_consigne``, a
+  real-data study (``make_vehicle_consigne_fig.py``) and tests
+  (``test_consigne.py``, ``test_consigne_gui.py``).
+
 ### Changed
 
 - **(H5)/NGH-MSM**: the ``D_k`` invertibility hypothesis is **dropped**. Per the

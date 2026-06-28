@@ -23,6 +23,8 @@ data/experiments/*.log
 #   - sp500_vix.csv (~270 KB)
 #   - enso_sst.csv  (~28 KB)
 #   - nino*.txt, oni.txt (~24 KB total, raw NOAA dumps)
+# ...except large downloaded caches (re-fetched by the make_*_fig.py scripts):
+data/real/vehicle/
 
 # Experiment results: regenerable. Keep only small ENSO summaries
 # needed for the wiki and §7 reproducibility.

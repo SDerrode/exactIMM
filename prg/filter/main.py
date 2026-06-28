@@ -188,6 +188,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "fast filter), any other model uses 'imm_general' (IMM approximation).",
     )
     parser.add_argument(
+        "--input",
+        default=None,
+        metavar="SPEC",
+        help="Exogenous input ('consigne') for the simulate+filter path (-N): a "
+        "generator (zeros|ones|gaussian[(std)]|step[(n0)]|ramp[(slope)]|"
+        "sin[(period)]|square[(period)]), const(a,b,...), or a CSV path. "
+        "Requires the model to define G_list. (With --csv, the file's u_* "
+        "columns are used automatically.)",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         type=int,
@@ -284,12 +294,19 @@ def main() -> None:
         out_path = _resolve_output(args.output, data_dir, args.model, None, None)
     else:
         # Simulate + filter jointly
+        if args.input is not None and params.p == 0:
+            log.error(
+                "--input given but model '%s' has no input gain (params.p == 0).",
+                args.model,
+            )
+            sys.exit(1)
         log.info("Simulating %d steps (seed=%s) + filtering …", args.N, args.seed)
         sim_path, df = filt.run(
             N=args.N,
             seed=args.seed,
             output_dir=data_dir,
             model_name=args.model,
+            u=args.input,
         )
         if sim_path:
             log.info("Simulation CSV: %s", sim_path)

@@ -12,7 +12,13 @@ n = 0  (initial step):
 
 n = 1, ..., N-1:
     R_n ~ Categorical(P[R_{n-1}, :])
-    Z_n ~ N(F(R_n) @ Z_{n-1}, Sigma_W(R_n))
+    Z_n ~ N(F(R_n) @ Z_{n-1} + b(R_n) + G(R_n) @ u_{n-1}, Sigma_W(R_n))
+
+The exogenous-input term G(R_n) @ u_{n-1} ("consigne") is present only when the
+model defines input gains (params.p > 0) and an input sequence u is supplied;
+otherwise the model is autonomous and behaves exactly as before.  The transition
+to Z_n is driven by the *previous* input u_{n-1}, consistent with the slaving
+read-out X_n = M_{r_n} y_n + N_{r_n} u_{n-1} of the exact filter.
 
 Each step yields (n, r_n, x_n, y_n) where:
     n    : int          — time index in {0, ..., N-1}
@@ -61,11 +67,18 @@ class GSSSimulator:
     seed : int or None, optional
         Random seed for reproducibility.  ``None`` gives a non-deterministic
         sequence (default).
+    u : ndarray (N, p), callable, or None, optional
+        Exogenous input ("consigne").  If an array, ``u[i]`` is the input
+        u_i applied at time i (the transition to Z_n uses u_{n-1}).  If a
+        callable, it is invoked as ``u(i) -> (p,)`` or ``(p, 1)``.  If None
+        (default) the model is autonomous (no input term).  Requires the
+        model to define input gains (``params.p > 0``).
 
     Raises
     ------
     ParamError
-        If ``N`` is not a strictly positive integer.
+        If ``N`` is not a strictly positive integer, or if ``u`` is given
+        with an incompatible shape or for a model without input gains.
 
     Examples
     --------
@@ -77,14 +90,48 @@ class GSSSimulator:
     >>> path = sim.run()    # run & save CSV
     """
 
-    def __init__(self, params: GSSParams, N: int, seed: int | None = None) -> None:
+    def __init__(
+        self,
+        params: GSSParams,
+        N: int,
+        seed: int | None = None,
+        u: np.ndarray | object | None = None,
+    ) -> None:
         if not (isinstance(N, int) and N > 0):
             raise ParamError(f"N must be a strictly positive integer, got {N!r}.")
 
         self._params = params
         self._N = N
         self._seed = seed
+        self._u = self._validate_input(u, params, N)
         self._reset_state(seed)
+
+    @staticmethod
+    def _validate_input(u, params: GSSParams, N: int):
+        """Normalise the optional exogenous input; return array/callable/None."""
+        if u is None:
+            return None
+        p = params.p
+        if p == 0:
+            raise ParamError(
+                "An exogenous input u was provided but the model has no input "
+                "gain (params.p == 0). Add G_list to the model parameters."
+            )
+        if callable(u):
+            return u
+        u = np.asarray(u, dtype=float)
+        if u.shape != (N, p):
+            raise ParamError(f"Input u must have shape (N, p) = ({N}, {p}), got {u.shape}.")
+        return u
+
+    def _get_u(self, i: int) -> np.ndarray:
+        """Input u_i as a (p, 1) column (zeros when no input is set)."""
+        p = self._params.p
+        if self._u is None or p == 0 or i < 0:
+            return np.zeros((p, 1), dtype=float)
+        if callable(self._u):
+            return np.asarray(self._u(i), dtype=float).reshape(p, 1)
+        return self._u[i].reshape(p, 1)
 
     # ------------------------------------------------------------------
     # Internal state management
@@ -142,6 +189,9 @@ class GSSSimulator:
             L = params.noise_cov.chol_W(r_n)  # (dim_z, dim_z)
             noise = self._rng.standard_normal((params.dim_z, 1))
             z_n = F @ self._z_prev + params.b(r_n) + L @ noise
+            # Exogenous input: transition to Z_n is driven by u_{n-1}.
+            if params.p > 0 and self._u is not None:
+                z_n = z_n + params.G(r_n) @ self._get_u(n - 1)
 
         if __debug__:
             if not np.all(np.isfinite(z_n)):
@@ -211,10 +261,15 @@ class GSSSimulator:
         params = self._params
         q, s = params.q, params.s
 
-        # Build CSV header
+        # Build CSV header.  Optional input columns u_* go LAST so that the
+        # x_/y_ columns keep their fixed positions (backward compat: no u
+        # columns when the model is autonomous).
+        has_input = self._u is not None and params.p > 0
         header = ["n", "r"]
         header += [f"x_{i}" for i in range(q)]
         header += [f"y_{i}" for i in range(s)]
+        if has_input:
+            header += [f"u_{i}" for i in range(params.p)]
 
         logger.info(
             "Starting simulation: model=%s  N=%d  K=%d  q=%d  s=%d  seed=%s",
@@ -234,6 +289,8 @@ class GSSSimulator:
         rows: list[list] = []
         for n, r, x, y in self:
             row = [n, r] + x.ravel().tolist() + y.ravel().tolist()
+            if has_input:
+                row += self._get_u(n).ravel().tolist()  # records u_n at row n
             rows.append(row)
 
             if (n + 1) % log_every == 0 or n + 1 == self._N:

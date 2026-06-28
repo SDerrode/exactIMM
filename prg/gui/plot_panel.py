@@ -40,30 +40,19 @@ class PlotPanel(QWidget):
       [1]                π_n(k) filtered regime posterior (after Filter; D6)
       [2 … q+1]          X^i    hidden components
       [q+2 … q+s+1]      Y^i    observed components
-      [q+s+2 … q+2s+1]   ν^i    filter innovations (shorter axes, after Filter)
+      [q+s+2 … q+s+p+1]  u^j    exogenous input "consigne" (only when p>0)
+      [… +s]             ν^i    filter innovations (shorter axes, after Filter)
+
+    With ``p=0`` (autonomous, default) there are no u^j rows and the layout is
+    identical to before.
     """
 
-    def __init__(self, q: int, s: int, parent=None):
+    def __init__(self, q: int, s: int, p: int = 0, parent=None):
         super().__init__(parent)
         self._q = q
         self._s = s
-        # Subplot index offsets for readable indexing.
-        self._r_offset = 0
-        self._pi_offset = 1  # D6: re-enabled filtered regime posterior
-        self._x_offset = 2
-        self._y_offset = 2 + q
-        self._innov_offset = 2 + q + s
-        self._n_axes = self._innov_offset + s
 
-        # π_n(k) and ν^i axes are 55 % the height of the regular axes
-        height_ratios = (
-            [1.0]  # R_n
-            + [0.55]  # π_n(k)
-            + [1.0] * (q + s)  # X^i, Y^i
-            + [0.55] * s  # innovations
-        )
-        fig_h = 2.2 * (1 + q + s) + 1.3 * (1 + s)  # extra 0.55 row for π_n
-        self._fig = Figure(figsize=(7, fig_h), tight_layout=True)
+        self._fig = Figure(figsize=(7, 6), tight_layout=True)
         self._canvas = FigureCanvasQTAgg(self._fig)
         # D10: canvas should not participate in Tab-key focus cycling
         self._canvas.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -74,6 +63,32 @@ class PlotPanel(QWidget):
         layout.addWidget(self._toolbar)
         layout.addWidget(self._canvas)
 
+        self._build_axes(p)
+
+    def _build_axes(self, p: int) -> None:
+        """(Re)create the stacked axes for ``p`` exogenous-input channels."""
+        q, s = self._q, self._s
+        self._p = int(p)
+        # Subplot index offsets for readable indexing.
+        self._r_offset = 0
+        self._pi_offset = 1  # D6: re-enabled filtered regime posterior
+        self._x_offset = 2
+        self._y_offset = 2 + q
+        self._u_offset = 2 + q + s  # exogenous-input "consigne" rows (only when p>0)
+        self._innov_offset = 2 + q + s + self._p
+        self._n_axes = self._innov_offset + s
+
+        # π_n(k), u^j and ν^i axes are 55 % the height of the regular axes
+        height_ratios = (
+            [1.0]  # R_n
+            + [0.55]  # π_n(k)
+            + [1.0] * (q + s)  # X^i, Y^i
+            + [0.55] * self._p  # u^j (consigne)
+            + [0.55] * s  # innovations
+        )
+        fig_h = 2.2 * (1 + q + s) + 1.3 * (1 + s + self._p)  # extra rows for π_n + u^j
+        self._fig.clear()
+        self._fig.set_size_inches(7, fig_h)
         self._axes = self._fig.subplots(
             self._n_axes,
             1,
@@ -84,7 +99,16 @@ class PlotPanel(QWidget):
             self._axes = [self._axes]
         # C6: stable reference so callers needn't use fragile negative indexing
         self._ax_last = self._axes[-1]
+        self._filter_artists = []
+        self._innov_artists = []
+        self._pi_artists = []
         self._draw_empty()
+
+    def set_input_dim(self, p: int) -> None:
+        """Change the number of exogenous-input rows; rebuild the figure if needed."""
+        if int(p) == self._p:
+            return
+        self._build_axes(p)  # _draw_empty() inside already schedules a redraw
 
     # ------------------------------------------------------------------
     # Public
@@ -97,8 +121,14 @@ class PlotPanel(QWidget):
         xs: np.ndarray | None,  # shape (N, q), or None if no ground truth
         ys: np.ndarray,  # shape (N, s)
         K: int,
+        u: np.ndarray | None = None,  # shape (N, p) exogenous input, or None
     ) -> None:
-        """Redraw all subplots with fresh simulation data."""
+        """Redraw all subplots with fresh simulation data.
+
+        When ``u`` (shape (N, p)) is supplied and the panel was built with the
+        matching ``p``, the consigne channels are drawn in the dedicated u^j
+        rows. ``u=None`` (default) leaves them empty — backward compatible.
+        """
         for ax in self._axes:
             ax.cla()
 
@@ -162,6 +192,9 @@ class PlotPanel(QWidget):
             ax.set_ylabel(rf"$Y^{i}$", fontsize=10)
             ax.grid(True, linestyle=":", alpha=0.5)
 
+        # --- u^j exogenous-input ("consigne") rows (only when p>0) ---
+        self._draw_input_rows(ns_arr, u)
+
         self._ax_last.set_xlabel(r"$n$", fontsize=10)
         # Force x-axis limits to the new data range (sharex propagates).
         # Needed because cla() on multiple shared axes can leave autoscale_x
@@ -169,6 +202,30 @@ class PlotPanel(QWidget):
         if len(ns_arr) > 0:
             self._set_shared_xlim(ns_arr)
         self._canvas.draw_idle()
+
+    def _draw_input_rows(self, ns_arr: np.ndarray, u: np.ndarray | None) -> None:
+        """Render the p exogenous-input channels on the dedicated u^j axes.
+
+        No-op when the panel has no input rows (p=0). When p>0 but ``u`` is None
+        the rows are drawn empty (labelled, no curve).
+        """
+        colours_u = ["#9467bd", "#8c564b", "#17becf", "#bcbd22", "#e377c2"]
+        u_arr = np.asarray(u) if u is not None else None
+        for j in range(self._p):
+            ax = self._axes[self._u_offset + j]
+            ax.set_ylabel(rf"$u^{j}$", fontsize=9)
+            ax.tick_params(labelsize=7)
+            ax.grid(True, linestyle=":", alpha=0.4)
+            if u_arr is not None and u_arr.ndim == 2 and j < u_arr.shape[1]:
+                ax.step(
+                    ns_arr,
+                    u_arr[: len(ns_arr), j],
+                    where="post",
+                    color=colours_u[j % len(colours_u)],
+                    linewidth=0.9,
+                )
+            else:
+                ax.set_yticks([])
 
     def add_filter_overlay(
         self,
@@ -380,6 +437,13 @@ class PlotPanel(QWidget):
             ax.set_ylabel(rf"$Y^{i}$", fontsize=10)
             ax.set_yticks([])
             ax.grid(True, linestyle=":", alpha=0.4)
+
+        for j in range(self._p):
+            ax = self._axes[self._u_offset + j]
+            ax.set_ylabel(rf"$u^{j}$", fontsize=9)
+            ax.set_yticks([])
+            ax.grid(True, linestyle=":", alpha=0.4)
+            ax.tick_params(labelsize=7)
 
         for i in range(self._s):
             ax = self._axes[self._innov_offset + i]

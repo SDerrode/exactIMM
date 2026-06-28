@@ -104,6 +104,7 @@ from scipy.stats import multivariate_normal
 
 from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
+from prg.utils.input_signal import make_input
 
 __all__ = ["GSSFilter", "FilterResult"]
 
@@ -499,6 +500,10 @@ class GSSFilter:
         self._pi: np.ndarray = self._pi_inf.copy()
         # Previous observation — needed from step 1 onward
         self._y_prev: np.ndarray | None = None
+        # Previous exogenous inputs: u_{n-1} drives the step-n transition/read-out;
+        # u_{n-2} enters the h5 regime likelihood via the slaved state X_{n-1}.
+        self._u_prev: np.ndarray | None = None
+        self._u_prev2: np.ndarray | None = None
         self._n: int = 0
         self._initialized: bool = False
 
@@ -520,7 +525,7 @@ class GSSFilter:
     def __iter__(self) -> GSSFilter:
         return self
 
-    def step(self, y: np.ndarray) -> FilterResult:
+    def step(self, y: np.ndarray, u: np.ndarray | None = None) -> FilterResult:
         """
         Process one observation and return filtered estimates.
 
@@ -528,12 +533,19 @@ class GSSFilter:
         ----------
         y : ndarray, shape (s,) or (s, 1)
             Observation Y_n.
+        u : ndarray, shape (p,) or (p, 1), or None, optional
+            Exogenous input u_n at the current time step ("consigne").  The
+            filter lags it internally: the estimate at step n uses the
+            *previous* input u_{n-1}, consistent with the slaving read-out
+            X_n = M_{r_n} y_n + N_{r_n} u_{n-1} and the input-driven
+            transition.  None (default) → autonomous, identical to before.
 
         Returns
         -------
         FilterResult
         """
         y = np.asarray(y, dtype=float).reshape(-1, 1)  # (s, 1)
+        u = self._reshape_u(u)  # (p, 1) or None
 
         if self._mode == "h5_exact":
             init_fn, step_fn = self._init_step_h5, self._update_step_h5
@@ -547,8 +559,22 @@ class GSSFilter:
             result = step_fn(y)
 
         self._y_prev = y
+        self._u_prev2 = self._u_prev  # u_{n-2} for the next step
+        self._u_prev = u
         self._n += 1
         return result
+
+    def _reshape_u(self, u: np.ndarray | None) -> np.ndarray | None:
+        """Normalise an input to a (p, 1) column, or None when absent."""
+        if u is None:
+            return None
+        pdim = self._p.p
+        if pdim == 0:
+            raise ValueError(
+                "step(u=...): an exogenous input was given but the model has "
+                "no input gain (params.p == 0)."
+            )
+        return np.asarray(u, dtype=float).reshape(pdim, 1)
 
     # ==================================================================
     # MODE = "h5_exact" — exact IMM under hypothesis (H5)
@@ -625,6 +651,16 @@ class GSSFilter:
         p = self._p
         K, q = p.K, p.q
         y_prev = self._y_prev  # (s, 1) — previous observation
+        # Exogenous input shifts (covariances Γ(j,k), P_post(k) are unchanged —
+        # u is deterministic).  The predictive mean of Y_n gains
+        #   G^Y_k u_{n-1}            (input driving the transition n-1 → n)
+        #   C_k N_j u_{n-2}          (input slaving the state X_{n-1}, via N_j)
+        # and the read-out X_n gains N_k u_{n-1}.
+        u_prev = self._u_prev  # u_{n-1}
+        u_prev2 = self._u_prev2  # u_{n-2}
+        has_u = p.p > 0 and u_prev is not None
+        has_u2 = p.p > 0 and u_prev2 is not None
+        Nu2 = [p.N(j) @ u_prev2 for j in range(K)] if has_u2 else None
 
         # ---- Step (II): mode-probability update ---------------------------
         # Joint p(r_n=j, r_{n+1}=k | y_{1:n}) = π_n(j) · P(j, k)
@@ -636,6 +672,9 @@ class GSSFilter:
         y_pred_acc = np.zeros_like(y_new)  # for marginal innovation
 
         for k in range(K):
+            # Deterministic input shift G^Y_k u_{n-1} (target regime k only).
+            dY_k = p.G(k)[q:] @ u_prev if has_u else None
+            C_k = p.f_matrix.C(k) if has_u2 else None  # (s, q)
             log_terms: list[float] = []
             for j in range(K):
                 w = joint[j, k]
@@ -643,6 +682,10 @@ class GSSFilter:
                     continue
                 # Pair-conditional predictive mean (eq. y_pred_jk)
                 mean_jk = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_prev - self._mu_Y[j])
+                if has_u:
+                    mean_jk = mean_jk + dY_k  # G^Y_k u_{n-1}
+                    if has_u2:
+                        mean_jk = mean_jk + C_k @ Nu2[j]  # C_k N_j u_{n-2}
 
                 # Accumulate marginal predicted observation
                 y_pred_acc += w * mean_jk
@@ -692,6 +735,8 @@ class GSSFilter:
         for k in range(K):
             nu_k = y_new - self._mu_Y[k]  # (s, 1)
             e_x = self._mu_X[k] + self._K_gain[k] @ nu_k  # (q, 1)
+            if has_u:
+                e_x = e_x + p.N(k) @ u_prev  # slaving input read-out N_k u_{n-1}
             E_x_r.append(e_x)
             Var_x_r.append(self._P_post[k])  # constant!
 
@@ -782,6 +827,10 @@ class GSSFilter:
         p = self._p
         K, q = p.K, p.q
         y_prev = self._y_prev  # (s, 1)
+        # Exogenous input u_{n-1}: enters the predicted mean of Z_n; the
+        # subsequent Kalman update then carries it into the X estimate.
+        u_prev = self._u_prev
+        has_u = p.p > 0 and u_prev is not None
 
         # ---- (17bis)  joint[rn, rnp1] = π_n[rn] · P[rn, rnp1] -------------
         joint = self._pi[:, None] * p.P  # (K, K)
@@ -799,10 +848,15 @@ class GSSFilter:
             w_P = sum(p_rn_rnp1[rn, rnp1] * self._P_z[rn] for rn in range(K))
 
             Fw_mu = F @ w_mu
-            mu_np1.append(Fw_mu + b)  # (17ter)
+            # Full deterministic offset d = b + G u_{n-1}.  The input is
+            # deterministic, so it must enter BOTH the mean and the uncentred
+            # second moment, otherwise the centred covariance
+            # Var = P_np1 - mu_np1 mu_np1^T would be corrupted.
+            d = b + p.G(rnp1) @ u_prev if has_u else b
+            mu_np1.append(Fw_mu + d)  # (17ter)
             P_np1.append(
                 _sym(
-                    F @ w_P @ F.T + Fw_mu @ b.T + b @ Fw_mu.T + b @ b.T + p.noise_cov.Sigma_W(rnp1)
+                    F @ w_P @ F.T + Fw_mu @ d.T + d @ Fw_mu.T + d @ d.T + p.noise_cov.Sigma_W(rnp1)
                 )
             )
 
@@ -833,6 +887,8 @@ class GSSFilter:
                 Gamma = _psd_floor(_sym(S_YY_pair - M_t @ Cov_Ynp1_Yn.T))
 
                 mu_Ynp1 = F[q:, :] @ self._mu[rn] + p.b(rnp1)[q:]
+                if has_u:
+                    mu_Ynp1 = mu_Ynp1 + p.G(rnp1)[q:] @ u_prev  # input shift on Y_n
                 mean_c = mu_Ynp1 + M_t @ (y_prev - mu_Y_n)
 
                 y_pred_acc += w * mean_c
@@ -926,9 +982,14 @@ class GSSFilter:
         seed: int | None = None,
         output_dir: str | pathlib.Path | None = None,
         model_name: str = "gss",
+        u: np.ndarray | str | None = None,
     ) -> tuple[pathlib.Path | None, pd.DataFrame]:
         """
         Simulate N steps and run the filter jointly.
+
+        ``u`` is the optional exogenous input ("consigne"): an ``(N, p)`` array
+        or a :func:`prg.utils.input_signal.make_input` spec string.  It is fed
+        to both the simulator and the filter (which lags it internally).
 
         Returns
         -------
@@ -941,18 +1002,29 @@ class GSSFilter:
         q, s = p.q, p.s
         self.reset()
 
-        sim = GSSSimulator(p, N=N, seed=seed)
+        if u is not None and p.p > 0:
+            u = make_input(u, N, p.p, seed=seed) if isinstance(u, str) else np.asarray(
+                u, dtype=float
+            ).reshape(N, p.p)
+        else:
+            u = None
+        has_u = u is not None
+
+        sim = GSSSimulator(p, N=N, seed=seed, u=u)
 
         sim_rows: list[list] = []
         filter_rows: list[dict] = []
         t0 = time.perf_counter()
 
         for n, r, x, y in sim:
-            result = self.step(y)
+            result = self.step(y, u=(u[n] if has_u else None))
             e_x = result.E_x.ravel()
             var_x = result.Var_x.diagonal()
 
-            sim_rows.append([n, r] + x.ravel().tolist() + y.ravel().tolist())
+            row_sim = [n, r] + x.ravel().tolist() + y.ravel().tolist()
+            if has_u:
+                row_sim += u[n].tolist()
+            sim_rows.append(row_sim)
 
             row: dict = {"n": n}
             row.update({f"E_x_{i}": float(e_x[i]) for i in range(q)})
@@ -972,6 +1044,8 @@ class GSSFilter:
             fname = f"simulated_{model_name}_N{N}_seed{seed_str}.csv"
             sim_path = output_dir / fname
             header = ["n", "r"] + [f"x_{i}" for i in range(q)] + [f"y_{i}" for i in range(s)]
+            if has_u:
+                header += [f"u_{i}" for i in range(p.p)]
             with sim_path.open("w", newline="", encoding="utf-8") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(header)
@@ -988,12 +1062,15 @@ class GSSFilter:
 
         y_cols = [f"y_{i}" for i in range(s)]
         x_cols = [f"x_{i}" for i in range(q)]
+        u_cols = [f"u_{i}" for i in range(p.p)]
         has_x = all(c in df_in.columns for c in x_cols)
+        has_u = p.p > 0 and all(c in df_in.columns for c in u_cols)
 
         rows: list[dict] = []
         for _, row_in in df_in.iterrows():
             y = row_in[y_cols].to_numpy(dtype=float).reshape(-1, 1)
-            result = self.step(y)
+            u = row_in[u_cols].to_numpy(dtype=float) if has_u else None
+            result = self.step(y, u=u)
             e_x = result.E_x.ravel()
             var_x = result.Var_x.diagonal()
 

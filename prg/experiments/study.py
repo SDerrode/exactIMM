@@ -1061,8 +1061,289 @@ def exp_approx_exactness(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# E7-fair — Fair comparison of the old (CMS-HLM) and new (NGH-MSM) families
+# ---------------------------------------------------------------------------
+def exp_fair_comparison(outdir: Path) -> dict:
+    """Fair head-to-head of the old (CMS-HLM) and new (NGH-MSM) approximations on
+    a model that lies in *neither* family (scalar, symmetric in x and y).
+
+    (a) Statistical parity: the families are exact time-reversal mirrors, so a
+        causal *forward* filter spuriously favours the new one, while a
+        time-symmetric (smoothing) metric makes them exactly equal.
+    (b) The real difference is computational: the new family is exactly,
+        linearly filterable, whereas the old family's exact filter is the
+        exponential K^N mixture, and the history-collapse the standard
+        approximations perform is lossless only on the new family.
+    """
+    from prg.classes.FMatrix import FMatrix
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance
+    from prg.utils.h5_constraint import apply_AB_constraint
+
+    # ---- (a) scalar symmetric moment model: Sigma over (x1,y1,x2,y2) ----
+    def _sig4(c, t, d):
+        return np.array([[1, c, t, d], [c, 1, d, t], [t, d, 1, c], [d, t, c, 1]], float)
+
+    def _bigcov(M, L):  # length-L joint covariance of the implied stationary VAR(1)
+        sz = M[:2, :2]
+        F = M[2:, :2] @ np.linalg.inv(M[:2, :2])
+        B = np.zeros((2 * L, 2 * L))
+        for i in range(L):
+            for j in range(L):
+                k = j - i
+                B[2 * i : 2 * i + 2, 2 * j : 2 * j + 2] = (
+                    sz @ np.linalg.matrix_power(F.T, k)
+                    if k >= 0
+                    else np.linalg.matrix_power(F, -k) @ sz
+                )
+        return B
+
+    def _mse(Bm, Bt, tgt, W):  # estimator gain from model Bm, error under truth Bt
+        g = (Bm[np.ix_([tgt], W)] @ np.linalg.inv(Bm[np.ix_(W, W)])).ravel()
+        return Bt[tgt, tgt] - 2 * g @ Bt[tgt, W] + g @ Bt[np.ix_(W, W)] @ g
+
+    c, t, L, nmid = 0.5, 0.5, 25, 12
+    xn = 2 * nmid
+    w_fwd = [2 * k + 1 for k in range(nmid + 1)]  # forward observations Y_1..Y_n
+    w_all = [2 * k + 1 for k in range(L)]  # all observations (smoothing)
+    deltas = np.linspace(0.0, 0.72, 25)
+    fwd_old, fwd_new, sm_old, sm_new = [], [], [], []
+    for delta in deltas:
+        St = _sig4(c, t, c * t + delta)
+        Mn = St.copy()
+        Mn[0, 3] = Mn[3, 0] = c * t  # new: replace Cov(X1,Y2) by the product
+        Mo = St.copy()
+        Mo[1, 2] = Mo[2, 1] = c * t  # old: replace Cov(Y1,X2) by the product
+        Bt, Bn, Bo = _bigcov(St, L), _bigcov(Mn, L), _bigcov(Mo, L)
+        fwd_old.append(_mse(Bo, Bt, xn, w_fwd))
+        fwd_new.append(_mse(Bn, Bt, xn, w_fwd))
+        sm_old.append(_mse(Bo, Bt, xn, w_all))
+        sm_new.append(_mse(Bn, Bt, xn, w_all))
+    tie_gap = float(np.max(np.abs(np.array(sm_old) - np.array(sm_new))))
+
+    # ---- (b) K=2 switching: NEW (NGH-MSM) exact-linear vs OLD (classical) K^N ----
+    def _m(x):
+        return np.array([[float(x)]])
+
+    def _build(A, B, C, D, SU, Dl, SV, b_zero=False):
+        fm = FMatrix(
+            K=2, q=1, s=1,
+            A_list=[_m(A[r]) for r in range(2)],
+            B_list=[_m(0.0 if b_zero else B[r]) for r in range(2)],
+            C_list=[_m(C[r]) for r in range(2)],
+            D_list=[_m(D[r]) for r in range(2)],
+        )
+        nc = GSSNoiseCovariance(
+            K=2, q=1, s=1,
+            Sigma_U_list=[_m(SU[r]) for r in range(2)],
+            Delta_list=[_m(Dl[r]) for r in range(2)],
+            Sigma_V_list=[_m(SV[r]) for r in range(2)],
+        )
+        p = GSSParams(
+            K=2, q=1, s=1, P=np.array([[0.9, 0.1], [0.1, 0.9]]),
+            f_matrix=fm, noise_cov=nc, pi0=np.array([0.5, 0.5]),
+            mu_z0_list=[np.zeros((2, 1))] * 2,
+            Sigma_z0_list=[np.eye(2)] * 2, b_list=[np.zeros((2, 1))] * 2,
+        )
+        return with_stationary_init(p)
+
+    A, B, SU, Dl, SV = [0.6, 0.4], [0.2, 0.3], [0.5, 0.6], [0.2, -0.15], [0.5, 0.6]
+    C, D = B[:], A[:]  # x<->y symmetric per regime (C=B, D=A)
+    true = _build(A, B, C, D, SU, Dl, SV)
+    m_new = apply_AB_constraint(true)  # NEW family projection (NGH-MSM)
+    m_old = _build(A, B, C, D, SU, Dl, SV, b_zero=True)  # OLD: X autonomous (classical)
+
+    def _resid(p):  # max disagreement of IMM / GPB2 with the exact K^N filter
+        ys = np.array([float(np.ravel(y)[0]) for _, _, _, y in GSSSimulator(p, N=9, seed=1)])
+        ex = exact_mixture_filter(p, ys)[0].ravel()
+        return (
+            float(np.max(np.abs(imm_filter(p, ys)[0].ravel() - ex))),
+            float(np.max(np.abs(gpb2_filter(p, ys)[0].ravel() - ex))),
+        )
+
+    imm_new, gpb2_new = _resid(m_new)
+    imm_old, gpb2_old = _resid(m_old)
+
+    # ---- figure ----
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 3.4))
+    ax1.plot(deltas, fwd_old, color=_C["kal"], lw=2, label="CMS-HLM")
+    ax1.plot(deltas, fwd_new, color=_C["h5"], lw=2, label="NGH-MSM")
+    ax1.set_title("(a1) naive metric: causal forward filtering")
+    ax1.set_xlabel(r"departure $\delta$")
+    ax1.set_ylabel("state MSE")
+    ax1.legend(fontsize=8)
+    ax2.plot(deltas, sm_old, color=_C["kal"], lw=3, label="CMS-HLM")
+    ax2.plot(deltas, sm_new, "--", color=_C["h5"], lw=2, label="NGH-MSM")
+    ax2.set_title("(a2) fair metric: time-symmetric (smoothing)")
+    ax2.set_xlabel(r"departure $\delta$")
+    ax2.set_ylabel("state MSE")
+    ax2.legend(fontsize=8)
+    ax2.text(0.30, 0.62, "exact tie", fontsize=8, color="0.4")
+    xb = np.arange(2)
+    bw = 0.35
+    ax3.bar(xb - bw / 2, [imm_new, imm_old], bw, color=_C["imm"], label="IMM")
+    ax3.bar(xb + bw / 2, [gpb2_new, gpb2_old], bw, color=_C["oracle"], label="GPB2")
+    ax3.set_yscale("log")
+    ax3.set_xticks(xb)
+    ax3.set_xticklabels(["NGH-MSM", "CMS-HLM"])
+    ax3.axhline(1e-12, color="black", ls=":", lw=1)
+    ax3.text(1.45, 2e-12, "round-off", fontsize=7, ha="right")
+    ax3.set_title("(b) history-collapse lossless only on NGH-MSM")
+    ax3.set_ylabel("max abs. difference vs exact")
+    ax3.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(outdir / "figures" / "efair_fair_comparison.pdf")
+    plt.close(fig)
+
+    return {
+        "operating_point": {"c": c, "t": t},
+        "smoothing_tie_gap": tie_gap,
+        "forward_gap_at_delta0p4": float(
+            abs(np.interp(0.4, deltas, fwd_old) - np.interp(0.4, deltas, fwd_new))
+        ),
+        "collapse_residual": {
+            "imm_new": imm_new, "gpb2_new": gpb2_new,
+            "imm_old": imm_old, "gpb2_old": gpb2_old,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# E_consigne — exogenous input ("consigne"): the exact filter stays exact and
+# gains the N_r u_{n-1} read-out; a regime-blind filter cannot exploit a
+# sign-flipping input gain.
+# ---------------------------------------------------------------------------
+def consigne_model(g: float = 1.2, p_switch: float = 0.04, m: float = 0.8) -> GSSParams:
+    """K=2 'quiet/volatile' NGH-MSM with a 1-D exogenous input whose hidden-state
+    gain flips sign across regimes (G^X = +g in regime 0, -g in regime 1; G^Y = 0),
+    so the known input u drives X in opposite directions depending on the regime.
+    The slaving read-out gain is then N_r = G^X_r = ±g: only a regime-aware filter
+    recovers the input contribution; a regime-blind filter averages the gain to ~0.
+    The regime stays identifiable from Y (quiet vs volatile). Built from free blocks
+    (NGH-MSM valid by construction), stationary init."""
+    from prg.classes.FMatrix import FMatrix
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance
+    from prg.utils.h5_constraint import compute_AB
+
+    K, q, s = 2, 1, 1
+    P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
+    M = [m, -m]
+    SV = [np.array([[0.05]]), np.array([[0.60]])]
+    D = [np.array([[0.30]]), np.array([[0.85]])]
+    C = [np.array([[0.50]]), np.array([[0.50]])]
+    SU = [np.array([[0.10]]), np.array([[0.70]])]
+    Dt = [M[k] * SV[k] for k in range(K)]
+    A_list, B_list = [], []
+    for k in range(K):
+        a, b = compute_AB(C[k], D[k], Dt[k], SV[k])
+        A_list.append(a)
+        B_list.append(b)
+    fm = FMatrix(K, q, s, A_list, B_list, C, D)
+    nc = GSSNoiseCovariance(K, q, s, SU, Dt, SV)
+    G_list = [np.array([[g], [0.0]]), np.array([[-g], [0.0]])]  # G^X = ±g, G^Y = 0
+    p = GSSParams(
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
+        mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
+        G_list=G_list,
+    )
+    return with_stationary_init(p)
+
+
+def _sim_u(params, N, seed, u):
+    """Simulate (rs, xs, ys) with an exogenous input u of shape (N, p)."""
+    rs, xs, ys = [], [], []
+    for _, r, x, y in GSSSimulator(params, N=N, seed=seed, u=u):
+        rs.append(int(r))
+        xs.append(np.ravel(np.asarray(x, dtype=float)))
+        ys.append(np.ravel(np.asarray(y, dtype=float)))
+    return np.array(rs), np.array(xs), np.array(ys)
+
+
+def _run_h5_u(params, ys, u):
+    """h5_exact E_x with (u not None) or without (u None) the consigne."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        f = GSSFilter(params, mode="h5_exact")
+        s = params.s
+        ex = []
+        for n, y in enumerate(ys):
+            un = u[n] if u is not None else None
+            ex.append(f.step(np.asarray(y, dtype=float).reshape(s, 1), u=un).E_x.ravel())
+    return np.array(ex)
+
+
+def exp_consigne(outdir: Path) -> dict:
+    from prg.utils.input_signal import make_input
+
+    params = consigne_model()
+    p_in = params.p
+    N, seeds = 600, list(range(40))
+    u = make_input("square(140)", N, p_in) * 2.0  # slow ±2 square wave
+
+    rmse = {"pairwise_blind": [], "h5_blind": [], "h5_consigne": [], "oracle_consigne": []}
+    for sd in seeds:
+        rs, xs, ys = _sim_u(params, N, 100 + sd, u)
+        rmse["pairwise_blind"].append(_rmse(single_kalman_filter(params, ys)[0], xs))
+        rmse["h5_blind"].append(_rmse(_run_h5_u(params, ys, None), xs))
+        rmse["h5_consigne"].append(_rmse(_run_h5_u(params, ys, u), xs))
+        rmse["oracle_consigne"].append(_rmse(oracle_filter(params, rs, ys, us=u)[0], xs))
+    means = {m: float(np.mean(v)) for m, v in rmse.items()}
+    stds = {m: float(np.std(v)) for m, v in rmse.items()}
+
+    # Exactness WITH the input: h5_exact == brute-force Kᴺ (short N)
+    Ns = 11
+    u_s = make_input("gaussian", Ns, p_in, seed=0)
+    _, _, ys_s = _sim_u(params, Ns, 7, u_s)
+    resid = float(np.max(np.abs(_run_h5_u(params, ys_s, u_s) - exact_mixture_filter(params, ys_s, us=u_s)[0])))
+
+    # Figure: (a) one trajectory segment, (b) RMSE bars
+    _, xs0, ys0 = _sim_u(params, N, 100, u)
+    ex_u, ex_no = _run_h5_u(params, ys0, u), _run_h5_u(params, ys0, None)
+    seg = slice(120, 360)
+    nn = np.arange(N)[seg]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.8, 3.4))
+    ax1.plot(nn, xs0[seg, 0], color="black", lw=1.3, label="true $X_n$")
+    ax1.plot(nn, ex_u[seg, 0], color=_C["h5"], lw=1.1, label=r"NGH-MSM-KF (consigne)")
+    ax1.plot(nn, ex_no[seg, 0], color=_C["imm"], lw=1.0, ls="--", label=r"NGH-MSM-KF (blind to $u$)")
+    ax1.set_xlabel("$n$")
+    ax1.set_ylabel("state $X_n$")
+    ax1.set_title(r"E$_c$a — sign-flipping input drives $X$")
+    ax1.legend(fontsize=7, loc="upper right")
+    order = ["pairwise_blind", "h5_blind", "h5_consigne", "oracle_consigne"]
+    labels = [
+        "pairwise\nKalman\n(blind)",
+        "NGH-MSM-KF\n(blind to $u$)",
+        "NGH-MSM-KF\n(consigne)",
+        "oracle\n(regimes+$u$)",
+    ]
+    cols = [_C["kal"], _C["imm"], _C["h5"], _C["oracle"]]
+    ax2.bar(range(4), [means[m] for m in order], yerr=[stds[m] for m in order], color=cols, capsize=3)
+    ax2.set_xticks(range(4))
+    ax2.set_xticklabels(labels, fontsize=7)
+    ax2.set_ylabel("state RMSE")
+    ax2.set_title(rf"E$_c$b — RMSE ({len(seeds)} runs)")
+    fig.savefig(outdir / "figures" / "econsigne.pdf")
+    plt.close(fig)
+    return {
+        "rmse_mean": means,
+        "rmse_std": stds,
+        "h5_vs_bruteforce_max_abs": resid,
+        "N_r": [float(params.N(k).ravel()[0]) for k in range(params.K)],
+        "N": N,
+        "n_seeds": len(seeds),
+        "p": p_in,
+    }
+
+
 def main(outdir: str | Path) -> dict:
     _setup_mpl()
     outdir = Path(outdir)
@@ -1080,6 +1361,8 @@ def main(outdir: str | Path) -> dict:
         ("E8_c_influence", exp_c_influence),
         ("E9_c_mismatch", exp_c_mismatch),
         ("E10_approx_exactness", exp_approx_exactness),
+        ("Efair_fair_comparison", exp_fair_comparison),
+        ("Econsigne", exp_consigne),
     ]:
         print(f"running {key} …", flush=True)
         results[key] = fn(outdir)

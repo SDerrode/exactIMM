@@ -24,15 +24,23 @@ class _SimWorker(QThread):
     finished = pyqtSignal(list, list, object, object)  # ns, rs, xs, ys
     error = pyqtSignal(str)
 
-    def __init__(self, params: GSSParams, N: int, seed: int | None, parent=None):
+    def __init__(
+        self,
+        params: GSSParams,
+        N: int,
+        seed: int | None,
+        u: np.ndarray | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self._params = params
         self._N = N
         self._seed = seed
+        self._u = u  # exogenous input (N, p) or None (autonomous)
 
     def run(self) -> None:
         try:
-            sim = GSSSimulator(self._params, N=self._N, seed=self._seed)
+            sim = GSSSimulator(self._params, N=self._N, seed=self._seed, u=self._u)
             ns, rs = [], []
             xs_rows, ys_rows = [], []
             # Check interruption every CHECK_EVERY iterations to keep overhead low
@@ -65,6 +73,7 @@ class _FilterWorker(QThread):
         ys: np.ndarray,  # (N, s)
         joseph: bool = False,
         mode: str = "imm_general",
+        u: np.ndarray | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -72,6 +81,7 @@ class _FilterWorker(QThread):
         self._ys = ys
         self._joseph = joseph
         self._mode = mode
+        self._u = u  # exogenous input (N, p) or None (autonomous)
 
     def run(self) -> None:
         try:
@@ -89,7 +99,8 @@ class _FilterWorker(QThread):
                     return
                 if i % PROGRESS_EVERY == 0:
                     self.progress.emit(i, N)
-                res = filt.step(y_row.reshape(-1, 1))
+                u_i = self._u[i] if self._u is not None else None
+                res = filt.step(y_row.reshape(-1, 1), u=u_i)
                 E_xs_list.append(res.E_x.ravel())
                 Var_xs_list.append(res.Var_x.diagonal())
                 pis_list.append(res.pi)

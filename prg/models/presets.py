@@ -29,6 +29,7 @@ class PresetEntry:
     K: int
     q: int
     s: int
+    p: int = 0  # exogenous-input ("consigne") dimension (0 = autonomous)
 
     def load(self) -> BaseGSSModel:
         """Instantiate and return the model (lazy import)."""
@@ -82,5 +83,16 @@ PRESETS: list[PresetEntry] = [
         K=3,
         q=1,
         s=1,
+    ),
+    PresetEntry(
+        label="K=2, q=1, s=1 — Consigne (exogenous input)",
+        tooltip="NGH-MSM with a 1-D exogenous input (consigne); the hidden-state "
+        "gain G^X flips sign across regimes.",
+        module_name="model_gss_K2_q1_s1_consigne",
+        class_name="ModelGssK2Q1S1Consigne",
+        K=2,
+        q=1,
+        s=1,
+        p=1,
     ),
 ]

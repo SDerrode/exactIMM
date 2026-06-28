@@ -40,6 +40,7 @@ from prg.classes.GSSSimulator import GSSSimulator
 from prg.models.base_gss_model import BaseGSSModel
 from prg.utils.exceptions import GSSError
 from prg.utils.h5_constraint import apply_AB_constraint
+from prg.utils.input_signal import make_input
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -216,6 +217,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not write the CSV (dry run for testing).",
     )
     parser.add_argument(
+        "--input",
+        default=None,
+        metavar="SPEC",
+        help="Exogenous input ('consigne') u_n: a generator name "
+        "(zeros|ones|gaussian[(std)]|step[(n0)]|ramp[(slope)]|sin[(period)]|"
+        "square[(period)]), const(a,b,...), or a CSV path. Requires the model "
+        "to define input gains G_list (params.p > 0).",
+    )
+    parser.add_argument(
         "--constraint",
         action="store_true",
         help="Enforce the (H5)-compatible AB constraint: recompute "
@@ -303,8 +313,25 @@ def main() -> None:
         params.dim_z,
     )
 
+    # --- Exogenous input ("consigne"), optional ---
+    u = None
+    if args.input is not None:
+        if params.p == 0:
+            log.error(
+                "--input given but model '%s' has no input gain (params.p == 0). "
+                "Add G_list to the model to use a consigne.",
+                args.model,
+            )
+            sys.exit(1)
+        try:
+            u = make_input(args.input, args.N, params.p, seed=args.seed)
+        except (ValueError, OSError) as exc:
+            log.error("Invalid --input %r: %s", args.input, exc)
+            sys.exit(1)
+        log.info("Exogenous input: spec=%r → u shape %s", args.input, u.shape)
+
     # --- Simulate ---
-    sim = GSSSimulator(params, N=args.N, seed=args.seed)
+    sim = GSSSimulator(params, N=args.N, seed=args.seed, u=u)
     log.info("GSSSimulator ready: %s", sim)
 
     if args.no_save:

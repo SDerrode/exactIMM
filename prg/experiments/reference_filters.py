@@ -112,6 +112,7 @@ def with_stationary_init(params):
 
     mu, Sigma = stationary_moments(params)
     K = params.K
+    G_list = [params.G(k) for k in range(K)] if params.p > 0 else None
     return GSSParams(
         K=K,
         q=params.q,
@@ -123,6 +124,7 @@ def with_stationary_init(params):
         mu_z0_list=mu,
         Sigma_z0_list=[0.5 * (S + S.T) for S in Sigma],
         b_list=[params.b(k) for k in range(K)],
+        G_list=G_list,
     )
 
 
@@ -147,17 +149,25 @@ def _collect(hyps, q, K):
     return ex.ravel(), vx, pr
 
 
-def exact_mixture_filter(params, ys):
+def exact_mixture_filter(params, ys, us=None):
     """Exact filtered posterior over all Kᴺ regime histories (no pruning).
 
     Returns ``(E_x, Var_x, pi)`` with shapes ``(N, q)``, ``(N, q, q)``,
     ``(N, K)``: ``E[X_n|Y_{1:n}]``, ``Var[X_n|Y_{1:n}]`` and ``p(r_n|Y_{1:n})``.
     Cost grows as Kᴺ — use short sequences (N ≲ 12 for K=2).
+
+    ``us`` is the optional exogenous input, shape ``(N, p)``; the prediction
+    to Z_n uses u_{n-1} (input is deterministic → only the means shift, the
+    read-out stays implicit in the per-history Kalman state).
     """
     K, q, s = params.K, params.q, params.s
     dim = q + s
     ys = np.asarray(ys, dtype=float).reshape(-1, s)
     N = ys.shape[0]
+    p_in = params.p
+    has_u = us is not None and p_in > 0
+    us = np.asarray(us, dtype=float).reshape(N, p_in) if has_u else None
+    G = [params.G(k) for k in range(K)] if has_u else None
     P = params.P
     pi0 = params.pi0
     F = [params.f_matrix.F(k) for k in range(K)]
@@ -187,6 +197,8 @@ def exact_mixture_filter(params, ys):
             j = h["r"]
             for k in range(K):
                 z_pred = F[k] @ h["z"] + b[k]
+                if has_u:
+                    z_pred = z_pred + G[k] @ us[n - 1].reshape(p_in, 1)  # u_{n-1}
                 P_pred = F[k] @ h["P"] @ F[k].T + SW[k]
                 z, Pc, ll = _kalman_exact_y_update(z_pred, P_pred, yn, H)
                 logw = h["logw"] + float(np.log(P[j, k] + 1e-300)) + ll
@@ -200,7 +212,7 @@ def exact_mixture_filter(params, ys):
 # ---------------------------------------------------------------------------
 # Pairwise (coupled) Kalman on the π-averaged model ("ignore the switching")
 # ---------------------------------------------------------------------------
-def single_kalman_filter(params, ys):
+def single_kalman_filter(params, ys, us=None):
     """Pairwise (coupled) Kalman filter on the stationary-π-averaged model.
 
     Uses F̄ = Σ_k π_k F_k, Σ̄_W = Σ_k π_k Σ_W(k), b̄ = Σ_k π_k b(k), started from
@@ -219,6 +231,10 @@ def single_kalman_filter(params, ys):
     Fbar = sum(pi[k] * params.f_matrix.F(k) for k in range(K))
     SWbar = sum(pi[k] * params.noise_cov.Sigma_W(k) for k in range(K))
     bbar = sum(pi[k] * params.b(k).reshape(dim, 1) for k in range(K))
+    p_in = params.p
+    has_u = us is not None and p_in > 0
+    us = np.asarray(us, dtype=float).reshape(N, p_in) if has_u else None
+    Gbar = sum(pi[k] * params.G(k) for k in range(K)) if has_u else None
     mu, Sigma = stationary_moments(params)
     z = sum(pi[k] * mu[k] for k in range(K))
     Pc = sum(pi[k] * (Sigma[k] + (mu[k] - z) @ (mu[k] - z).T) for k in range(K))
@@ -228,6 +244,8 @@ def single_kalman_filter(params, ys):
     for n in range(N):
         if n > 0:
             z = Fbar @ z + bbar
+            if has_u:
+                z = z + Gbar @ us[n - 1].reshape(p_in, 1)  # u_{n-1}
             Pc = Fbar @ Pc @ Fbar.T + SWbar
         z, Pc, _ = _kalman_exact_y_update(z, Pc, ys[n].reshape(s, 1), H)
         E_x[n] = z[:q].ravel()
@@ -238,7 +256,7 @@ def single_kalman_filter(params, ys):
 # ---------------------------------------------------------------------------
 # Oracle Kalman — known regime sequence (best achievable X-estimate)
 # ---------------------------------------------------------------------------
-def oracle_filter(params, rs, ys):
+def oracle_filter(params, rs, ys, us=None):
     """Kalman filter that switches with the *known* regime sequence ``rs``.
 
     Returns ``(E_x, Var_x)``: the minimum-mean-square X-estimate attainable when
@@ -251,6 +269,9 @@ def oracle_filter(params, rs, ys):
     N = ys.shape[0]
     H = _obs_matrix(q, s)
     mu, Sigma = stationary_moments(params)
+    p_in = params.p
+    has_u = us is not None and p_in > 0
+    us = np.asarray(us, dtype=float).reshape(N, p_in) if has_u else None
 
     r0 = int(rs[0])
     z = mu[r0].reshape(dim, 1).copy()
@@ -261,6 +282,8 @@ def oracle_filter(params, rs, ys):
         k = int(rs[n])
         if n > 0:
             z = params.f_matrix.F(k) @ z + params.b(k).reshape(dim, 1)
+            if has_u:
+                z = z + params.G(k) @ us[n - 1].reshape(p_in, 1)  # u_{n-1}, target regime k
             Pc = params.f_matrix.F(k) @ Pc @ params.f_matrix.F(k).T + params.noise_cov.Sigma_W(k)
         z, Pc, _ = _kalman_exact_y_update(z, Pc, ys[n].reshape(s, 1), H)
         E_x[n] = z[:q].ravel()
@@ -314,7 +337,7 @@ def _model_arrays(params):
     return F, b, SW, mu0, Sig0, pi0, _obs_matrix(q, s), K, q, s, dim
 
 
-def imm_filter(params, ys):
+def imm_filter(params, ys, us=None):
     """Blom-Bar-Shalom Interacting Multiple Model (IMM) filter.
 
     Keeps one regime-conditional Kalman state and a mode probability per
@@ -332,6 +355,10 @@ def imm_filter(params, ys):
     Var_x = np.zeros((N, q, q))
     pis = np.zeros((N, K))
     loglik = 0.0
+    p_in = params.p
+    has_u = us is not None and p_in > 0
+    us = np.asarray(us, dtype=float).reshape(N, p_in) if has_u else None
+    Gin = [params.G(k) for k in range(K)] if has_u else None
 
     # n = 0 : condition each regime prior on Y_1, weight by π0.
     y0 = ys[0].reshape(s, 1)
@@ -360,6 +387,8 @@ def imm_filter(params, ys):
         ll = np.zeros(K)
         for k in range(K):
             z_pred = F[k] @ z0[k] + b[k]
+            if has_u:
+                z_pred = z_pred + Gin[k] @ us[n - 1].reshape(p_in, 1)  # u_{n-1}
             P_pred = F[k] @ P0[k] @ F[k].T + SW[k]
             z[k], Pc[k], ll[k] = _kalman_exact_y_update(z_pred, 0.5 * (P_pred + P_pred.T), yn, H)
         logmu = np.log(cbar + 1e-300) + ll
@@ -371,7 +400,7 @@ def imm_filter(params, ys):
     return E_x, Var_x, pis, loglik
 
 
-def gpb2_filter(params, ys):
+def gpb2_filter(params, ys, us=None):
     """Generalized Pseudo-Bayesian order 2 (GPB2) filter.
 
     Keeps one Gaussian per current regime; each step expands to the K² regime
@@ -389,6 +418,10 @@ def gpb2_filter(params, ys):
     Var_x = np.zeros((N, q, q))
     pis = np.zeros((N, K))
     loglik = 0.0
+    p_in = params.p
+    has_u = us is not None and p_in > 0
+    us = np.asarray(us, dtype=float).reshape(N, p_in) if has_u else None
+    Gin = [params.G(k) for k in range(K)] if has_u else None
 
     y0 = ys[0].reshape(s, 1)
     z = [_kalman_exact_y_update(mu0[k], Sig0[k], y0, H) for k in range(K)]
@@ -407,6 +440,8 @@ def gpb2_filter(params, ys):
         for j in range(K):
             for k in range(K):
                 z_pred = F[k] @ z[j] + b[k]
+                if has_u:
+                    z_pred = z_pred + Gin[k] @ us[n - 1].reshape(p_in, 1)  # u_{n-1}
                 P_pred = F[k] @ Pc[j] @ F[k].T + SW[k]
                 zk, Pk, lll = _kalman_exact_y_update(z_pred, 0.5 * (P_pred + P_pred.T), yn, H)
                 zjk[(j, k)], Pjk[(j, k)] = zk, Pk
@@ -428,7 +463,7 @@ def gpb2_filter(params, ys):
     return E_x, Var_x, pis, loglik
 
 
-def rbpf_filter(params, ys, n_particles=1000, seed=0, resample_threshold=0.5):
+def rbpf_filter(params, ys, n_particles=1000, seed=0, resample_threshold=0.5, us=None):
     """Rao-Blackwellised particle filter (Doucet, de Freitas, Murphy & Russell, 2000).
 
     Particles over the discrete regime path, each carrying an exact
@@ -451,6 +486,10 @@ def rbpf_filter(params, ys, n_particles=1000, seed=0, resample_threshold=0.5):
     Var_x = np.zeros((N, q, q))
     pis = np.zeros((N, K))
     loglik = 0.0
+    p_in = params.p
+    has_u = us is not None and p_in > 0
+    us = np.asarray(us, dtype=float).reshape(N, p_in) if has_u else None
+    Gin = [params.G(k) for k in range(K)] if has_u else None
 
     # n = 0 : sample r_0 ~ π0, init each particle's Kalman state, weight by Λ.
     y0 = ys[0].reshape(s, 1)
@@ -470,6 +509,8 @@ def rbpf_filter(params, ys, n_particles=1000, seed=0, resample_threshold=0.5):
         for p in range(M):
             k = int(r[p])
             z_pred = F[k] @ z[p] + b[k]
+            if has_u:
+                z_pred = z_pred + Gin[k] @ us[n - 1].reshape(p_in, 1)  # u_{n-1}
             P_pred = F[k] @ Pc[p] @ F[k].T + SW[k]
             z[p], Pc[p], incr[p] = _kalman_exact_y_update(z_pred, 0.5 * (P_pred + P_pred.T), yn, H)
         loglik += _logsumexp(logw + incr)  # log Σ_p W_{n-1}[p] Λ_p

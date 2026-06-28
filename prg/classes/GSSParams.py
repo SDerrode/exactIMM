@@ -5,8 +5,12 @@ prg/classes/GSSParams.py
 Aggregates all parameters of the GSS model (equations 7, 7bis, 7ter).
 
 The model equation is:
-  Z_{n+1} = F(r_{n+1}) Z_n + b(r_{n+1}) + W_{n+1}
-where b(k) is the regime-dependent drift bias (zero by default).
+  Z_{n+1} = F(r_{n+1}) Z_n + b(r_{n+1}) + G(r_{n+1}) u_n + W_{n+1}
+where b(k) is the regime-dependent drift bias (zero by default) and
+G(k) u_n is the optional exogenous input ("consigne", zero by default):
+u_n in R^p is observed (known), G(k) is the (q+s, p) regime-dependent
+input gain.  With no input (G_list=None) the model is autonomous and
+behaves exactly as before.
 
 GSSParams is the single source of truth passed to GSSSimulator (and
 later to filters/smoothers).  It validates every parameter at
@@ -57,6 +61,12 @@ class GSSParams:
         Regime-dependent drift bias b(k) in the transition equation
         Z_{n+1} = F(k) Z_n + b(k) + W_{n+1}.
         If None or omitted, b(k) = 0 for all k.
+    G_list : list of K ndarrays, each shape (q+s, p), optional
+        Regime-dependent exogenous-input gain G(k) in the transition
+        equation Z_{n+1} = F(k) Z_n + b(k) + G(k) u_n + W_{n+1}, where
+        u_n in R^p is a known ("observed") input.  The input dimension p
+        is inferred from G_list; if None or omitted the model is
+        autonomous (p = 0, no input) and behaves exactly as before.
 
     Raises
     ------
@@ -84,6 +94,7 @@ class GSSParams:
         mu_z0_list: list[np.ndarray],
         Sigma_z0_list: list[np.ndarray],
         b_list: list[np.ndarray] | None = None,
+        G_list: list[np.ndarray] | None = None,
     ) -> None:
         # Structural validation always runs: gating it behind ``if __debug__``
         # silently disables it under ``python -O``, letting malformed parameters
@@ -95,6 +106,7 @@ class GSSParams:
         self._validate_noise_cov(noise_cov, K, q, s)
         self._validate_pi0(pi0, K)
         self._validate_initial_conditions(mu_z0_list, Sigma_z0_list, K, q + s)
+        self._validate_G_list(G_list, K, q, s)
 
         self._K = int(K)
         self._q = int(q)
@@ -119,6 +131,16 @@ class GSSParams:
             self._b = [zero.copy() for _ in range(K)]
         else:
             self._b = [np.array(b, dtype=float).reshape(q + s, 1) for b in b_list]
+
+        # Exogenous-input gain G(k): None → autonomous model (p = 0).
+        # An empty (q+s, 0) gain makes ``G(k) @ u_n`` contribute nothing, so
+        # the no-input path is bit-for-bit identical to the previous behaviour.
+        if G_list is None:
+            self._p = 0
+            self._G = [np.zeros((q + s, 0), dtype=float) for _ in range(K)]
+        else:
+            self._p = int(np.asarray(G_list[0]).shape[1])
+            self._G = [np.asarray(g, dtype=float) for g in G_list]
 
         # Cache Cholesky factors of Sigma_z0 for efficient sampling
         self._chol_z0: list[np.ndarray] = []
@@ -178,6 +200,7 @@ class GSSParams:
             mu_z0_list=p["mu_z0_list"],
             Sigma_z0_list=p["Sigma_z0_list"],
             b_list=p.get("b_list", None),
+            G_list=p.get("G_list", None),
         )
 
     # ------------------------------------------------------------------
@@ -249,6 +272,29 @@ class GSSParams:
                 arr = np.asarray(arr)
                 if arr.shape != shape:
                     raise ParamError(f"{name}[{k}] must have shape {shape}, got {arr.shape}.")
+
+    @staticmethod
+    def _validate_G_list(G_list: list | None, K: int, q: int, s: int) -> None:
+        if G_list is None:
+            return
+        if not isinstance(G_list, (list, tuple)) or len(G_list) != K:
+            length = len(G_list) if hasattr(G_list, "__len__") else "?"
+            raise ParamError(
+                f"G_list must be a list/tuple of {K} arrays, got "
+                f"{type(G_list).__name__} of length {length}."
+            )
+        first = np.asarray(G_list[0])
+        if first.ndim != 2 or first.shape[0] != q + s:
+            raise ParamError(
+                f"G_list[0] must be 2-D with {q + s} rows, got shape {first.shape}."
+            )
+        p = first.shape[1]
+        for k, arr in enumerate(G_list):
+            arr = np.asarray(arr)
+            if arr.shape != (q + s, p):
+                raise ParamError(
+                    f"G_list[{k}] must have shape ({q + s}, {p}), got {arr.shape}."
+                )
 
     # ------------------------------------------------------------------
     # Stationary distribution
@@ -381,6 +427,38 @@ class GSSParams:
         """Drift bias for regime k, shape (q+s, 1).  Zero if not set."""
         return self._b[k]
 
+    @property
+    def p(self) -> int:
+        """Exogenous-input dimension p (0 if the model is autonomous)."""
+        return self._p
+
+    def G(self, k: int) -> np.ndarray:
+        """
+        Exogenous-input gain for regime k, shape (q+s, p).
+
+        Empty (q+s, 0) array when the model is autonomous (p = 0), so that
+        ``G(k) @ u_n`` contributes nothing.
+        """
+        return self._G[k]
+
+    def N(self, k: int) -> np.ndarray:
+        """
+        Slaving read-out gain for the exogenous input, shape (q, p):
+
+            N_k = G^X_k − Δ_k Σ_{V,k}^{-1} G^Y_k = G^X_k − M_k G^Y_k,
+
+        where G^X_k, G^Y_k are the X- and Y-blocks of ``G(k)``.  This is the
+        input counterpart of the observation gain ``M_k`` in the exact slaving
+        read-out ``X_n = M_{r_n} y_n + N_{r_n} u_{n-1}``.  Returns a (q, 0)
+        array when the model is autonomous (p = 0).
+        """
+        if self._p == 0:
+            return np.zeros((self._q, 0), dtype=float)
+        G_k = self._G[k]
+        G_X = G_k[: self._q, :]
+        G_Y = G_k[self._q :, :]
+        return G_X - self._noise_cov.M(k) @ G_Y
+
     def mu_z0(self, k: int) -> np.ndarray:
         """Initial mean of Z_0 given R_0 = k, shape (q+s, 1)."""
         return self._mu_z0[k]
@@ -475,6 +553,10 @@ class GSSParams:
         print("\nDrift bias b(k):")
         for k in range(self._K):
             print(f"  k={k}  b: {self._b[k].ravel()}")
+        if self._p > 0:
+            print(f"\nExogenous-input gain G(k)  (p={self._p}):")
+            for k in range(self._K):
+                print(f"  k={k}  G:\n{fmt(self._G[k])}")
         print("=" * 50)
 
     def __repr__(self) -> str:
@@ -528,10 +610,13 @@ class NGHMSMParams(GSSParams):
         mu_z0_list: list[np.ndarray],
         Sigma_z0_list: list[np.ndarray],
         b_list: list[np.ndarray] | None = None,
+        G_list: list[np.ndarray] | None = None,
         *,
         tol: float = 1e-6,
     ) -> None:
-        super().__init__(K, q, s, P, f_matrix, noise_cov, pi0, mu_z0_list, Sigma_z0_list, b_list)
+        super().__init__(
+            K, q, s, P, f_matrix, noise_cov, pi0, mu_z0_list, Sigma_z0_list, b_list, G_list
+        )
         # Validate the corrected CNS; reuses all of validate_ngh_msm's logic.
         from prg.utils.h5_constraint import validate_ngh_msm
 
@@ -562,6 +647,7 @@ class NGHMSMParams(GSSParams):
         mu_z0_list: list[np.ndarray],
         Sigma_z0_list: list[np.ndarray],
         b_list: list[np.ndarray] | None = None,
+        G_list: list[np.ndarray] | None = None,
         *,
         tol: float = 1e-6,
     ) -> NGHMSMParams:
@@ -610,6 +696,7 @@ class NGHMSMParams(GSSParams):
             mu_z0_list=mu_z0_list,
             Sigma_z0_list=Sigma_z0_list,
             b_list=b_list,
+            G_list=G_list,
             tol=tol,
         )
 
@@ -635,6 +722,7 @@ class NGHMSMParams(GSSParams):
             mu_z0_list=p["mu_z0_list"],
             Sigma_z0_list=p["Sigma_z0_list"],
             b_list=p.get("b_list", None),
+            G_list=p.get("G_list", None),
         )
 
     # ------------------------------------------------------------------

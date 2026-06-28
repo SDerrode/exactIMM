@@ -32,6 +32,7 @@ class _SessionState:
     data: tuple | None = None  # (ns, rs, xs, ys, seed_used)
     params: object | None = None  # GSSParams (avoids circular import)
     params_signature: tuple | None = None  # bytes signature of GUI at capture
+    u: np.ndarray | None = None  # exogenous input (N, p) used by Simulate / Filter
     innovations: np.ndarray | None = None  # (N, s)
     # D5: filter arrays kept for session persistence
     filter_E_xs: np.ndarray | None = None  # (N, q)
@@ -71,6 +72,7 @@ class _SessionState:
         self.data = None
         self.params = None
         self.params_signature = None
+        self.u = None
         self._clear_filter()
 
     def begin_simulation(self, params: object, signature: tuple | None) -> None:
@@ -79,8 +81,9 @@ class _SessionState:
         self.params_signature = signature
         self._clear_filter()  # previous filter results no longer match the new data
 
-    def store_data(self, ns, rs, xs, ys, seed) -> None:
+    def store_data(self, ns, rs, xs, ys, seed, u: np.ndarray | None = None) -> None:
         self.data = (ns, rs, xs, ys, seed)
+        self.u = u
 
     def store_innovations(self, innov: np.ndarray) -> None:
         self.innovations = innov
@@ -102,4 +105,5 @@ class _SessionState:
         self.data = (ns, rs, xs, ys, None)
         self.params = params
         self.params_signature = signature
+        self.u = None  # loaded data carries no input sequence (recomputed on filter)
         self._clear_filter()  # any previous filter results belong to the old data

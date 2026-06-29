@@ -15,7 +15,7 @@ on held-out files: with/without the consigne, with/without the speed regime.
 
     python -m prg.experiments.make_vehicle_consigne_fig
 
-Output: docs/wojciech/rapport_consigne/figures/vehicle_consigne.pdf  (+ printed RMSE).
+Output: docs/rapport_consigne/figures/vehicle_consigne.pdf  (+ printed RMSE).
 The ~20 MB download is cached under data/real/vehicle/.
 """
 
@@ -32,7 +32,7 @@ import pandas as pd
 
 FIGSHARE_AGGRESSIVE = "https://ndownloader.figshare.com/files/52533854"  # aggressive_driver.zip
 CACHE = Path("data/real/vehicle")
-OUT = Path("docs/wojciech/rapport_consigne/figures/vehicle_consigne.pdf")
+OUT = Path("docs/rapport_consigne/figures/vehicle_consigne.pdf")
 
 YAW = "Yaw rate [deg/s]"
 ALAT = "Lateral acceleration [g]"

@@ -8,7 +8,7 @@ Simulation and **fast exact jump-filtering** algorithms for the paper:
 The paper introduces an exact, **linear-time** optimal filter for Gaussian
 switching state-space models satisfying a closed-form structural constraint
 (the **AB / (H5) constraint**). The LaTeX sources of the current version live in
-`docs/wojciech/article_vWojciech_tex/`;
+`docs/NGH-MSM/`;
 the commands that regenerate its figures are in
 [Reproducing the paper figures](#reproducing-the-paper-figures) below.
 
@@ -384,19 +384,20 @@ Then run with `--model model_my_gss`.
 ## Reproducing the paper figures
 
 The LaTeX sources of the current paper version live in
-`docs/wojciech/article_vWojciech_tex/`.
-Its figures are produced by the **jump-filtering study harness**
+`docs/NGH-MSM/`. The experiments that back the paper are written up in
+`docs/rapport_experimental/`, whose figures are produced by the
+**jump-filtering study harness**
 `prg/experiments/study.py` — a single, self-contained, deterministic
 (fixed-seed) script that runs a battery of filtering experiments and writes
 one vector PDF per experiment plus a `results.json` summary.
 
 ```bash
-# Regenerate the candidate figures into the paper's figures/ directory
-python -m prg.experiments.study docs/wojciech/article_vWojciech_tex
+# Regenerate the candidate figures into the experimental report's figures/ directory
+python -m prg.experiments.study docs/rapport_experimental
 ```
 
-This creates `docs/wojciech/article_vWojciech_tex/figures/*.pdf` and
-`docs/wojciech/article_vWojciech_tex/results.json`. The candidate
+This creates `docs/rapport_experimental/figures/*.pdf` and
+`docs/rapport_experimental/results.json`. The candidate
 experiments — all on the **exact jump filter** — are:
 
 | Figure | Experiment |

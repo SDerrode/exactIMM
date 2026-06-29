@@ -9,7 +9,7 @@ Inputs  (committed under data/real/):
     enso_sst.csv     date, nino34, nino12, oni, regime
     stock_bond.csv   Date, stock_ret, dy, bond_ret   (bond_ret = -d(DGS10), FRED)
 Output:
-    docs/wojciech/rapport_experimental/figures/real_structure.pdf
+    docs/rapport_experimental/figures/real_structure.pdf
 
     python -m prg.experiments.make_real_structure_fig
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-OUT = Path("docs/wojciech/rapport_experimental/figures/real_structure.pdf")
+OUT = Path("docs/rapport_experimental/figures/real_structure.pdf")
 
 
 def main() -> None:

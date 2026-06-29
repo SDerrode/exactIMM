@@ -13,6 +13,7 @@ Output:
 
     python -m prg.experiments.make_real_structure_fig
 """
+
 from __future__ import annotations
 
 import warnings
@@ -58,8 +59,24 @@ def main() -> None:
     roll = pd.Series(xb).rolling(60).corr(pd.Series(ys))
     a2.plot(d["Date"], roll, color="#1f77b4", lw=0.8)
     a2.axhline(0, color="k", lw=0.8)
-    a2.fill_between(d["Date"], roll, 0, where=(roll < 0), color="#d62728", alpha=0.3, label="risk-off  (beta < 0)")
-    a2.fill_between(d["Date"], roll, 0, where=(roll > 0), color="#2ca02c", alpha=0.25, label="risk-on  (beta > 0)")
+    a2.fill_between(
+        d["Date"],
+        roll,
+        0,
+        where=(roll < 0),
+        color="#d62728",
+        alpha=0.3,
+        label="risk-off  (beta < 0)",
+    )
+    a2.fill_between(
+        d["Date"],
+        roll,
+        0,
+        where=(roll > 0),
+        color="#2ca02c",
+        alpha=0.25,
+        label="risk-on  (beta > 0)",
+    )
     a2.set_title("(b) Stock-bond: the read-out flips sign  (beta +0.35 <-> -0.37)", fontsize=9)
     a2.set_ylabel("rolling corr(bond, stock)")
     a2.legend(fontsize=7, loc="lower left")

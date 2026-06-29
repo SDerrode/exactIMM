@@ -142,11 +142,11 @@ def test_h5_exact_equals_brute_force_kn(with_input):
     N = 11
     rng = np.random.default_rng(9)
     u = rng.standard_normal((N, pc.p)) if with_input else None
-    Y = np.array(
-        [y.ravel() for _n, _r, _x, y in GSSSimulator(pc, N=N, seed=9, u=u)]
-    )
+    Y = np.array([y.ravel() for _n, _r, _x, y in GSSSimulator(pc, N=N, seed=9, u=u)])
     filt = GSSFilter(pc, mode="h5_exact")
-    Ex_h5 = np.array([filt.step(Y[n], u=(u[n] if with_input else None)).E_x.ravel() for n in range(N)])
+    Ex_h5 = np.array(
+        [filt.step(Y[n], u=(u[n] if with_input else None)).E_x.ravel() for n in range(N)]
+    )
     Ex_kn, _, _ = exact_mixture_filter(pc, Y, us=u)
     assert np.max(np.abs(Ex_h5 - Ex_kn)) < 1e-9
 

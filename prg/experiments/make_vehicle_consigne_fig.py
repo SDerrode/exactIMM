@@ -18,6 +18,7 @@ on held-out files: with/without the consigne, with/without the speed regime.
 Output: docs/wojciech/rapport_consigne/figures/vehicle_consigne.pdf  (+ printed RMSE).
 The ~20 MB download is cached under data/real/vehicle/.
 """
+
 from __future__ import annotations
 
 import glob
@@ -116,9 +117,13 @@ def main() -> dict:
         mtr, mte = sbtr == r, sbte == r
         bE = _fit(ytr[mtr], [atr[mtr], str_tr[mtr]])
         yhE[mte] = bE[0] + bE[1] * ate[mte] + bE[2] * str_te[mte]
-    rmse = {"D_blind_inputblind": _rmse(yte, yhD), "C_blind_consigne": _rmse(yte, yhC),
-            "B_regime_inputblind": _rmse(yte, yhB), "A_regime_speed_consigne": _rmse(yte, yhA),
-            "E_steerregime_consigne": _rmse(yte, yhE)}
+    rmse = {
+        "D_blind_inputblind": _rmse(yte, yhD),
+        "C_blind_consigne": _rmse(yte, yhC),
+        "B_regime_inputblind": _rmse(yte, yhB),
+        "A_regime_speed_consigne": _rmse(yte, yhA),
+        "E_steerregime_consigne": _rmse(yte, yhE),
+    }
 
     # figure: (a) yaw on a test segment, (b) RMSE bars
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 3.8))

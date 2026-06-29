@@ -843,12 +843,33 @@ def exp_c_influence(outdir: Path) -> dict:
         arrowprops=dict(arrowstyle="-|>", lw=1.2, color="black", mutation_scale=18, shrinkB=4),
     )
     ax2.plot(Cs, rmse["zero"], "--", color="#bbbbbb", label="zero")
-    ax2.errorbar(Cs, rmse["single_kalman"], yerr=rstd["single_kalman"], fmt="^-",
-                 color=_C["kal"], capsize=2, label="pairwise Kalman")
-    ax2.errorbar(Cs, rmse["h5_exact"], yerr=rstd["h5_exact"], fmt="o-",
-                 color=_C["h5"], capsize=2, label="NGH-MSM-KF (proposed)")
-    ax2.errorbar(Cs, rmse["oracle"], yerr=rstd["oracle"], fmt="s-",
-                 color=_C["oracle"], capsize=2, label="oracle")
+    ax2.errorbar(
+        Cs,
+        rmse["single_kalman"],
+        yerr=rstd["single_kalman"],
+        fmt="^-",
+        color=_C["kal"],
+        capsize=2,
+        label="pairwise Kalman",
+    )
+    ax2.errorbar(
+        Cs,
+        rmse["h5_exact"],
+        yerr=rstd["h5_exact"],
+        fmt="o-",
+        color=_C["h5"],
+        capsize=2,
+        label="NGH-MSM-KF (proposed)",
+    )
+    ax2.errorbar(
+        Cs,
+        rmse["oracle"],
+        yerr=rstd["oracle"],
+        fmt="s-",
+        color=_C["oracle"],
+        capsize=2,
+        label="oracle",
+    )
     ax2.set_xlabel("observation coupling $C$")
     ax2.set_ylabel("state RMSE")
     ax2.set_title("E8b — state recovered as $C$ grows")
@@ -907,12 +928,33 @@ def exp_c_mismatch(outdir: Path) -> dict:
     penalty = [rmse["c0_old"][i] - rmse["correct"][i] for i in range(len(Cs))]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    ax1.errorbar(Cs, rmse["c0_old"], yerr=rstd["c0_old"], fmt="s-", color=_C["imm"],
-                 capsize=2, label="old $C{=}0$ filter (CMS-HLM)")
-    ax1.errorbar(Cs, rmse["correct"], yerr=rstd["correct"], fmt="o-", color=_C["h5"],
-                 capsize=2, label="correct filter (NGH-MSM)")
-    ax1.errorbar(Cs, rmse["oracle"], yerr=rstd["oracle"], fmt="^-", color=_C["oracle"],
-                 capsize=2, label="oracle")
+    ax1.errorbar(
+        Cs,
+        rmse["c0_old"],
+        yerr=rstd["c0_old"],
+        fmt="s-",
+        color=_C["imm"],
+        capsize=2,
+        label="old $C{=}0$ filter (CMS-HLM)",
+    )
+    ax1.errorbar(
+        Cs,
+        rmse["correct"],
+        yerr=rstd["correct"],
+        fmt="o-",
+        color=_C["h5"],
+        capsize=2,
+        label="correct filter (NGH-MSM)",
+    )
+    ax1.errorbar(
+        Cs,
+        rmse["oracle"],
+        yerr=rstd["oracle"],
+        fmt="^-",
+        color=_C["oracle"],
+        capsize=2,
+        label="oracle",
+    )
     ax1.set_xlabel("true observation coupling $C$")
     ax1.set_ylabel("state RMSE")
     ax1.set_title("E9a — old $C{=}0$ model on $C{\\neq}0$ data")
@@ -923,7 +965,14 @@ def exp_c_mismatch(outdir: Path) -> dict:
     ax2.set_title("E9b — cost of the old assumption")
     fig.savefig(outdir / "figures" / "e9_c_mismatch.pdf")
     plt.close(fig)
-    return {"C": Cs, "rmse_mean": rmse, "rmse_std": rstd, "penalty": penalty, "N": N, "n_seeds": len(seeds)}
+    return {
+        "C": Cs,
+        "rmse_mean": rmse,
+        "rmse_std": rstd,
+        "penalty": penalty,
+        "N": N,
+        "n_seeds": len(seeds),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1033,7 +1082,13 @@ def exp_approx_exactness(outdir: Path) -> dict:
     ax1.legend(fontsize=7, ncol=2)
 
     ax2.errorbar(
-        Ms, rb_err, yerr=rb_std, fmt="o-", color=_C["oracle"], ms=4, capsize=2,
+        Ms,
+        rb_err,
+        yerr=rb_std,
+        fmt="o-",
+        color=_C["oracle"],
+        ms=4,
+        capsize=2,
         label="RBPF (M1, mean $\\pm$ s.d., 20 seeds)",
     )
     ax2.set_xscale("log")
@@ -1126,23 +1181,33 @@ def exp_fair_comparison(outdir: Path) -> dict:
 
     def _build(A, B, C, D, SU, Dl, SV, b_zero=False):
         fm = FMatrix(
-            K=2, q=1, s=1,
+            K=2,
+            q=1,
+            s=1,
             A_list=[_m(A[r]) for r in range(2)],
             B_list=[_m(0.0 if b_zero else B[r]) for r in range(2)],
             C_list=[_m(C[r]) for r in range(2)],
             D_list=[_m(D[r]) for r in range(2)],
         )
         nc = GSSNoiseCovariance(
-            K=2, q=1, s=1,
+            K=2,
+            q=1,
+            s=1,
             Sigma_U_list=[_m(SU[r]) for r in range(2)],
             Delta_list=[_m(Dl[r]) for r in range(2)],
             Sigma_V_list=[_m(SV[r]) for r in range(2)],
         )
         p = GSSParams(
-            K=2, q=1, s=1, P=np.array([[0.9, 0.1], [0.1, 0.9]]),
-            f_matrix=fm, noise_cov=nc, pi0=np.array([0.5, 0.5]),
+            K=2,
+            q=1,
+            s=1,
+            P=np.array([[0.9, 0.1], [0.1, 0.9]]),
+            f_matrix=fm,
+            noise_cov=nc,
+            pi0=np.array([0.5, 0.5]),
             mu_z0_list=[np.zeros((2, 1))] * 2,
-            Sigma_z0_list=[np.eye(2)] * 2, b_list=[np.zeros((2, 1))] * 2,
+            Sigma_z0_list=[np.eye(2)] * 2,
+            b_list=[np.zeros((2, 1))] * 2,
         )
         return with_stationary_init(p)
 
@@ -1201,8 +1266,10 @@ def exp_fair_comparison(outdir: Path) -> dict:
             abs(np.interp(0.4, deltas, fwd_old) - np.interp(0.4, deltas, fwd_new))
         ),
         "collapse_residual": {
-            "imm_new": imm_new, "gpb2_new": gpb2_new,
-            "imm_old": imm_old, "gpb2_old": gpb2_old,
+            "imm_new": imm_new,
+            "gpb2_new": gpb2_new,
+            "imm_old": imm_old,
+            "gpb2_old": gpb2_old,
         },
     }
 
@@ -1303,7 +1370,9 @@ def exp_consigne(outdir: Path) -> dict:
     Ns = 11
     u_s = make_input("gaussian", Ns, p_in, seed=0)
     _, _, ys_s = _sim_u(params, Ns, 7, u_s)
-    resid = float(np.max(np.abs(_run_h5_u(params, ys_s, u_s) - exact_mixture_filter(params, ys_s, us=u_s)[0])))
+    resid = float(
+        np.max(np.abs(_run_h5_u(params, ys_s, u_s) - exact_mixture_filter(params, ys_s, us=u_s)[0]))
+    )
 
     # Figure: (a) one trajectory segment, (b) RMSE bars
     _, xs0, ys0 = _sim_u(params, N, 100, u)
@@ -1313,7 +1382,9 @@ def exp_consigne(outdir: Path) -> dict:
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.8, 3.4))
     ax1.plot(nn, xs0[seg, 0], color="black", lw=1.3, label="true $X_n$")
     ax1.plot(nn, ex_u[seg, 0], color=_C["h5"], lw=1.1, label=r"NGH-MSM-KF (consigne)")
-    ax1.plot(nn, ex_no[seg, 0], color=_C["imm"], lw=1.0, ls="--", label=r"NGH-MSM-KF (blind to $u$)")
+    ax1.plot(
+        nn, ex_no[seg, 0], color=_C["imm"], lw=1.0, ls="--", label=r"NGH-MSM-KF (blind to $u$)"
+    )
     ax1.set_xlabel("$n$")
     ax1.set_ylabel("state $X_n$")
     ax1.set_title(r"E$_c$a — sign-flipping input drives $X$")
@@ -1326,7 +1397,9 @@ def exp_consigne(outdir: Path) -> dict:
         "oracle\n(regimes+$u$)",
     ]
     cols = [_C["kal"], _C["imm"], _C["h5"], _C["oracle"]]
-    ax2.bar(range(4), [means[m] for m in order], yerr=[stds[m] for m in order], color=cols, capsize=3)
+    ax2.bar(
+        range(4), [means[m] for m in order], yerr=[stds[m] for m in order], color=cols, capsize=3
+    )
     ax2.set_xticks(range(4))
     ax2.set_xticklabels(labels, fontsize=7)
     ax2.set_ylabel("state RMSE")

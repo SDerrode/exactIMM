@@ -34,9 +34,9 @@ jobs:
         # The GUI smoke tests (tests/test_*_gui.py) need a Qt binding (PyQt6),
         # which is in the optional `gui` extra and not installed on CI. Disable
         # the pytest-qt plugin (it errors at startup without a binding) and skip
-        # those two files so the suite runs headless. They still run locally via
+        # the GUI test files so the suite runs headless. They still run locally via
         # `pip install -e ".[dev,gui]"`.
-        run: pytest -p no:pytest-qt --ignore=tests/test_param_panel_gui.py --ignore=tests/test_main_window_gui.py --cov=prg --cov-report=term --cov-report=xml --tb=short
+        run: pytest -p no:pytest-qt --ignore=tests/test_param_panel_gui.py --ignore=tests/test_main_window_gui.py --ignore=tests/test_consigne_gui.py --cov=prg --cov-report=term --cov-report=xml --tb=short
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7

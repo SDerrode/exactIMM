@@ -285,16 +285,12 @@ class GSSParams:
             )
         first = np.asarray(G_list[0])
         if first.ndim != 2 or first.shape[0] != q + s:
-            raise ParamError(
-                f"G_list[0] must be 2-D with {q + s} rows, got shape {first.shape}."
-            )
+            raise ParamError(f"G_list[0] must be 2-D with {q + s} rows, got shape {first.shape}.")
         p = first.shape[1]
         for k, arr in enumerate(G_list):
             arr = np.asarray(arr)
             if arr.shape != (q + s, p):
-                raise ParamError(
-                    f"G_list[{k}] must have shape ({q + s}, {p}), got {arr.shape}."
-                )
+                raise ParamError(f"G_list[{k}] must have shape ({q + s}, {p}), got {arr.shape}.")
 
     # ------------------------------------------------------------------
     # Stationary distribution

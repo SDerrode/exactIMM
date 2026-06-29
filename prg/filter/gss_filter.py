@@ -1003,9 +1003,11 @@ class GSSFilter:
         self.reset()
 
         if u is not None and p.p > 0:
-            u = make_input(u, N, p.p, seed=seed) if isinstance(u, str) else np.asarray(
-                u, dtype=float
-            ).reshape(N, p.p)
+            u = (
+                make_input(u, N, p.p, seed=seed)
+                if isinstance(u, str)
+                else np.asarray(u, dtype=float).reshape(N, p.p)
+            )
         else:
             u = None
         has_u = u is not None

@@ -68,6 +68,7 @@ _FORBIDDEN_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
 _WHITELIST: tuple[str, ...] = (
     "tests/test_no_stale_refs.py",  # this test
     "CHANGELOG.md",  # historical v0.12.0 entry
+    "audit/",  # the 2026-06 audit documents the old API names / Lehmann proof verbatim
 )
 
 

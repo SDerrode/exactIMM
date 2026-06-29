@@ -1,0 +1,813 @@
+{
+ "dimensions": [
+  {
+   "dimension": "estimation-vs-code",
+   "findings": [
+    {
+     "file": "prg/learning/supervised.py",
+     "line": "424 (and 534) vs paper/sections/05_estimation.tex:43-44",
+     "severity": "medium",
+     "category": "paper-claim-not-implemented",
+     "title": "Algorithme 1 (supervisé), étape 3 : π̂₀ par fréquences + lissage de Laplace — jamais implémentée dans fit_supervised",
+     "description": "L'Algorithme 1 du papier comporte l'étape « Estimate π̂₀(k) from regime frequencies (with Laplace smoothing) » (05_estimation.tex l.43-44). Le code fit_supervised ne calcule jamais π₀ : il retourne en dur \"pi0\": None (supervised.py l.424), et le fichier modèle généré écrit « pi0: None → stationary distribution » (l.534). La distribution initiale utilisée en aval est donc la stationnaire de P̂, pas les fréquences empiriques lissées. Distinct de l'acquis « π₀ appris jeté dans le modèle sauvegardé » (qui concerne le π₀ EM, bien estimé puis écarté à la sauvegarde) : ici, côté supervisé, l'estimateur décrit n'existe pas du tout. Ironiquement, la formule exacte du papier (counts+1)/(N+K) est implémentée dans semi_supervised.py l.421-423, mais seulement comme graine d'initialisation EM.",
+     "evidence": "supervised.py l.424 : '\"pi0\": None,' dans le dict retourné par fit_supervised ; docstring l.310 : 'pi0 (always None → stationary distribution)'. Papier Alg.1 l.43-44 : 'Estimate π̂₀(k) from regime frequencies (with Laplace smoothing)'.",
+     "suggestion": "Soit implémenter l'étape 3 de l'Algorithme 1 dans fit_supervised (réutiliser la formule de semi_supervised.py l.421-423), soit retirer l'étape du pseudo-code et dire dans le papier que π₀ est prise stationnaire."
+    },
+    {
+     "file": "prg/learning/semi_supervised.py",
+     "line": "376-381, 409-423, 432-447, 453-461 vs paper/sections/05_estimation.tex:166-168",
+     "severity": "medium",
+     "category": "algorithm-mismatch",
+     "title": "Algorithme 2 : « Run Algorithm 1 on (R⁽⁰⁾, X, Y) » — le code n'appelle pas l'Algorithme 1 mais une variante défensive différente",
+     "description": "L'Algorithme 2 (05_estimation.tex l.166-168) affirme que chaque redémarrage EM est initialisé en exécutant l'Algorithme 1 supervisé sur l'assignation k-means R⁽⁰⁾. Le code utilise _initialize_params_from_R (semi_supervised.py l.384-463), qui diffère de fit_supervised sur plusieurs points : (1) lignes de P sans support → remplacées par uniforme (l.413-419) alors que fit_supervised lève ValueError (supervised.py l.331-337) ; (2) OLS par régime seulement si idx.size ≥ dim_z+1, sinon repli F=I, b=0, Σ_W = cov globale + 0.1·I (l.443-447) — fit_supervised fait l'OLS dès 1 échantillon et lève ValueError si 0 ; ce repli (cov globale + 0.1·I) ne correspond pas non plus à la convention « unit noise covariance » de l'annexe D ; (3) μ_z0/Σ_z0 de repli = moments globaux (l.459-461) au lieu du zéro/identité de fit_supervised (supervised.py l.403-410) ; (4) en amont, _initialize_kmeans réassigne aléatoirement un échantillon à tout cluster k-means vide (l.376-381) — absent du papier. Notez aussi que l'Algorithme 1, tel qu'implémenté, lèverait ValueError sur les assignations k-means dégénérées, donc l'affirmation du papier n'est pas seulement imprécise : elle est inexécutable telle quelle.",
+     "evidence": "semi_supervised.py l.438-439 appelle _fit_regime directement (pas fit_supervised), gardé par 'if idx.size >= dim_z + 1' l.436 ; fallback l.444-447 'F = np.eye(dim_z) … SigW = Z_global_cov + 0.1 * np.eye(dim_z)'. Papier Alg.2 l.167-168 : 'Run Algorithm 1 on (R⁽⁰⁾, X, Y) with AB=false'.",
+     "suggestion": "Décrire dans le papier (ou en annexe D) l'initialisation réellement utilisée (seuil dim_z+1, replis, lissage des lignes de P, réassignation des clusters vides), ou faire pointer le code vers fit_supervised avec la même sémantique d'erreur."
+    },
+    {
+     "file": "prg/learning/semi_supervised.py",
+     "line": "313-316 et 244-247 vs paper/appendix/D_baum_welch.tex:80-89",
+     "severity": "medium",
+     "category": "paper-claim-not-implemented",
+     "title": "Annexe D : Σ_W « symmetrised and clamped to the nearest SPD matrix » — le M-step ne clampe que les blocs Σ_U et Σ_V, jamais la matrice jointe",
+     "description": "L'annexe D (l.86-89) affirme que la covariance pondérée Σ̂_W,k du M-step est « symmetrised and clamped to the nearest SPD matrix ». Dans le code, _weighted_fit symétrise bien Σ_W (l.316) mais le clamp SPD est délégué à _apply_constraints (l.246-247) qui ne clampe que les blocs diagonaux Σ_U et Σ_V séparément ; le bloc croisé Δ est conservé tel quel et la matrice jointe Σ_W = [[Σ_U, Δ],[Δᵀ, Σ_V]] reconstruite en l.572 n'est jamais projetée SPD pendant les itérations EM (le clamp complet n'existe qu'à l'initialisation, l.451). Clamper les blocs séparément ne garantit pas que la matrice jointe soit SPD (Δ peut rester trop grand) ; le code s'en remet alors au repli ridge du Cholesky dans _log_mvn_batch (l.115-118), mécanisme non décrit dans le papier. Noter que l'Algorithme 1 du papier (supervisé) dit, lui, « Clamp Σ_U, Σ_V to nearest SPD » (05_estimation.tex l.56) — c'est l'annexe D qui sur-promet par rapport au code et à l'Algorithme 1.",
+     "evidence": "semi_supervised.py l.315-316 : 'SigW = (residuals.T @ (w[:, None] * residuals)) / Wsum ; SigW = (SigW + SigW.T) / 2.0' — aucun _nearest_spd sur SigW ; _apply_constraints l.246-247 : 'SU = _nearest_spd(SU) ; SV = _nearest_spd(SV)'. Annexe D l.88-89 : 'which is symmetrised and clamped to the nearest SPD matrix'.",
+     "suggestion": "Soit clamper la Σ_W jointe dans _weighted_fit (comme à l'init, l.451), soit corriger l'annexe D : « les blocs Σ_U et Σ_V sont clampés SPD séparément ; un ridge de 10⁻⁸ est ajouté si le Cholesky de Σ_W échoue »."
+    },
+    {
+     "file": "prg/learning/semi_supervised.py",
+     "line": "576-584 (et 89, 276, 550-553) vs paper/appendix/D_baum_welch.tex:105-112",
+     "severity": "low",
+     "category": "algorithm-mismatch",
+     "title": "Annexe D, régimes dégénérés : le papier dit que (μ_z0, Σ_z0) sont réinitialisés ; le code les laisse à leur valeur précédente — et deux planchers différents",
+     "description": "L'annexe D (l.110-112) : « The same convention applies to (μ_z0,k, Σ_z0,k) when the regime is empty over the full sequence » — c.-à-d. réinitialisation (convention identité/unité). Dans _em_run, la mise à jour de μ_z0/Σ_z0 est simplement sautée quand Σ_n γ_n(k) ≤ plancher (l.579 : 'if denom_k > _LOG_FLOOR'), conservant les valeurs de l'itération précédente — pas de réinitialisation. De plus le papier parle d'« a numerical floor » unique, alors que le code en utilise deux très différents : floor_w = 1e-12 pour (F, b, Σ_W) dans _weighted_fit (l.276) et _LOG_FLOOR = 1e-300 pour μ_z0/Σ_z0 et le dénominateur de P (l.89, l.545, l.579). Enfin, le repli des lignes de P sans support — conserver la ligne précédente de P (l.550-553) — n'est décrit nulle part dans la section « Degenerate regimes » de l'annexe.",
+     "evidence": "semi_supervised.py l.576-584 : la branche 'if denom_k > _LOG_FLOOR:' n'a pas de else — aucun reset ; l.89 : '_LOG_FLOOR = 1e-300' ; l.276 : 'floor_w: float = 1e-12'. Annexe D l.110-112 : 'The same convention applies to (μ_z0,k, Σ_z0,k) when the regime is empty'.",
+     "suggestion": "Aligner : soit réinitialiser μ_z0/Σ_z0 (zéro/identité) quand le régime est vide comme annoncé, soit reformuler l'annexe (« les moments précédents sont conservés ») ; documenter les deux planchers et le repli des lignes de P."
+    },
+    {
+     "file": "prg/experiments/run_em.py",
+     "line": "22-24, 70-74 vs paper/sections/06_experiments.tex:294-301, 312-313",
+     "severity": "medium",
+     "category": "reproducibility",
+     "title": "Protocole §6.4 du papier (I_max=50, n_init=5) contredit par le script run_em.py (max_iter=100, n_inits=10) et par les défauts de la librairie",
+     "description": "Le papier (06_experiments.tex l.294-296) déclare : « Algorithm 2 is run with I_max = 50 EM iterations, convergence tolerance ε = 10⁻⁵, and n_init = 5 random restarts », et l.312-313 : « we nevertheless use n_init = 5 in all subsequent EM experiments ». Le script §6.4 (run_em.py) documente et utilise par défaut DEFAULT_N_INITS = 10 (l.72, et docstring l.24 : 'Run PH and GEM, each with n_inits=10 restarts') et DEFAULT_MAX_ITER = 100 (l.73) ; il est invoqué nu ('python -m prg.experiments.run_em') dans README.md l.625 et wiki/Paper-Reproduce.md l.37, donc avec 10 restarts et 100 itérations. Seule ε = 1e-5 concorde (l.74). Défauts secondaires divergents mais contournables par flags : DEFAULT_N_LIST = (500, 2000, 5000) et DEFAULT_N_RUNS = 100 (l.70-71) vs « N ∈ {500, 2000}, 10 MC runs » (papier l.300-301) — l'exemple d'usage l.40 montre les bons flags. Le wiki (l.40 : « × 5 restarts = 360 EM runs ») est cohérent avec le papier mais pas avec le code. À noter : les défauts de l'API fit_semi_supervised (semi_supervised.py l.699-701 : n_inits=10, max_iter=100, tol=1e-5) divergent aussi des valeurs du protocole §6. En revanche §7 (07_real_data.tex l.146-147 : n_init=5, I_max=50, ε=1e-5) correspond exactement à run_real_data.py l.242 (n_inits=5, max_iter=50).",
+     "evidence": "run_em.py l.72-73 : 'DEFAULT_N_INITS = 10  # EM restarts per trial' / 'DEFAULT_MAX_ITER = 100' ; docstring l.24 : '2. Run PH and GEM, each with n_inits=10 restarts.' ; papier l.295-296 : 'I_max = 50 EM iterations, convergence tolerance ε = 10⁻⁵, and n_init = 5 random restarts'.",
+     "suggestion": "Soit corriger le protocole §6.4 du papier (10 restarts, 100 itérations max), soit aligner DEFAULT_N_INITS/DEFAULT_MAX_ITER de run_em.py sur 5/50 et régénérer les tables ; mettre wiki/Paper-Reproduce.md en cohérence."
+    },
+    {
+     "file": "prg/learning/semi_supervised.py",
+     "line": "512-537 et 779 vs paper/sections/05_estimation.tex:127-129, 169-181",
+     "severity": "low",
+     "category": "algorithm-mismatch",
+     "title": "Critère d'arrêt : ℓ évalué avant le M-step (pas après comme dans l'Algorithme 2) — à max_iter, le log L rapporté/sélectionné ne correspond pas aux paramètres retournés",
+     "description": "L'Algorithme 2 du papier (l.169-181) calcule ℓ⁽ⁱ⁾ = log p(z|θ⁽ⁱ⁾) APRÈS le M-step i puis teste |ℓ⁽ⁱ⁾−ℓ⁽ⁱ⁻¹⁾| < ε. Le code évalue log_lik pendant le E-step (donc pour les paramètres du M-step précédent) et teste la convergence AVANT le M-step (l.532-537). Conséquence quand max_iter est atteint sans convergence : la boucle se termine juste après un dernier M-step dont la vraisemblance n'est jamais évaluée — les paramètres retournés sont « un M-step en avance » sur info['log_lik'] = log_lik_history[-1]. La sélection du meilleur redémarrage (fit_semi_supervised l.779) et le « Best log L » sauvegardé comparent alors des vraisemblances qui ne correspondent pas aux paramètres retournés (indépendamment de l'écart pré-projection déjà acté). Accessoirement, §5 l.128-129 dit que l'on retient « the restart with the highest converged log-likelihood » : le code retient aussi les runs non convergés (max-iter atteint) dans la compétition (l.775-780), sans filtre sur info['converged'].",
+     "evidence": "semi_supervised.py l.532-537 : 'if it > 0: delta = log_lik - log_lik_history[-2]; if abs(delta) < tol: converged = True; break' — placé avant le M-step ; le M-step (l.539-584) s'exécute ensuite, y compris à la toute dernière itération. Papier l.177-178 : 'ℓ⁽ⁱ⁾ ← log p(z_{1:N}|θ⁽ⁱ⁾)' après le M-step, puis test.",
+     "suggestion": "Évaluer la vraisemblance une dernière fois après le M-step final (ou inverser l'ordre E/M-test comme dans l'Algorithme 2), et préciser dans le papier que les runs non convergés participent à la sélection."
+    },
+    {
+     "file": "prg/learning/semi_supervised.py",
+     "line": "249-259 vs paper/sections/05_estimation.tex:174-176, 184-186",
+     "severity": "low",
+     "category": "algorithm-mismatch",
+     "title": "Projection AB en échec silencieux : le code garde A, B non contraints avec un simple warning, alors que l'Algorithme 2 affirme appliquer la contrainte",
+     "description": "Dans _apply_constraints (semi_supervised.py l.249-259), si compute_AB lève ValueError, le code log un warning et conserve les A, B non contraints — aussi bien en mode GEM (chaque M-step) qu'en projection post-hoc finale. L'Algorithme 2 du papier (l.174-176 et l.184-186) présente l'application de la contrainte AB comme inconditionnelle ; aucun mode d'échec n'est décrit. Le modèle sauvegardé porte pourtant l'en-tête « Constraint : AB » (_generate_model_code, supervised.py l.481), si bien qu'un modèle étiqueté AB peut violer (H5) sans que rien ne l'indique dans le fichier. À noter que le chemin supervisé (_fit_regime, supervised.py l.258-261) n'a pas ce rattrapage : l'exception remonte — comportements incohérents entre les deux estimateurs.",
+     "evidence": "semi_supervised.py l.253-259 : 'try: A, B = compute_AB(C, D, Dt, SV) except ValueError as exc: _log.warning(\"AB projection failed in %s: %s — keeping unconstrained A, B.\", …)'.",
+     "suggestion": "Faire échouer (ou re-projeter après réparation de Σ_V) plutôt que de continuer silencieusement ; au minimum, propager l'information d'échec jusqu'au fichier modèle généré, ou documenter ce repli dans le papier."
+    },
+    {
+     "file": "prg/learning/supervised.py",
+     "line": "249-251, 603-607 (et semi_supervised.py:53, 830-834) vs paper/sections/05_estimation.tex (absent)",
+     "severity": "info",
+     "category": "undocumented-feature",
+     "title": "Option --delta-zero (forcer Δ(k)=0 avant la projection AB) présente dans les deux estimateurs, absente de la §5 et de l'annexe D",
+     "description": "Les deux estimateurs offrent un prétraitement --delta-zero qui annule le bloc croisé Δ(k) de Σ_W avant la projection AB (supervised.py l.249-251 dans _fit_regime ; semi_supervised.py l.244-245 dans _apply_constraints, exposé CLI l.830-834). Combiné à la projection AB, cela force A = Δ Σ_V⁻¹ C = 0 et B = 0. Ni l'Algorithme 1, ni l'Algorithme 2, ni l'annexe D ne mentionnent cette option (seule une remarque incidente en 04_constraint.tex l.125 évoque le cas Δ = 0). Un lecteur du papier ne peut pas savoir que la chaîne d'estimation publiée possède ce mode, ni qu'il transforme la projection AB en A=B=0.",
+     "evidence": "supervised.py l.249-251 : '# --- Step 1: enforce Δ = 0 --- if delta_zero: Dt = np.zeros((q, s))' suivi de la projection AB l.258-261 ; aucun \\textsc{delta-zero} dans les algorithmes de 05_estimation.tex.",
+     "suggestion": "Soit documenter l'option (et sa conséquence A=B=0 sous projection AB) dans la §5, soit la retirer des CLI si elle ne sert pas les résultats du papier."
+    },
+    {
+     "file": "prg/learning/supervised.py",
+     "line": "236 et 400 vs paper/sections/05_estimation.tex:22-23, 52-53, 62-63",
+     "severity": "info",
+     "category": "numerical",
+     "title": "Diviseurs incohérents : Σ_W,k en MLE (/N_k) mais Σ_z0,k en covariance non biaisée (/(n−1)) — le papier dit « sample covariance » pour les deux",
+     "description": "Le papier appelle Σ_W,k « the empirical residual covariance » (l.22-23) / « sample covariance of the OLS residuals » (Alg.1 l.52-53), et (μ_z0, Σ_z0) « sample mean/covariance » (Alg.1 l.62-63), sans préciser les diviseurs. Le code utilise deux conventions différentes : Σ_W,k = résidusᵀ·résidus / N_k (MLE, supervised.py l.236) mais Σ_z0,k via np.cov(..., rowvar=False) qui divise par n−1 (non biaisé, l.400 ; idem semi_supervised.py l.430, 458). Aucun des deux n'est faux isolément, mais le papier laisse croire à une convention unique, et la différence est visible sur les petits régimes. (Côté EM, l'annexe D donne explicitement les formules pondérées /Σγ — le code y est conforme.)",
+     "evidence": "supervised.py l.236 : 'SigW = (residuals.T @ residuals) / N_k' (commentaire docstring l.214 : 'MLE, divided by N_k') vs l.400 : 'cov_k = np.cov(Z_k, rowvar=False)' (ddof=1 par défaut).",
+     "suggestion": "Préciser les diviseurs dans le papier (MLE /N_k pour Σ_W, /(n−1) pour Σ_z0) ou unifier la convention dans le code."
+    },
+    {
+     "file": "prg/learning/supervised.py",
+     "line": "331-337, 355-360, 402-410 vs paper/sections/05_estimation.tex:33-67",
+     "severity": "info",
+     "category": "algorithm-mismatch",
+     "title": "Gestion des régimes vides du supervisé non décrite : le code lève ValueError (P, OLS) ou bascule sur zéro/identité (μ_z0, Σ_z0) ; l'Algorithme 1 est présenté comme total",
+     "description": "L'Algorithme 1 du papier ne prévoit aucun cas dégénéré : il suppose chaque régime présent comme source et destination. Le code, lui : (1) lève ValueError si un régime n'apparaît jamais comme source de transition (ligne de P inestimable, supervised.py l.331-337) ; (2) lève ValueError si un régime n'apparaît jamais comme destination (OLS impossible, l.355-360) ; (3) pour μ_z0/Σ_z0 avec moins de 2 pas de temps dans le régime, bascule silencieusement sur moyenne nulle / covariance identité (l.402-410) — repli jamais mentionné dans le papier (l'annexe D « Degenerate regimes » ne couvre que l'EM). Ces comportements expliquent aussi pourquoi l'initialisation EM ne peut pas appeler littéralement l'Algorithme 1 (cf. finding dédié).",
+     "evidence": "supervised.py l.357-359 : 'raise ValueError(f\"Regime k={k} never appears as a transition destination — cannot estimate F(k) by OLS.\")' ; l.409-410 : 'mu_z0_list.append(np.zeros((dim_z, 1))) ; Sigma_z0_list.append(np.eye(dim_z))'.",
+     "suggestion": "Une phrase dans §5.1 suffirait : « regimes absent as source/destination raise an error; initial moments default to (0, I) when fewer than two samples are available »."
+    }
+   ],
+   "scope_summary": "Comparaison point par point de la Section 5 (05_estimation.tex, Algorithmes 1 et 2) et de l'Annexe D (D_baum_welch.tex) avec prg/learning/supervised.py et prg/learning/semi_supervised.py, plus vérification croisée des hyperparamètres du protocole §6.4/§7 contre prg/experiments/run_em.py et run_real_data.py. Conformes (non rapportés) : E-step log-domain (log-MVN Cholesky eq:log_mvn, forward/backward logsumexp, terme d'émission initiale ι, formules γ/ξ), mises à jour M-step de P et π₀ (eq:M_step_P), OLS pondéré par le √w-trick et W_k=diag(γ) (eq:M_step_Theta, eq:sqrt_w), covariance pondérée /Σγ (eq:Sigma_W_weighted), moments initiaux pondérés, reset identité/unité des dynamiques dégénérées dans _weighted_fit, k-means sur les différences premières ΔZ, tri canonique par A_k[0,0] décroissant, timing de contrainte PH (défaut) vs GEM conforme à §5.2.4 et au flag --constraint-each-iter, hyperparamètres §7 = run_real_data.py. Exclus car déjà actés : eq:S_jk/imm_general, convention de moments Remark 4, projection AB post-hoc par défaut, sélection multi-restart sur vraisemblances pré-projection, π₀ EM jeté à la sauvegarde. Dix écarts rapportés : π₀ supervisé jamais estimé malgré l'étape 3 de l'Algorithme 1 ; initialisation EM ≠ « Run Algorithm 1 » ; clamp SPD de la Σ_W jointe annoncé en annexe D mais limité aux blocs dans le M-step ; non-reset des moments initiaux dégénérés + planchers incohérents ; protocole §6.4 (n_init=5, I_max=50) contredit par run_em.py (10, 100) et les défauts de l'API ; ordre E-step/test de convergence inversé avec log L périmé à max_iter ; échec silencieux de la projection AB ; option --delta-zero non documentée ; diviseurs de covariance mixtes ; gestion des régimes vides supervisés non décrite."
+  },
+  {
+   "dimension": "filter-remarks-vs-code",
+   "findings": [
+    {
+     "file": "paper/sections/02_model_h5.tex",
+     "line": "108-130 (et 03_filtering.tex:56-59)",
+     "severity": "high",
+     "category": "paper-math-error / paper-code-mismatch",
+     "title": "Le noyau de la Prop. 2 (eq:mu_jk) omet le terme de biais C_k(b_X,j − Δ_j Σ_V,j⁻¹ b_Y,j) ; le code h5_exact (correct) ne « matche » donc PAS μ_jk comme l'affirme la Remark h5-exact",
+     "description": "La Remark rem:h5exact (03_filtering.tex:56-59) affirme que les constantes du mode h5-exact « match[ent] the explicit expressions Γ_jk and μ_jk(·) of Proposition prop:markov ». Vérification numérique sur le modèle jouet AB-contraint avec b≠0 : Γ(j,k) du code (gss_filter.py:461) coïncide avec eq:Gamma_jk à 1e-17 près, et la pente avec eq:mu_jk à 1e-16 près, MAIS l'ordonnée à l'origine diverge dès que b_X,j ≠ Δ_j Σ_V,j⁻¹ b_Y,j : code (j=1,k=0)=1.6267 vs papier b_Y,k=2.0 ; (j=1,k=1)=−1.1867 vs −1.0. Une régression Monte-Carlo (400k pas simulés, GSSSimulator) donne 1.641 et −1.190 : c'est le CODE qui est exact, le papier qui est faux. Algébriquement, l'intercept exact est b_Y,k + C_k(b_X,j − Δ_j Σ_V,j⁻¹ b_Y,j) ; eq:mu_jk (02_model_h5.tex:109-112) omet le second terme. Par conséquent la Remark rem:bX_invisible (02_model_h5.tex:119-130, « Bias on X is invisible ») est fausse en général : b_X entre dans le noyau de (R,Y) via b_X − ΔΣ_V⁻¹b_Y (et son renvoi vers §3.6 — « only the stationary moments of Z need to be updated » — ne correspond à aucun énoncé de §3.6). rem:Gamma_bias_free (132-138) est en revanche confirmée numériquement. Distinct de l'acquis eq:S_jk : ici c'est la MOYENNE du noyau de la Prop. 2 et deux remarques de §2/§3 qui sont contredites par le code h5_exact, lequel implémente le bon conditionnement gaussien (gss_filter.py:458 mu_Y_jk, :460 M_t, :624 mean_jk).",
+     "evidence": "paper: eq:mu_jk = b_{Y,k} + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n (02_model_h5.tex:109-112) ; rem:bX_invisible « depends on b_{Y,k} … but not on b_{X,k} » (119-130) ; rem:h5exact « matching the explicit expressions Γ_jk and μ_jk(·) » (03_filtering.tex:56-59). code: prg/filter/gss_filter.py:458 « mu_Y_jk = F[q:, :] @ self._mu_z[j] + b_Y », :624 « mean_jk = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_prev - self._mu_Y[j]) ». Numérique : intercept code 1.6267/−1.1867 vs papier 2.0/−1.0 ; MC (n=4750 et 234915 transitions) : 1.641/−1.190 ; b_X(1)−K_1·b_Y(1) = −2 − 0.1333·(−1) = −1.8667 = écart/C_k exactement.",
+     "suggestion": "Corriger eq:mu_jk en μ_jk(y_n) = b_{Y,k} + C_k(b_{X,j} − Δ_j Σ_{V,j}^{-1} b_{Y,j}) + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n, reformuler rem:bX_invisible (le biais d'état est visible via b_X − ΔΣ_V⁻¹b_Y), et préciser dans rem:h5exact que seul Γ_jk est retrouvé tel quel."
+    },
+    {
+     "file": "prg/filter/gss_filter.py",
+     "line": "850-874 (vs paper/sections/03_filtering.tex:285-302)",
+     "severity": "high",
+     "category": "algorithm-mismatch",
+     "title": "La Remark « posterior regime moments » (bouclage par les moments a posteriori) n'est pas implémentée dans le mode imm_general (mode par défaut)",
+     "description": "La Remark rem:posterior_moments (03_filtering.tex:285-302) prescrit de réinjecter dans l'étape (I) du pas suivant les moments A POSTERIORI μ^post(k)=[x̂_{n+1|n+1}^{(k)}; y_{n+1}] et P^post(k), « ensuring that the prediction at time n+2 conditions on the full history ». Dans _update_step_general, les moments stockés pour le pas suivant sont les moments PRÉDITS mu_np1/P_np1 (gss_filter.py:871-874 « self._P_z = P_np1; self._mu = mu_np1 ») : le posterior Kalman calculé lignes 850-865 (E_x_r, Var_x_r) n'est jamais réinjecté et le bloc Y de μ n'est jamais collapsé sur y_{n+1}. Le docstring l'admet à demi-mot (lignes 59-63 : « µ_n(r), P_n(r) are *prior* (observation-free) quantities »). Le mode h5_exact, lui, implémente la remarque en forme fermée (Γ(j,k)=C_k P_post(j) C_kᵀ + Σ_V(k) ligne 461 et moyenne via x̂ filtré ligne 624 — équivalence vérifiée algébriquement). Lien avec l'acquis eq:S_jk : la non-réinjection des moments a posteriori est précisément ce qui empêche imm_general de produire la covariance conditionnelle correcte ; même en corrigeant eq:S_jk, imm_general ne suivrait pas la récursion de §3 sans ce bouclage. Comme imm_general est le mode par défaut du constructeur (ligne 206), l'algorithme effectivement exécuté par défaut ne correspond à aucune version de la récursion de la Section 3.",
+     "evidence": "paper: « These posterior values (μ^post, P^post) serve as (μ_{n+1}(k), P_{n+1}(k)) in step (I) of the next time step » (03_filtering.tex:297-301). code: gss_filter.py:871-874 stocke mu_np1/P_np1 (prédits, étape I) ; E_x_r/Var_x_r (lignes 850-865) ne sont utilisés que pour la combinaison (IV) ; docstring lignes 59-63.",
+     "suggestion": "Soit implémenter le bouclage de rem:posterior_moments dans imm_general (μ^post(k) = [e_x; y_new], P^post reconstruit de var_x), soit documenter dans le papier que le mode général n'effectue pas ce bouclage — mais alors la récursion §3 n'a pas d'implémentation hors h5_exact."
+    },
+    {
+     "file": "prg/filter/gss_filter.py",
+     "line": "478, 486-488, 542-563, 700-728 (vs paper/sections/03_filtering.tex:330-366)",
+     "severity": "medium",
+     "category": "initialization-mismatch",
+     "title": "§3.6 initialise avec (π_0, μ_z0(k), Σ_z0(k)) fournis par le modèle ; le code remplace ces moments par le point fixe stationnaire dans LES DEUX modes",
+     "description": "Le papier (§3.6, 03_filtering.tex:333-366) démarre la récursion avec les moments initiaux du modèle : eq:init_post/eq:init_mean/eq:init_var utilisent μ_z0(k), Σ_z0(k), et lignes 361-363 imposent μ_1(k)=μ_z0(k), P_1(k)=Σ_z0(k)+μ_z0μ_z0ᵀ pour la première étape (I). Le code ignore systématiquement params.mu_z0/Sigma_z0/pi0 au profit des limites stationnaires : _init_step_h5 utilise _mu_X/_mu_Y/_S_YY/_K_gain/_P_post stationnaires (gss_filter.py:551-567, commentaire explicite lignes 535-539 « avoids the transient that would arise from an arbitrary user-supplied π_0 / Σ_z0 ») ; _init_step_general fait de même (709-728) et _reset_state seed μ_1/P_1 avec les moments stationnaires (486-488), π initial = π_∞ (478). Les μ_z0/Σ_z0 du modèle ne servent que de graine à l'itération de point fixe (335-336). Démonstration : sur le modèle jouet, μ_z0=0/Σ_z0=I mais le filtre s'initialise avec μ_∞=[4.31, 8.62] (k=0). Conséquence aggravante : l'affirmation du papier « The general (time-varying) mode remains more reliable in transient or non-stationary settings » (03_filtering.tex:61-63) n'a pas de contrepartie dans le code — les deux modes forcent un départ stationnaire, donc aucun mode ne peut représenter un régime initial hors-stationnaire. (Adjacent mais distinct de l'acquis « π₀ appris jeté » côté apprentissage : ici c'est le filtre qui n'utilise jamais params.pi0.)",
+     "evidence": "paper: « the model provides the prior π_0(k) … together with μ_z0(k) … Σ_z0(k) » (03_filtering.tex:333-338) ; « μ_1(k) = μ_z0(k) and P_1(k) = Σ_z0(k) + μ_z0 μ_z0ᵀ, which feed the first application of Step (I) » (361-364). code: gss_filter.py:478 « self._pi = self._pi_inf.copy() », 486-488, 535-539, 551-567, 709-728 ; GSSParams.pi0 jamais lu par GSSFilter.",
+     "suggestion": "Soit aligner le code (initialiser avec mu_z0/Sigma_z0/pi0 du modèle, au moins en imm_general), soit ajouter au papier une remarque indiquant que l'implémentation substitue les moments stationnaires à l'initialisation §3.6 — et retirer/qualifier la phrase sur la fiabilité du mode général en régime transitoire."
+    },
+    {
+     "file": "prg/filter/gss_filter.py",
+     "line": "298-368 (vs paper/sections/03_filtering.tex:48-64, 90-94)",
+     "severity": "medium",
+     "category": "validity-guards / paper-imprecision",
+     "title": "Précalcul stationnaire : l'itération implémentée n'est pas celle prescrite par la Remark (renversement figé à π_∞), et les conditions de validité (stationnarité, convergence) ne sont pas vérifiées",
+     "description": "(a) La Remark rem:h5exact (03_filtering.tex:52-55) dit de précalculer les limites « by iterating eq:mu_propagate–eq:var_Z to convergence » ; or ces équations dépendent des données via le noyau renversé eq:reverse_P construit sur π_n (03_filtering.tex:90-94), qui ne converge pas ponctuellement — la recette du papier est mal définie telle quelle. Le code itère une version bien définie où le noyau renversé est figé à π_∞ (gss_filter.py:321-327), jamais décrite dans le papier. (b) Conditions de validité : la Remark conditionne le mode au « time-homogeneous and stationary regime » (lignes 50-51) et l'introduction promet « an explicit characterisation of when the two modes agree » (01_introduction.tex:69-72) — jamais fournie (§3 ne donne que la phrase qualitative lignes 59-63). Côté code, seul le résidu (H5) est contrôlé avec RuntimeWarning (gss_filter.py:232-288) ; la stationnarité n'est jamais vérifiée (pas de comparaison μ_z0/Σ_z0 vs point fixe), la non-convergence du point fixe (MAX_ITER=1000, TOL=1e-12) ne déclenche qu'un logger.warning facilement invisible (363-368) — contrairement au RuntimeWarning (H5) — et aucune garde de contraction n'existe : pour des F_k instables l'itération diverge silencieusement (overflow → moments inf/NaN).",
+     "evidence": "paper: « One may therefore precompute these limits off-line by iterating eq:mu_propagate–eq:var_Z to convergence » (03_filtering.tex:52-55) où eq:reverse_P = π_n(j)P_jk/Σ π_n(j')P_j'k (90-94). code: gss_filter.py:323 « joint_inf = self._pi_inf[:, None] * p.P », 326-327 p_rev stationnaire ; 363-368 logger.warning (pas warnings.warn) en cas de non-convergence ; aucune vérification de stationnarité ni de rayon spectral.",
+     "suggestion": "Papier : définir explicitement l'itération à point fixe sur le noyau renversé stationnaire (celle du code) et énoncer ses conditions d'existence/convergence ; livrer la « characterisation of when the two modes agree » promise. Code : promouvoir la non-convergence en RuntimeWarning et vérifier la cohérence μ_z0/Σ_z0 vs point fixe quand le mode h5_exact est demandé."
+    },
+    {
+     "file": "prg/filter/gss_filter.py",
+     "line": "205, 217-223, 410-424, 862 (vs paper/appendix/E_joseph.tex:77-86 et 03_filtering.tex:256-283)",
+     "severity": "medium",
+     "category": "paper-code-mismatch",
+     "title": "Forme de Joseph : « recommended implementation » dans le papier mais joseph=False par défaut, flag ignoré en imm_general (le seul mode où elle servirait), et flooring spectral _psd_floor non documenté",
+     "description": "L'Annexe E conclut « it is the recommended implementation » (E_joseph.tex:82-86) et la Remark §3 affirme « The implementation switches between the short and Joseph forms via a single boolean flag » (03_filtering.tex:280-282). En réalité : (a) le défaut est joseph=False — la forme courte (gss_filter.py:205, docstring 79-80) ; (b) le flag n'est honoré qu'en h5_exact ; en imm_general — le mode où la covariance est recalculée à chaque pas, donc le seul où l'argument de stabilité en arithmétique finie de l'Annexe E s'applique réellement — il est ignoré avec un simple logger.warning (217-223) et la mise à jour utilise la forme courte par pas (862) ; (c) la PSD y est garantie par un mécanisme absent du papier : projection spectrale _psd_floor avec plancher 1e-9 sur les valeurs propres (1108-1119), appliquée aussi PAR-DESSUS la forme de Joseph en h5_exact (418-420), rendant Joseph largement redondante dans le code. L'équivalence numérique Joseph/courte EST testée (tests/test_gss_filter.py:363-405), mais uniquement dans le cadre h5_exact à covariance constante.",
+     "evidence": "paper: « The Joseph form … is the recommended implementation » (E_joseph.tex:82-86) ; « switches between the short and Joseph forms via a single boolean flag » (03_filtering.tex:280-282). code: gss_filter.py:205 « joseph: bool = False », 217-223 « joseph=True has no effect in mode='imm_general' », 862 « var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T)) », 418-420 _psd_floor appliqué au résultat Joseph.",
+     "suggestion": "Soit faire de Joseph le défaut et l'implémenter aussi dans la mise à jour par pas d'imm_general, soit reformuler la Remark/Annexe E : préciser que la forme courte est le défaut et que la PSD est en pratique assurée par une projection spectrale (à documenter)."
+    },
+    {
+     "file": "paper/sections/03_filtering.tex",
+     "line": "278-280 (et E_joseph.tex:85-86) vs prg/filter/gss_filter.py:410-424",
+     "severity": "low",
+     "category": "complexity-claim",
+     "title": "Coût annoncé de la forme de Joseph « per regime per step » erroné : dans le code elle est évaluée une seule fois à la construction",
+     "description": "Le papier (deux fois : 03_filtering.tex:278-280 et E_joseph.tex:85-86) chiffre le surcoût de Joseph à « two additional matrix multiplications per regime per step ». Dans le seul mode où Joseph existe (h5_exact), la covariance a posteriori est constante et la forme de Joseph est calculée UNE fois à la construction (gss_filter.py:410-424) : surcoût par pas nul. Dans le mode où un coût « par pas » aurait un sens (imm_general), Joseph n'est pas implémentée (cf. finding dédié). Le cadrage du coût ne correspond donc à aucun des deux modes.",
+     "evidence": "paper: « at the modest extra cost of two additional matrix multiplications per regime per step » (03_filtering.tex:278-280 ; répété E_joseph.tex:85-86). code: gss_filter.py:410-424 — boucle unique sur k dans _precompute(), aucun calcul de covariance a posteriori dans _update_step_h5 (675 : « Var_x_r.append(self._P_post[k])  # constant! »).",
+     "suggestion": "Reformuler : « coût unique à la pré-calcul en mode h5-exact ; par pas uniquement si les moments sont propagés en ligne »."
+    },
+    {
+     "file": "prg/filter/gss_filter.py",
+     "line": "447-467, 632-636, 809, 816-821, 1050-1105 (vs paper/sections/03_filtering.tex:59-61 et 06_experiments.tex:165-168)",
+     "severity": "low",
+     "category": "complexity-claim",
+     "title": "L'avantage de coût attribué par le papier aux « gains constants / no propagation overhead » provient en bonne partie d'une asymétrie d'implémentation (factorisations pré-calculées vs scipy par paire et par pas)",
+     "description": "Le papier ne formule aucune borne O(·) explicite (aucun O(K²) trouvé dans paper/) ; ses seules affirmations de coût sont qualitatives : h5-exact « numerically cheaper at inference time (no propagation overhead) » (03_filtering.tex:59-61) et « 1.4× faster … owing to its precomputed constant Kalman gains » (06_experiments.tex:165-168). Dans le code, les deux modes font bien une boucle O(K²) par pas sur les paires (j,k) (617-637 et 792-822), mais l'écart de vitesse mesurable vient aussi — et surtout — d'une asymétrie d'implémentation non décrite : h5_exact pré-factorise les K² covariances Γ(j,k) par Cholesky à la construction (_Gamma_prec, 447-467, 1050-1090) et n'évalue par pas qu'un produit matrice-vecteur (_fast_logpdf, 632-636, 1093-1105) ; imm_general appelle scipy.multivariate_normal.logpdf avec refactorisation complète par paire ET par pas (816-821), plus une eigh par paire via _psd_floor (809). Toute comparaison de temps entre modes (et l'attribution causale « owing to its precomputed constant Kalman gains ») confond donc gain algorithmique et artefact d'implémentation.",
+     "evidence": "code: gss_filter.py:1063-1065 « removes the O(N·K²) eigen-decompositions that multivariate_normal.logpdf would otherwise perform » (l'auteur du code documente lui-même l'asymétrie) ; 816-821 scipy logpdf par (j,k) par pas en imm_general. paper: « no propagation overhead » (03_filtering.tex:60), « owing to its precomputed constant Kalman gains » (06_experiments.tex:167-168) ; aucun énoncé O(K²)/mémoire dans paper/.",
+     "suggestion": "Si le papier conserve des chiffres de CPU par pas, factoriser aussi les covariances du mode général (elles changent par pas, mais l'appel scipy peut être remplacé par une Cholesky directe) ou signaler l'asymétrie d'implémentation dans le protocole de benchmark."
+    },
+    {
+     "file": "prg/filter/gss_filter.py",
+     "line": "10, 190-199 vs 202-207",
+     "severity": "medium",
+     "category": "documentation-bug",
+     "title": "Docstring du module : « mode=h5_exact (default) » et exemple « (H5)-exact :: GSSFilter(params) » alors que le défaut du constructeur est imm_general — le mode divergent (acquis eq:S_jk) est sélectionné silencieusement",
+     "description": "Le docstring du module annonce « ``mode=\"h5_exact\"`` (default) » (gss_filter.py:10) et l'exemple intitulé « Step-by-step, (H5)-exact:: » construit GSSFilter(params) sans argument avec le commentaire « # default mode » (190-195). Or la signature du constructeur fixe mode=\"imm_general\" (202-207), conformément au docstring de la classe (172-180). Conséquence opérationnelle : un utilisateur suivant l'exemple du module obtient, sans avertissement, le mode imm_general — celui qui implémente fidèlement l'eq:S_jk erronée (divergence confirmée, acquis CRITICAL) — en croyant exécuter le filtre exact (H5) décrit par la Section 3. Écart code-interne mais directement lié à la correspondance papier↔code : il détermine quel algorithme du papier tourne par défaut.",
+     "evidence": "gss_filter.py:10 « ``mode=\"h5_exact\"`` (default) — exact IMM recursion under hypothesis (H5) » ; :190-192 « Step-by-step, (H5)-exact:: / filt = GSSFilter(params)  # default mode, short form » ; :206 « mode: str = \"imm_general\" ».",
+     "suggestion": "Aligner le docstring du module et l'exemple sur le défaut réel (ou changer le défaut en h5_exact, cohérent avec le titre du papier « exactIMM »)."
+    }
+   ],
+   "scope_summary": "Mission : écarts algorithme-papier ↔ code non couverts par les acquis, sur les remarques opérationnelles de la Section 3 (paper/sections/03_filtering.tex) + Annexe E (paper/appendix/E_joseph.tex) vs prg/filter/gss_filter.py (avec appuis : 02_model_h5.tex, 01_introduction.tex, 06_experiments.tex, prg/classes/GSSParams.py, tests/test_gss_filter.py). Méthode : lecture croisée + deux vérifications numériques exécutées dans le venv du dépôt (comparaison des constantes h5_exact aux formes fermées de la Prop. 2 sur le modèle jouet AB-contraint à biais non nuls ; régression Monte-Carlo sur 400k pas simulés pour trancher papier vs code). Résultats par point demandé : (1) Précalcul stationnaire — l'itération du code fige le noyau renversé à π_∞ (jamais décrit dans le papier, dont la recette via π_n est mal définie) ; stationnarité jamais vérifiée, non-convergence en simple logger.warning ; surtout, la prétention de la Remark h5-exact de retrouver μ_jk de la Prop. 2 est FAUSSE pour b_X ≠ ΔΣ_V⁻¹b_Y : le noyau du papier omet C_k(b_X,j − Δ_jΣ_V,j⁻¹b_Y,j) — le code est correct (MC-vérifié), la Prop. 2 et la Remark « Bias on X is invisible » sont erronées (Γ_jk et rem:Gamma_bias_free confirmés exacts). (2) Joseph — équivalence numérique bien testée (tests/test_gss_filter.py:363-405), mais : défaut joseph=False contre la « recommended implementation » de l'Annexe E ; flag ignoré en imm_general (seul mode où l'argument par-pas s'applique) ; PSD en pratique assurée par _psd_floor (projection spectrale 1e-9), mécanisme absent du papier ; coût « per regime per step » faux (calcul unique à la construction). (3) Complexité — aucun énoncé O(·) explicite dans le papier ; les deux modes sont O(K²) par pas ; l'avantage CPU attribué aux « gains constants » est gonflé par une asymétrie d'implémentation (Cholesky pré-factorisées + _fast_logpdf en h5_exact vs scipy logpdf refactorisé par paire/pas + eigh en imm_general). (4) Initialisation §3.6 — le code substitue (π_∞, μ_∞, Σ_∞) aux (π_0, μ_z0, Σ_z0) du modèle dans LES DEUX modes (params.pi0 jamais lu par le filtre), contredisant §3.6 et vidant de substance la phrase « le mode général reste plus fiable en transitoire » ; de plus la Remark posterior_moments (bouclage par moments a posteriori) n'est pas implémentée en imm_general (moments prédits réinjectés, docstring l'admet). (5) q≠s et biais b_k — propagation des biais (eq:mu_propagate/var_Z/cov_Z_Z, μ_Y^(j,k)) fidèlement implémentée dans les deux modes et générique en (q,s) ; seul écart : le terme de biais manquant du noyau Prop. 2 (finding 1). Bonus : contradiction interne du docstring sur le mode par défaut (annonce h5_exact, réalité imm_general — le mode au CRITICAL acté). Non re-rapportés : eq:S_jk/imm_general, conformité h5_exact↔eq:AB/H5, convention de moments, écarts côté apprentissage."
+  },
+  {
+   "dimension": "model-defs-vs-code",
+   "findings": [
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/06_experiments.tex",
+     "line": "144-145",
+     "severity": "medium",
+     "category": "metrics",
+     "title": "RMSE: paper definition non normalisée par q, code divise par N·q — valeurs M2 publiées plus petites d'un facteur √2",
+     "description": "Le papier définit RMSE = sqrt((1/N)·Σ‖x̂−x‖²) (06_experiments.tex l.144-145). Le code calcule sqrt((1/(N·q))·Σ‖x̂−x‖²) (prg/experiments/metrics.py l.94 et l.114, docstring explicite « normalised by the state dimension q »). Identique pour M1/M3 (q=1), mais pour M2 (q=2) les valeurs publiées 0.4595/0.4616 (figures/generated/tab_filter_M2M3.tex l.13, produites via run_simulations.py l.183 → compute_rmse) valent 1/√2 de la définition imprimée : selon la formule du papier on devrait lire ≈0.650/0.653. La comparaison ordinale H5-exact < IMM reste valide, mais les nombres ne correspondent pas à la définition affichée.",
+     "evidence": "Papier: « RMSE: sqrt(1/N · Σ_{n=1}^{N} ‖x̂_{n|n} − x_n‖²) » (06_experiments.tex:144-145). Code: « RMSE = sqrt( (1 / (N·q)) · Σ ... ) » et « return float(np.sqrt(np.sum((x_true - x_est) ** 2) / (N * q))) » (prg/experiments/metrics.py:94,114). Table générée: « M2 & 0.4595 & ... & 0.4616 » (paper/figures/generated/tab_filter_M2M3.tex:13).",
+     "suggestion": "Soit ajouter la normalisation 1/(Nq) dans la définition du papier (RMSE par dimension), soit retirer le facteur q dans compute_rmse et régénérer tab_filter_M2M3 / le texte §6.2.4."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/02_model_h5.tex",
+     "line": "84-91",
+     "severity": "medium",
+     "category": "model-definition",
+     "title": "Loi initiale de Z : papier = marginales stationnaires par régime, simulation = N(0, I) pour tous les régimes (non documenté en §6)",
+     "description": "Le papier présente le triplet comme « stationary in the form of its marginals » (Remark 1, 02_model_h5.tex l.84-91) et le filtre H5-exact est initialisé aux moments stationnaires (μ_∞(k), P_∞(k)) (06_experiments.tex l.127-130 ; gss_filter.py précalcule ces moments « so that the initial step can start at the stationary distribution »). Or les trois modèles de référence simulent Z_0|R_0=k ~ N(0, I_{q+s}) pour tout k (prg/experiments/models_paper.py l.99-100 M1, l.169-170 M2, l.233-234 M3 ; consommé par GSSSimulator.__next__ l.131-137). Les trajectoires démarrent donc hors stationnarité alors que le modèle du §2 et l'initialisation du filtre supposent les marginales stationnaires — le transitoire entre dans NEES, LB et RMSE. De plus §6 ne documente nulle part la loi initiale utilisée pour la simulation (μ_z0, Σ_z0). Seule la partie R_0 est cohérente : pi0=None → distribution stationnaire de P (GSSParams.py l.104-106), conforme aux π_∞ cités pour M1.",
+     "evidence": "Papier: « the triplet (X,R,Y) is stationary in the form of its marginals » (02_model_h5.tex:84-91) ; « the regime moments (μ_∞(k), P_∞(k)) are precomputed once by iterating ... to stationarity » (06_experiments.tex:127-130). Code: « mu_z0 = [np.zeros((dim_z, 1)) ...] ; Sig_z0 = [np.eye(dim_z) ...] » (prg/experiments/models_paper.py:99-100,169-170,233-234) ; tirage initial GSSSimulator.py:131-137.",
+     "suggestion": "Initialiser la simulation aux moments stationnaires par régime (mu_z0=μ_∞(k), Sigma_z0=P_∞(k)) ou documenter explicitement dans §6 le démarrage N(0,I) et son transitoire."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/02_model_h5.tex",
+     "line": "21-26",
+     "severity": "medium",
+     "category": "model-definition",
+     "title": "(H3), 2e condition : conditionnement sur (x_n, y_n) absent dans le papier — le simulateur implémente la version conditionnelle en z_n",
+     "description": "La seconde égalité de (H3) est imprimée « p(x_{n+1}, y_{n+1} | r_n, r_{n+1}) = p(x_{n+1}, y_{n+1} | r_{n+1}) » (02_model_h5.tex l.23-25), sans (x_n, y_n) dans les conditionnements. Telle qu'imprimée c'est une contrainte marginale sur la paire de régimes que le processus simulé NE satisfait PAS : sous eq:dynamics, p(z_{n+1}|r_n=j, r_{n+1}=k) = N(F_k μ_n(j)+b_k, F_k P_n(j)F_k^T+Σ_{W,k}) dépend de j en général (même à stationnarité, F_k μ_∞(j) varie avec j). Le code implémente la version vraisemblablement voulue, conditionnelle en z_n : GSSSimulator tire z_n ~ N(F(r_n) z_{n-1} + b(r_n), Σ_W(r_n)), c.-à-d. p(z_{n+1}|z_n, r_n, r_{n+1}) = p(z_{n+1}|z_n, r_{n+1}) (GSSSimulator.py l.139-144), cohérente avec eq:dynamics (02_model_h5.tex l.58-62). Quelle que soit la lecture, l'hypothèse (H3) imprimée et le générateur de données divergent. Distinct de l'écart eq:S_jk déjà acté (qui est en §3).",
+     "evidence": "Papier: « (H3) ... p(x_{n+1}, y_{n+1} | r_n, r_{n+1}) = p(x_{n+1}, y_{n+1} | r_{n+1}) » (02_model_h5.tex:23-25). Code: « z_n = F @ self._z_prev + params.b(r_n) + L @ noise » avec F = F(r_n), L = chol_W(r_n) (prg/classes/GSSSimulator.py:139-144).",
+     "suggestion": "Corriger (H3) en p(x_{n+1},y_{n+1} | x_n, r_n, y_n, r_{n+1}) = p(x_{n+1},y_{n+1} | x_n, y_n, r_{n+1}) (ajout de z_n des deux côtés), ou justifier la version marginale et vérifier qu'elle est imposée par construction."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/06_experiments.tex",
+     "line": "131-136",
+     "severity": "medium",
+     "category": "protocol",
+     "title": "Comparateur du benchmark : décrit comme « IMM standard de Blom 1988 avec K sous-filtres de Kalman », mais le code exécute le mode imm_general (récursion générale du papier compagnon)",
+     "description": "§6.2.1 décrit IMM-approx comme « the standard approximate IMM of [blom_interacting_1988], which collapses the per-mode mixture in the state-mixing step. Implemented with the same K Kalman sub-filters and the true B satisfying H5 » (06_experiments.tex l.131-136). Or aucune implémentation de l'IMM de Blom ni de banc de K sous-filtres de Kalman n'existe dans le dépôt : le seul filtre est prg/filter/gss_filter.py et le benchmark exécute mode=\"imm_general\" (run_simulations.py l.64 DEFAULT_MODES=(\"h5_exact\",\"imm_general\"), l.374), que le docstring du code décrit comme la récursion générale du papier compagnon « CS_FinaleBis eqs (17ter), (17quater), (13')–(15), (18), (21')–(22) ... matches exactIMM ≤ v0.9.0 », avec en outre une modification assumée des poids de mélange (postérieur filtré π_n au lieu des marginales a priori du papier, gss_filter.py l.51-63). Les colonnes « IMM-approx » de tab_filter_M1/tab_filter_M2M3 sont donc produites par un algorithme différent de celui annoncé. Écart distinct du CRITICAL déjà acté sur eq:S_jk (ici c'est la description du protocole §6 qui ne correspond pas au comparateur réellement benchmarké).",
+     "evidence": "Papier: « IMM-approx: the standard approximate IMM of \\cite{blom_interacting_1988} ... Implemented with the same K Kalman sub-filters and the true B satisfying H5 » (06_experiments.tex:131-136). Code: DEFAULT_MODES = (\"h5_exact\", \"imm_general\") (prg/experiments/run_simulations.py:64) ; « mode=\"imm_general\" ... following the recursion of the companion paper CS_FinaleBis eqs (17ter), (17quater)... This implementation instead uses the filtered posterior π_n ... rather than the unconditional marginals of the paper » (prg/filter/gss_filter.py:44-63).",
+     "suggestion": "Soit implémenter réellement l'IMM de Blom (mixing + K sous-filtres de Kalman) comme comparateur, soit réécrire §6.2.1 pour décrire fidèlement le mode imm_general effectivement benchmarké (y compris sa pondération par le postérieur filtré)."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/06_experiments.tex",
+     "line": "150-152",
+     "severity": "low",
+     "category": "metrics",
+     "title": "Ljung–Box multivarié : le code prend le min des p-values par composante (niveau effectif ≈0.0975 pour M2), convention absente du papier",
+     "description": "Le papier définit « LB pass (%) : fraction of runs where the Ljung–Box whiteness test (lag 20) does not reject at level 0.05 » (06_experiments.tex l.150-152) sans préciser le cas s>1. Le code applique le test composante par composante et retourne le MINIMUM des p-values (metrics.py l.209-225), puis make_figures compte (lb_pval > 0.05) (make_figures.py l.223). Pour M2 (s=2), rejeter si l'une des deux composantes rejette à 5% donne un niveau par run ≈ 1−0.95² ≈ 0.0975, pas 0.05 — ce qui explique en partie le LB% nettement plus bas de M2 (69–70%, tab_filter_M2M3.tex l.13) vs ≥90% pour M1/M3. Par ailleurs le code ne retient que la p-value au dernier lag (metrics.py l.217-219), cohérent avec « lag 20 » mais non explicité.",
+     "evidence": "Papier: « fraction of runs where the Ljung–Box whiteness test (lag~20) does not reject the null ... at level 0.05 » (06_experiments.tex:150-152). Code: « the test is applied to each component independently and the *minimum* p-value is returned » + min_pval = min(min_pval, pval) (prg/experiments/metrics.py:191-194,223) ; lb_pass = (g[\"lb_pval\"] > 0.05).mean() (prg/experiments/make_figures.py:223).",
+     "suggestion": "Documenter la convention min-p (ou appliquer une correction de Bonferroni : seuil 0.05/s) dans le papier, et noter que le LB% de M2 n'est pas comparable à celui des modèles scalaires au même niveau nominal."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/06_experiments.tex",
+     "line": "153-154",
+     "severity": "low",
+     "category": "metrics",
+     "title": "CPU (µs/step) : le chronométrage inclut la simulation des données, pas seulement le filtre",
+     "description": "Le papier définit « CPU (µs/step): wall-clock time per time step » pour les méthodes de filtrage et en tire le facteur 1.4× (06_experiments.tex l.153-154 et l.166-168). Dans le code, t0/cpu_s englobe la boucle complète « for _,_r,x,y in sim: result = filt.step(y) » (run_simulations.py l.162-173) : chaque pas chronométré inclut le tirage aléatoire du simulateur (choice + standard_normal + produits matriciels de GSSSimulator.__next__) et les appends Python, avant division par N dans make_figures.py l.223-225. Les µs/step absolus (309/425 etc.) sont donc surestimés et le ratio H5-exact vs IMM (1.4×) est dilué par cet overhead commun aux deux modes.",
+     "evidence": "Papier: « CPU (µs/step): wall-clock time per time step, averaged over 100 runs » (06_experiments.tex:153-154). Code: t0 = time.perf_counter() avant la boucle simulation+filtre ; cpu_s = time.perf_counter() - t0 (prg/experiments/run_simulations.py:162-173) ; cpu_us = cpu_s / N * 1e6 (prg/experiments/make_figures.py:225).",
+     "suggestion": "Chronométrer uniquement filt.step(y) (accumulateur autour de l'appel) ou pré-générer les données avant le chronométrage, puis régénérer les colonnes CPU."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/06_experiments.tex",
+     "line": "17-19",
+     "severity": "low",
+     "category": "model-definition",
+     "title": "Résidu H5 des modèles : papier = norme absolue < 1e-10, code = résidu RELATIF < 1e-8",
+     "description": "Le papier affirme que les trois modèles satisfont (H5) avec « H5 residual ‖Δ^T A^T + Σ_V B^T − PM^{-1}W‖_F < 10^{-10} » (06_experiments.tex l.17-19) — une norme de Frobenius absolue avec seuil 1e-10. Le code vérifie autre chose : un résidu relatif normalisé par max(‖Δᵀ Aᵀ + Σ_V Bᵀ‖_F, 1) avec _H5_ASSERT_TOL = 1e-8 (models_paper.py l.41 et l.44-52). En pratique le résidu est en précision machine donc les deux tiennent, mais la garantie imprimée (statistique et seuil) ne correspond pas au contrôle réellement appliqué.",
+     "evidence": "Papier: « H5 residual ‖Δ^T A^T + Σ_V B^T - PM^{-1}W‖_F < 10^{-10} » (06_experiments.tex:17-19). Code: _H5_ASSERT_TOL = 1e-8 ; rel = ‖res‖_F / max(‖Δᵀ Aᵀ + Σ_V Bᵀ‖_F, 1) ; assert rel < _H5_ASSERT_TOL (prg/experiments/models_paper.py:41,44-52).",
+     "suggestion": "Aligner le papier sur le contrôle effectif (résidu relatif, seuil 1e-8) ou resserrer l'assertion du code en absolu 1e-10."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/06_experiments.tex",
+     "line": "47-86",
+     "severity": "low",
+     "category": "reproducibility",
+     "title": "M2 : la matrice de transition P n'est jamais donnée dans le papier (le code utilise celle de M1)",
+     "description": "Le paragraphe M2 et la Table 1 (06_experiments.tex l.47-86) listent les cinq blocs libres par régime mais ne donnent jamais P pour M2, alors que P est imprimée pour M1 (l.24-26) et M3 (l.91-95). Le code utilise P = [[0.97, 0.03], [0.02, 0.98]] — la même que M1 (models_paper.py l.137). Toutes les autres valeurs numériques de M1/M2/M3 (C, D, Σ_U, Δ, Σ_V, biais, P de M1 et M3, et les valeurs AB dérivées de M1 : A=0.10/≈0.013, B=0.35/0.08) sont identiques des deux côtés et la contrainte AB est vérifiée des deux côtés. Lacune de reproductibilité plutôt que contradiction de valeurs.",
+     "evidence": "Papier: le paragraphe « Model M2 » (06_experiments.tex:47-56) et tab:M2_params (l.58-86) ne contiennent aucune matrice P. Code: P = np.array([[0.97, 0.03], [0.02, 0.98]]) (prg/experiments/models_paper.py:137).",
+     "suggestion": "Ajouter P (et idéalement la loi initiale de Z) au paragraphe M2 du papier."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/06_experiments.tex",
+     "line": "381-388",
+     "severity": "low",
+     "category": "bic",
+     "title": "BIC : ℓ*_K défini comme log-vraisemblance MAXIMISÉE mais calculé avec les paramètres VRAIS ; dof compte le biais pour M2/M3 où b est fixé à 0",
+     "description": "Deux écarts distincts de l'ambiguïté π₀ déjà actée. (a) Le papier définit BIC(K) = d·log N − 2·ℓ*_K « where ℓ*_K is the maximised log-likelihood under the K-regime H5-constrained model » (06_experiments.tex l.381-384), mais le BIC̄₂ = 1846.8 rapporté (l.386-388) provient de run_one_trial où compute_bic reçoit la log-vraisemblance du filtre exécuté avec les paramètres VRAIS — aucun ajustement (run_simulations.py l.160,171,187) — tout en pénalisant d_H5 = 17 paramètres jamais estimés. (b) compute_bic est appelé sans condition pour M2 et M3 ; dof_h5 compte K·(q+s) ddl de biais (metrics.py l.81-82) alors que M2 est défini avec b ≡ 0 (« not free », models_paper.py l.168 ; 06_experiments.tex l.55-56) et que M3 fixe b^(2) = 0 (models_paper.py l.230-231) : pour M2 le dof serait surcompté de 8 si ces BIC étaient publiés. La formule dof_h5 elle-même (metrics.py l.80-82) est par ailleurs strictement identique à eq:bic_d, y compris l'exemple d_H5(2,1,1)=17.",
+     "evidence": "Papier: « BIC(K) = d_H5(K,q,s) log N − 2 ℓ*_K, where ℓ*_K is the maximised log-likelihood » (06_experiments.tex:381-384) ; « mean BIC of 1846.8 » (l.386-388). Code: log_lik_total accumulé avec les paramètres vrais puis bic = compute_bic(log_lik_total, N, K, q, s) (prg/experiments/run_simulations.py:160-187) ; per_regime = q*s + s**2 + dim_z*(dim_z+1)//2 + dim_z (prg/experiments/metrics.py:81-82) ; M2: b_list = zeros (prg/experiments/models_paper.py:168).",
+     "suggestion": "Qualifier le BIC du papier de « plug-in/oracle BIC » (ou utiliser une vraisemblance maximisée par EM), et soustraire les ddl des blocs fixés à zéro quand le BIC est calculé pour M2/M3."
+    },
+    {
+     "file": "/Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/06_experiments.tex",
+     "line": "389-393",
+     "severity": "info",
+     "category": "protocol",
+     "title": "Le protocole BIC évoque des modèles K=1, mais GSSParams rejette K < 2",
+     "description": "Le papier indique qu'une sélection d'ordre complète exige d'ajuster des modèles H5-GSS avec K = 1, 3, 4 (06_experiments.tex l.389-393, différé à une étude compagnon). La classe GSSParams interdit structurellement K=1 : « K must be an integer >= 2 » (GSSParams.py l.186-187). La référence K=1 du protocole annoncé est donc irréalisable avec le code actuel.",
+     "evidence": "Papier: « requires fitting H5-GSS models with K = 1, 3, 4 via EM » (06_experiments.tex:389-393). Code: if not (isinstance(K, int) and K >= 2): raise ParamError(f\"K must be an integer >= 2 ...\") (prg/classes/GSSParams.py:186-187).",
+     "suggestion": "Autoriser K=1 (cas dégénéré sans chaîne) dans GSSParams ou reformuler le protocole (K ∈ {2,3,4})."
+    }
+   ],
+   "scope_summary": "Comparaison des définitions du papier (sections 2 et 6) avec les classes et modèles du code : paper/sections/02_model_h5.tex et 06_experiments.tex vs prg/classes/GSSParams.py, prg/classes/GSSSimulator.py, prg/experiments/models_paper.py, prg/experiments/metrics.py (avec vérification des sites d'appel dans run_simulations.py, make_figures.py, gss_filter.py et de la table générée tab_filter_M2M3.tex). Vérifié sans écart : toutes les valeurs numériques de M1/M2/M3 (P de M1/M3, C, D, Σ_U, Δ, Σ_V, biais, A/B dérivés, π_∞ de M1) sont identiques papier↔code et la contrainte AB est satisfaite des deux côtés ; l'ordre régime→état de eq:dynamics (conditionnement sur r_{n+1}, tirage joint (X,Y) via chol(Σ_W)) est fidèlement implémenté par GSSSimulator ; pi0=None→stationnaire cohérent avec les π_∞ du §6 ; la formule dof_h5 est strictement identique à eq:bic_d (incl. d_H5(2,1,1)=17) ; la définition NEES (normalisation 1/(qN)) est identique. Écarts non couverts par les acquis : RMSE normalisé par q dans le code mais pas dans la définition imprimée (valeurs M2 publiées /√2), initialisation simulée N(0,I) vs marginales stationnaires du modèle/filtre, conditionnement z_n absent de la 2e condition (H3) imprimée, comparateur de benchmark décrit comme IMM de Blom 1988 mais exécuté en mode imm_general, convention min-p Ljung–Box multivariée non documentée, chronométrage CPU incluant la simulation, tolérance H5 1e-10 absolue vs 1e-8 relative, P de M2 absente du papier, BIC plug-in vs ℓ* maximisée et surcomptage des ddl de biais pour M2/M3, et impossibilité K=1 (GSSParams exige K≥2)."
+  }
+ ],
+ "verdicts": [
+  {
+   "title": "Algorithme 1 (supervisé), étape 3 : π̂₀ par fréquences + lissage de Laplace — jamais implémentée dans fit_supervised",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Vérifié ligne par ligne : (1) 05_estimation.tex l.43-44 contient bien l'étape « Estimate π̂₀(k) from regime frequencies (with Laplace smoothing) » dans l'Algorithme 1 ; (2) fit_supervised (prg/learning/supervised.py) ne calcule jamais π₀ — grep exhaustif : seules occurrences de pi0 aux l.309 (docstring « always None → stationary distribution »), l.424 («\"pi0\": None» en dur dans le dict retourné), l.534 (modèle généré « pi0: ... = None # None → stationary distribution ») ; (3) la formule de Laplace (counts+1)/(N+K) existe bien dans semi_supervised.py l.422-423 mais uniquement comme graine d'initialisation EM. Aucune réfutation possible : pas de wrapper estimant π₀, pas de convention annoncée dans §5.1 du papier. L'étape 3 de l'algorithme publié n'a aucune implémentation. Seule imprécision mineure de la trouvaille : docstring à l.309 et non l.310 (off-by-one sans incidence).",
+    "severityAdjustment": "aucun — medium est correct : une étape entière d'un algorithme publié est absente du code, même si l'impact aval est limité (le filtre ignore π₀ au profit du régime stationnaire)"
+   }
+  },
+  {
+   "title": "Algorithme 1 (supervisé), étape 3 : π̂₀ par fréquences + lissage de Laplace — jamais implémentée dans fit_supervised",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Faits vérifiés exacts : 05_estimation.tex l.43-44 contient bien l'étape « Estimate π̂₀(k) from regime frequencies (with Laplace smoothing) » dans l'Algorithme 1, et fit_supervised (supervised.py l.424) retourne en dur \"pi0\": None (docstring l.309 : « always None → stationary distribution ») sans jamais calculer de fréquences. Lentille CONTEXTE : la divergence est atténuée mais pas annulée par le contexte. D'une part, le papier lui-même définit π₀(k) comme « the stationary distribution of the transition kernel » en §3.6 (03_filtering.tex l.334-335) — le seul consommateur de π₀ dans le pipeline — et GSSParams résout None vers la stationnaire de P̂ ; les deux estimateurs (fréquences lissées vs stationnaire de P̂) visent la même quantité, et GSSFilter ne lit même pas pi0, donc l'impact numérique sur les résultats publiés est nul. D'autre part, l'Algorithme 1 documente une étape concrète et nommée (lissage de Laplace) qui n'existe nulle part dans le code supervisé, et §5 l.9 liste π₀ parmi les paramètres estimés : c'est un vrai décalage pseudo-code/code, irréfutable factuellement, et même une incohérence interne du papier (Alg.1 étape 3 vs convention §3.6). Trouvaille réelle mais sur-calibrée : c'est une coquille de pseudo-code corrigeable en une ligne (la suggestion du finding — retirer l'étape et dire π₀ stationnaire — est la bonne), sans conséquence sur aucun résultat. medium → low.",
+    "severityAdjustment": "low"
+   }
+  },
+  {
+   "title": "Algorithme 2 : « Run Algorithm 1 on (R⁽⁰⁾, X, Y) » — le code n'appelle pas l'Algorithme 1 mais une variante défensive différente",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles sont vérifiées sur le code et le .tex réels. (a) 05_estimation.tex l.166-168 dit bien « Run Algorithm 1 on (R⁽⁰⁾, X, Y) with AB=false ». (b) Le code (semi_supervised.py l.504-505) appelle _initialize_kmeans puis _initialize_params_from_R, jamais fit_supervised ; _fit_regime est appelé directement sous garde 'idx.size >= dim_z+1' (l.435-439). (c) Les quatre divergences listées sont exactes : lignes de P sans support → uniforme (l.413-419) vs ValueError (supervised.py l.331-337) ; repli F=I, b=0, Σ_W=cov globale+0.1·I (l.443-447) vs OLS dès 1 échantillon + ValueError à 0 (supervised.py l.356-360, warning l.369-376), et ce repli ne correspond pas au « identity dynamics with unit noise covariance » de l'annexe D (l.109-110) ; μ_z0/Σ_z0 de repli = moments globaux (l.459-461) vs zéro/identité (supervised.py l.403-410) ; réassignation aléatoire des clusters vides (l.375-380), absente du papier. (d) La remarque « inexécutable telle quelle » est correctement qualifiée (cas dégénérés seulement). Réfutation éditoriale impossible sous lentille MATHS : le pseudo-code nomme explicitement l'Algorithme 1, dont la sémantique d'erreur et les replis diffèrent matériellement ; en outre _initialize_params_from_R calcule un π₀ lissé alors que fit_supervised retourne pi0=None — divergence supplémentaire. Sévérité medium bien calibrée : impact limité aux petits échantillons/cas dégénérés mais affirmation précise du papier factuellement fausse.",
+    "severityAdjustment": "aucun — medium est approprié"
+   }
+  },
+  {
+   "title": "Algorithme 2 : « Run Algorithm 1 on (R⁽⁰⁾, X, Y) » — le code n'appelle pas l'Algorithme 1 mais une variante défensive différente",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Faits confirmés : Alg. 2 (05_estimation.tex l.167-168) dit « Run Algorithm 1 on (R⁽⁰⁾, X, Y) » alors que le code utilise _initialize_params_from_R (semi_supervised.py l.384-463) avec les quatre replis défensifs cités, non documentés (l'annexe D, pourtant dédiée aux « implementation-level details », ne couvre que la dégénérescence du M-step). MAIS la sévérité est surestimée sous la lentille CONTEXTE : (1) le chemin non dégénéré réutilise littéralement le cœur de l'Algorithme 1 — _fit_regime est importé de prg.learning.supervised (l.77-79, appelé l.438) — plus P par comptages et moments empiriques, et implémente même l'étape 3 de l'Alg. 1 (π₀ Laplace, l.421-423) que fit_supervised omet ; la routine d'init est donc plus proche de l'Alg. 1 tel qu'écrit que fit_supervised lui-même ; (2) toutes les divergences ne concernent que des entrées dégénérées (clusters vides/minuscules, lignes de P sans support), cas que le pseudo-code du papier ne définit pas — omettre ces gardes numériques d'un pseudo-code est une pratique éditoriale standard et défendable ; (3) « inexécutable telle quelle » ne vaut que pour des assignations k-means dégénérées, rares sur les données des expériences (N ≥ 500) ; (4) il s'agit d'une simple initialisation EM soumise à n_init redémarrages, dont les valeurs sont effacées par les itérations — impact scientifique marginal, correctif = une phrase en annexe. Écart réel mais de niveau « lacune de documentation », pas medium.",
+    "severityAdjustment": "medium → low (idéalisation conventionnelle du pseudo-code sur les cas dégénérés d'un initialiseur EM ; le chemin générique exécute exactement les mathématiques de l'Algorithme 1 via le même code partagé ; une phrase en annexe D suffit)"
+   }
+  },
+  {
+   "title": "Annexe D : Σ_W « symmetrised and clamped to the nearest SPD matrix » — le M-step ne clampe que les blocs Σ_U et Σ_V, jamais la matrice jointe",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les citations sont exactes : D_baum_welch.tex l.88-89 affirme bien que Σ̂_W,k est « symmetrised and clamped to the nearest SPD matrix », alors que le code (_weighted_fit l.315-316) ne fait que symétriser la matrice jointe ; _apply_constraints l.246-247 ne clampe que les blocs Σ_U et Σ_V séparément, Δ est conservé tel quel, et la Σ_W jointe reconstruite l.572 n'est jamais projetée SPD pendant l'EM (clamp complet uniquement à l'init, l.451). Le repli ridge 1e-8 de _log_mvn_batch (l.114-118) est le vrai filet de sécurité et n'est pas décrit dans le papier. L'Algorithme 1 (05_estimation.tex l.56) confirme que c'est l'annexe D qui sur-promet. La trouvaille est donc réelle. Nuance : la Σ_W brute du M-step est une matrice de Gram pondérée (poids ≥ 0, clippés l.304), donc PSD par construction aux arrondis près, et _nearest_spd ne fait qu'ajouter un incrément PSD bloc-diagonal — la jointe reste PSD ; seul l'échec de définie-positivité stricte (Schur complement quasi-nul) peut survenir, géré par le ridge. L'écart est donc une imprécision de documentation dans une annexe « implementation-level », sans impact sur les résultats, corrigeable en une phrase — comparable au finding voisin sur les régimes dégénérés de l'annexe D, noté low.",
+    "severityAdjustment": "medium → low (mismatch réel mais purement documentaire : la matrice jointe est PSD par construction dans ce chemin de code, le ridge non documenté couvre les cas dégénérés, et aucun résultat du papier n'en dépend)"
+   }
+  },
+  {
+   "title": "Annexe D : Σ_W « symmetrised and clamped to the nearest SPD matrix » — le M-step ne clampe que les blocs Σ_U et Σ_V, jamais la matrice jointe",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Faits confirmés dans le dépôt : appendix/D_baum_welch.tex l.88-89 affirme que la Σ̂_W,k jointe (eq:Sigma_W_weighted) est « symmetrised and clamped to the nearest SPD matrix », alors que semi_supervised.py ne fait que symétriser (l.316) puis clamper Σ_U et Σ_V séparément via _apply_constraints (l.246-247) ; la matrice jointe reconstruite l.572 n'est jamais projetée SPD pendant l'EM (clamp joint seulement à l'init, l.451), et le repli ridge non documenté existe bien (_log_mvn_batch l.114-118). Côté CONTEXTE, ce n'est pas un choix éditorial défendable : l'annexe D annonce elle-même (l.7-9) donner les « implementation-level details », et aucune convention annoncée ailleurs ne couvre l'écart — au contraire, l'Algorithme 1 du texte principal (05_estimation.tex l.56) énonce la convention bloc-par-bloc, rendant le papier intérieurement incohérent. La trouvaille est donc réelle. En revanche la sévérité « medium » est surcalibrée : la Σ_W du M-step est PSD par construction (matrice de Gram à poids ≥ 0), le clamp bloc-par-bloc (plancher de valeurs propres) préserve la PSD-ité jointe, donc le seul risque résiduel est une matrice singulière absorbée par le ridge ; un lecteur ré-implémentant d'après l'annexe obtiendrait des résultats numériquement indiscernables hors cas dégénérés. Aucun théorème ni protocole expérimental n'en dépend ; correction = une phrase. C'est une inexactitude purement documentaire, à classer low.",
+    "severityAdjustment": "medium → low : écart réel mais purement documentaire ; la Σ_W estimée est PSD par construction et le clamp bloc-par-bloc préserve la PSD-ité jointe, donc impact pratique quasi nul (cas singuliers déjà couverts par le repli ridge) ; correctif = reformuler une phrase de l'annexe D."
+   }
+  },
+  {
+   "title": "Annexe D, régimes dégénérés : le papier dit que (μ_z0, Σ_z0) sont réinitialisés ; le code les laisse à leur valeur précédente — et deux planchers différents",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Tous les éléments factuels sont confirmés par lecture directe. (1) D_baum_welch.tex:107-112 dit bien que la convention pour régimes vides est « skipped and reset to identity dynamics with unit noise covariance » et que « the same convention applies to (μ_z0,k, Σ_z0,k) ». (2) Le code (semi_supervised.py:576-584) saute simplement la mise à jour de μ_z0/Σ_z0 (branche `if denom_k > _LOG_FLOOR:` sans else) en conservant les valeurs précédentes — aucun reset — alors que _weighted_fit (l.297-302) reset bien F=I, b=0, Σ_W=I : l'asymétrie contredit le « same convention » du papier quelle que soit la lecture. (3) Les deux planchers existent : floor_w=1e-12 (l.276) vs _LOG_FLOOR=1e-300 (l.89, utilisé l.545, 552, 579), alors que le papier parle d'un seul « numerical floor ». (4) Le repli des lignes de P sans support (conserver la ligne précédente, l.550-553) n'est documenté nulle part (grep sur 05_estimation.tex et l'annexe D). Tentative de réfutation : lire « same convention » comme « skip seulement » ne sauve pas le papier, car la convention énoncée inclut explicitement le reset. Sévérité « low » bien calibrée : détail d'implémentation d'annexe, cas dégénérés rarissimes (le plancher 1e-300 ne se déclenche pratiquement jamais).",
+    "severityAdjustment": "aucun — « low » est approprié"
+   }
+  },
+  {
+   "title": "Protocole §6.4 du papier (I_max=50, n_init=5) contredit par le script run_em.py (max_iter=100, n_inits=10) et par les défauts de la librairie",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles sont vérifiées dans les sources. (1) 06_experiments.tex l.294-297 dit bien I_max=50, ε=1e-5, n_init=5, et l.300-301 « M1, N ∈ {500, 2000}, 10 MC runs » ; l.312-313 réaffirme n_init=5 « in all subsequent EM experiments ». (2) run_em.py l.70-74 : DEFAULT_N_LIST=(500,2000,5000), DEFAULT_N_RUNS=100, DEFAULT_N_INITS=10, DEFAULT_MAX_ITER=100, DEFAULT_TOL=1e-5 ; docstring l.24 « n_inits=10 restarts » ; argparse l.492-493 reprend ces défauts. (3) Le chemin de reproduction documenté (README.md l.625, wiki/Paper-Reproduce.md l.37) invoque le script sans flags ; aucun Makefile/script du dépôt ne passe les valeurs du papier (recherche exhaustive). (4) fit_semi_supervised (semi_supervised.py ~l.698-700) a aussi n_inits=10, max_iter=100. (5) 07_real_data.tex l.145-147 confirme que le papier annonce partout 5/50/1e-5. Tentative de réfutation échouée : seule ε concorde ; ni surcharge de flags ni protocole alternatif ne réconcilie papier et code. Atténuation mineure : plus de restarts/itérations ne peut qu'améliorer les résultats (le papier note 100% de basin rate dès 1 restart sur M1), donc les conclusions scientifiques sont probablement intactes — mais la contradiction protocole-papier vs code-exécuté est réelle et la sévérité medium est bien calibrée. Bonus relevé en vérifiant : wiki l.40 (« 3 models × 2 lengths × 30 seeds × 2 variants × 5 restarts = 360 EM runs ») n'est cohérent ni avec le papier ni avec le code, et l'arithmétique donne 1800, pas 360.",
+    "severityAdjustment": "aucun — medium approprié (mismatch de protocole/reproductibilité documenté, sans impact probable sur les conclusions)"
+   }
+  },
+  {
+   "title": "Protocole §6.4 du papier (I_max=50, n_init=5) contredit par le script run_em.py (max_iter=100, n_inits=10) et par les défauts de la librairie",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Tous les faits sont confirmés dans les fichiers réels : 06_experiments.tex:294-297 et 312-313 annoncent I_max=50, ε=1e-5, n_init=5 ; run_em.py l.72-73 fixe DEFAULT_N_INITS=10 et DEFAULT_MAX_ITER=100, et son docstring intitulé « Protocol (§6.4) » dit lui-même « n_inits=10 restarts » — contradiction directe et auto-étiquetée avec le papier. Le chemin de reproduction canonique (README.md l.623, wiki/Paper-Reproduce.md l.37) invoque le script sans flags, donc avec les défauts divergents (y compris N_LIST=(500,2000,5000) et N_RUNS=100 vs « N ∈ {500, 2000}, 10 MC runs »). Tentatives de réfutation CONTEXTE : (a) « les défauts de la librairie sont indépendants du protocole » ne tient pas, puisque le docstring du script présente les 10 restarts comme LE protocole §6.4 et que les docs officielles lancent le script nu ; (b) aucune convention 10/100 n'est annoncée ailleurs — un grep du papier ne montre que 5/50 (§6.4 et §7), et le wiki annonce « × 5 restarts », cohérent avec le papier mais pas avec le code (il ajoute même une troisième description incohérente : 3 modèles × 30 seeds). Seule nuance : l'impact scientifique est probablement faible (plus de restarts/itérations ne peuvent qu'égaler ou améliorer la vraisemblance, et tab_em_restarts montre qu'un seul restart suffit sur M1), ce qui exclut « high » mais pas « medium » : la commande de reproduction publiée exécute une expérience ~30× plus grosse que le protocole déclaré, et la provenance exacte des tables publiées est ambiguë. Sévérité medium bien calibrée, aucun ajustement.",
+    "severityAdjustment": ""
+   }
+  },
+  {
+   "title": "Critère d'arrêt : ℓ évalué avant le M-step (pas après comme dans l'Algorithme 2) — à max_iter, le log L rapporté/sélectionné ne correspond pas aux paramètres retournés",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations vérifiées sur pièces. (1) Papier 05_estimation.tex l.177-178 : Algorithme 2 calcule ℓ⁽ⁱ⁾ = log p(z|θ⁽ⁱ⁾) APRÈS le M-step puis teste la convergence — ℓ et θ ajoutés à ℬ correspondent donc toujours. (2) Code semi_supervised.py : log_lik est produit par le E-step (_forward, l.523) donc évalué sur les paramètres du M-step précédent ; le test de convergence (l.532-537) précède le M-step (l.539-584) ; aucune réévaluation post-boucle (l.586-649). À max_iter sans convergence, info['log_lik']=log_lik_history[-1] (l.643) est bien « un M-step en retard » sur les paramètres retournés (en cas de convergence, le break précède le M-step et il n'y a pas de décalage — le finding le dit correctement). (3) Sélection l.779 : comparaison sur info['log_lik'] sans filtre sur info['converged'], alors que §5 l.128-129 promet « the restart with the highest converged log-likelihood ». Réfutation tentée : le code suit l'idiome Baum-Welch standard et, en EM pur (défaut post-hoc), la monotonie garantit que le dernier M-step non évalué ne peut qu'améliorer ℓ (le ℓ rapporté est une borne inférieure) — mais cet argument tombe en mode GEM (constraint_each_iter=True, non monotone) et ne supprime pas l'incohérence (θ, ℓ) dans la compétition des redémarrages ni l'écart avec le pseudo-code. Sévérité « low » bien calibrée : impact pratique limité (cas max_iter et formulation « converged »), correctif simple.",
+    "severityAdjustment": "none — « low » est approprié"
+   }
+  },
+  {
+   "title": "Projection AB en échec silencieux : le code garde A, B non contraints avec un simple warning, alors que l'Algorithme 2 affirme appliquer la contrainte",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations vérifiées sur le code et le .tex réels. (1) semi_supervised.py l.252-259 : compute_AB est bien entouré d'un try/except ValueError qui log un warning et conserve A, B non contraints ; ce chemin couvre le M-step GEM (l.326) ET la projection post-hoc finale (l.602-616, where=\"post-hoc\"). (2) Le mode d'échec est réel : h5_constraint.py l.138-147 lève ValueError si cond(Σ_V) > 1e12 ou Σ_V singulière — atteignable en EM avec régimes dégénérés. (3) 05_estimation.tex l.174-176 et 184-186 : l'Algorithme 2 présente bien l'application de la contrainte AB comme inconditionnelle, sans mode d'échec. (4) Incohérence confirmée : supervised.py l.258-261 appelle compute_AB sans rattrapage, l'exception remonte. (5) supervised.py l.481 : l'en-tête « Constraint : AB » du fichier modèle généré dépend uniquement du flag CLI (semi_supervised.py l.943-950 passe args.constraint sans information d'échec), donc un modèle étiqueté AB peut violer H5 sans trace dans le fichier. Sévérité « low » bien calibrée : chemin rare (cond > 1e12), loggé, et le filtre contrôle lui-même le résidu H5 avec RuntimeWarning à l'usage, ce qui atténue l'impact aval — mais l'écart papier/code et l'étiquetage trompeur du fichier modèle sont réels.",
+    "severityAdjustment": "none — low est approprié"
+   }
+  },
+  {
+   "title": "Option --delta-zero (forcer Δ(k)=0 avant la projection AB) présente dans les deux estimateurs, absente de la §5 et de l'annexe D",
+   "severity": "info",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Tous les faits vérifiés ligne à ligne. (1) supervised.py l.249-251 : 'if delta_zero: Dt = np.zeros((q, s))' avant la projection AB (l.258-261) — exact. (2) semi_supervised.py l.244-245 dans _apply_constraints (M-step GEM et post-hoc) — exact. (3) Flags CLI --delta-zero présents : supervised.py l.603-607, semi_supervised.py l.830-834, docstring l.53 — exact. (4) Conséquence mathématique confirmée par h5_constraint.py (compute_AB : A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) : Δ=0 + projection AB ⟹ A=B=0 (sous-modèle CGOMSM). (5) Absence du papier confirmée par grep : aucune mention de delta-zero dans paper/ ; les Algorithmes 1 et 2 de 05_estimation.tex n'ont aucune étape Δ=0 ; l'annexe D ne mentionne pas Δ ; la seule occurrence de Δ=0 est bien 04_constraint.tex:125, remarque incidente du tableau des cas particuliers (CGOMSM). Calibration : les scripts d'expériences passent explicitement delta_zero=False (run_supervised.py:259, run_em.py:235), donc aucun résultat publié n'est affecté — l'option est documentée dans le README seulement. La sévérité 'info' est correctement calibrée : écart documentaire réel code/papier, sans impact sur les résultats. Aucun ajustement nécessaire.",
+    "severityAdjustment": "none — 'info' est la calibration correcte (option jamais utilisée dans les expériences du papier, documentée dans le README)"
+   }
+  },
+  {
+   "title": "Diviseurs incohérents : Σ_W,k en MLE (/N_k) mais Σ_z0,k en covariance non biaisée (/(n−1)) — le papier dit « sample covariance » pour les deux",
+   "severity": "info",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles sont vérifiées sur le code et le .tex réels. supervised.py l.236 calcule bien Σ_W = residualsᵀ·residuals/N_k (docstring l.212-213 : « MLE, divided by N_k »), tandis que l.400 utilise np.cov(Z_k, rowvar=False) dont le diviseur par défaut est n−1 (vérifié numériquement : bias=False, ddof=1). semi_supervised.py l.430/458 utilisent aussi np.cov pour les moments initiaux. Le papier (05_estimation.tex) appelle Σ_W « empirical residual covariance » (l.23) puis « sample covariance of the OLS residuals » (Alg.1 l.52-53) et Σ_z0 « sample mean/covariance » (l.62-63), sans jamais préciser de diviseur — le même terme « sample covariance » recouvre donc deux conventions différentes dans le code. Un lecteur implémentant l'Alg.1 littéralement (convention non biaisée /(n−1) pour les deux) ne reproduirait pas le Σ_W du code sur les petits régimes. La trouvaille admet elle-même qu'aucune convention n'est fausse isolément et est calibrée « info », le niveau le plus bas, ce qui est approprié pour une simple précision de rédaction. Aucune surévaluation ni mauvaise lecture détectée.",
+    "severityAdjustment": ""
+   }
+  },
+  {
+   "title": "Gestion des régimes vides du supervisé non décrite : le code lève ValueError (P, OLS) ou bascule sur zéro/identité (μ_z0, Σ_z0) ; l'Algorithme 1 est présenté comme total",
+   "severity": "info",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles sont vérifiées sur les sources réelles. (1) L'Algorithme 1 du papier (05_estimation.tex l.33-67) ne prévoit aucun cas dégénéré : pas de condition d'erreur ni de repli pour régime vide. (2) supervised.py l.331-337 lève bien ValueError si un régime n'est jamais source de transition ; l.356-360 lève ValueError s'il n'est jamais destination. (3) l.397-410 : si moins de 2 pas de temps dans le régime, repli sur moyenne nulle / covariance identité pour (μ_z0, Σ_z0) — seul un _log.warning est émis (donc « silencieusement » est très légèrement exagéré, mais aucun signal n'atteint l'utilisateur du papier). (4) La sous-section « Degenerate regimes » (D_baum_welch.tex l.105-112) ne couvre que l'EM (plancher sur Σγ), rien pour le supervisé. Tentatives de réfutation échouées : le docstring du code documente les ValueError, mais la trouvaille porte sur le papier ; l'omission de gestion d'erreur dans un pseudo-code est conventionnelle, mais le repli (0, I) est une substitution d'estimateur non déductible de l'algorithme publié. Sévérité « info » déjà au plancher et cohérente avec le correctif d'une phrase proposé.",
+    "severityAdjustment": "aucun — info est approprié"
+   }
+  },
+  {
+   "title": "Le noyau de la Prop. 2 (eq:mu_jk) omet le terme de biais C_k(b_X,j − Δ_j Σ_V,j⁻¹ b_Y,j) ; le code h5_exact (correct) ne « matche » donc PAS μ_jk comme l'affirme la Remark h5-exact",
+   "severity": "high",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Refutation attempt failed; the finding is confirmed by three independent routes. (1) Algebra: under the AB/H5 closed form A_j=Δ_jΣ_V,j⁻¹C_j, B_j=Δ_jΣ_V,j⁻¹D_j (compute_AB leaves b untouched), p(x_n|r_n=j,y_n)=N(b_X,j+Δ_jΣ_V,j⁻¹(y_n−b_Y,j), ·), hence μ_jk(y_n)=b_Y,k+C_k(b_X,j−Δ_jΣ_V,j⁻¹b_Y,j)+(D_k+C_kΔ_jΣ_V,j⁻¹)y_n; eq:mu_jk (02_model_h5.tex:110-112) omits the C_k(...) intercept term, which vanishes only if b_X,j=Δ_jΣ_V,j⁻¹b_Y,j. (2) Independent Monte-Carlo on a fresh toy model (K=2, q=s=1, b≠0, 2M steps via GSSSimulator): per-pair OLS intercepts (2.1006, −1.0842, 1.2575, −0.4402) match the corrected formula (2.1000, −1.0750, 1.2533, −0.4400), not the paper's b_Y,k (2.0, −1.0); slopes and residual variances match eq:mu_jk's slope and eq:Gamma_jk, confirming the finding's claim that only the intercept is wrong and rem:Gamma_bias_free holds. (3) The h5_exact filter constants (gss_filter.py:458-464, 624) reproduce the corrected formula to machine precision, so the code is exact and rem:h5exact's claim that the constants 'match μ_jk(·) of Proposition prop:markov' (03_filtering.tex:56-59) is false for the mean under nonzero bias; rem:bX_invisible ('drift on X does not affect the transition of (R_n,Y_n)') is false in general since b_X,j enters via b_X,j−Δ_jΣ_V,j⁻¹b_Y,j. Line citations in the finding check out. Severity 'high' is appropriate: it is a wrong equation in the paper's central proposition with two dependent remarks partially invalidated, and the paper treats bias as a first-class quantity (02_model_h5.tex:80-82); the mitigating fact that the code (hence experiments) is correct is already acknowledged in the finding.",
+    "severityAdjustment": null
+   }
+  },
+  {
+   "title": "Le noyau de la Prop. 2 (eq:mu_jk) omet le terme de biais C_k(b_X,j − Δ_j Σ_V,j⁻¹ b_Y,j) ; le code h5_exact (correct) ne « matche » donc PAS μ_jk comme l'affirme la Remark h5-exact",
+   "severity": "high",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Lentille CONTEXTE : les faits tiennent et aucune défense éditoriale n'existe. (1) Re-dérivation algébrique indépendante : sous la forme AB (prg/utils/h5_constraint.py:117, A=ΔΣ_V⁻¹C, B=ΔΣ_V⁻¹D), E[X_n|r_n=j,y_n]=b_{X,j}+Δ_jΣ_{V,j}⁻¹(y_n−b_{Y,j}), donc μ_jk = b_{Y,k} + C_k(b_{X,j}−Δ_jΣ_{V,j}⁻¹b_{Y,j}) + (D_k+C_kΔ_jΣ_{V,j}⁻¹)y_n ; eq:mu_jk (paper/sections/02_model_h5.tex:110-111) omet bien le terme constant. Le code (prg/filter/gss_filter.py:458,624) utilise les moments stationnaires de Z (qui portent b_X) et est donc exact mais ne matche pas eq:mu_jk dès que b≠0, contredisant rem:h5exact (03_filtering.tex:56-59). (2) Pas de convention b=0 couvrant la Prop. 2 : le papier déclare au contraire le biais « first-class quantity throughout » (02_model_h5.tex:80-82) et l'énonce sans restriction. (3) L'erreur est propagée comme contribution : l'abstract (00_abstract.tex:14-15) répète « depends on b_{Y,r} but not on b_{X,r} », l'introduction vante des expressions « bias-aware » (01_introduction.tex:65). (4) Le renvoi de rem:bX_invisible vers §3.6 est vide : ssec:init (03_filtering.tex:330-366) ne mentionne jamais le biais. (5) Sévérité high calibrée : formule fausse dans une Proposition centrale + remarque et abstract faux + claim papier-code invalidée ; le fait que le code soit correct n'atténue pas pour un audit du papier. Le correctif devrait aussi couvrir l'abstract.",
+    "severityAdjustment": ""
+   }
+  },
+  {
+   "title": "La Remark « posterior regime moments » (bouclage par les moments a posteriori) n'est pas implémentée dans le mode imm_general (mode par défaut)",
+   "severity": "high",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles sont vérifiées dans les sources. (1) rem:posterior_moments (03_filtering.tex:285-302) prescrit bien la réinjection des moments a posteriori (mu_post(k)=[x_filtré; y_{n+1}], P_post(k)) comme (mu_{n+1}(k), P_{n+1}(k)) de l'étape (I) suivante. (2) Dans _update_step_general (gss_filter.py), la mise à jour d'état l.872-874 stocke les moments PRÉDITS mu_np1/P_np1 ; les posteriors Kalman E_x_r/Var_x_r (l.850-865) ne servent qu'à la combinaison (_mix) et ne sont jamais réinjectés ; par induction self._mu/self._P_z restent observation-free (le docstring l.51-63 l'admet : « µ_n(r), P_n(r) are *prior* (observation-free) quantities »). (3) imm_general est bien le défaut du constructeur (l.206 : mode: str = \"imm_general\") — le docstring module l.10 prétend même à tort que h5_exact est le défaut. (4) J'ai refait l'algèbre du mode h5_exact : mean_jk = mu_Y_jk + (C_k K_j + D_k)(y_n − mu_Y(j)) = C_k·x_filtré(j) + D_k y_n + b_Y et Gamma(j,k) = C_k P_post(j) C_k^T + Sigma_V(k) (l.461, l.624) — c'est exactement le bouclage de la Remark en forme stationnaire fermée, donc seul h5_exact l'implémente. Tentative de réfutation : §6 (06_experiments.tex:123-135) étiquette honnêtement le second mode « IMM-approx » (et make_figures.py confirme le mapping imm_general → IMM-approx), ce qui mitige pour les résultats expérimentaux ; mais §3.1 (l.43-46 : « no Gaussian-collapse approximation is made at any stage ») et rem:h5exact (l.62-63 : « the general (time-varying) mode remains more reliable in transient or non-stationary settings ») décrivent une récursion time-varying avec bouclage qui n'a aucune implémentation — imm_general n'est ni la récursion §3 ni strictement l'IMM de Blom (qui réinjecte les posteriors avant collapse). La trouvaille est exacte ligne par ligne et la conséquence (mode par défaut ≠ récursion publiée ; §3 sans implémentation hors h5_exact) est réelle.",
+    "severityAdjustment": "Conserver « high » : le mode affecté est le défaut du constructeur et la récursion centrale de §3 n'a pas d'implémentation time-varying. Mitigation partielle (étiquetage honnête « IMM-approx » en §6 et docstring du code) qui pourrait justifier au pire « medium », mais les affirmations de §3 (propagation exacte, fiabilité du mode général en transitoire) restent contredites par le code."
+   }
+  },
+  {
+   "title": "La Remark « posterior regime moments » (bouclage par les moments a posteriori) n'est pas implémentée dans le mode imm_general (mode par défaut)",
+   "severity": "high",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Tous les faits sont vérifiés. (1) Papier : rem:posterior_moments (03_filtering.tex:285-302) prescrit sans condition la réinjection des moments a posteriori dans l'étape (I) du pas suivant (« serve as (μ_{n+1}(k), P_{n+1}(k)) in step (I) of the next time step, ensuring that the prediction at time n+2 conditions on the full history »). (2) Code : _update_step_general stocke les moments PRÉDITS pour le pas suivant (gss_filter.py:872-874 « self._P_z = P_np1; self._mu = mu_np1 ») ; les posteriors E_x_r/Var_x_r (l.850-865) ne servent qu'à la combinaison (IV) ; le bloc Y n'est jamais collapsé sur y_{n+1} ; le docstring (l.51-63) l'admet (« µ_n(r), P_n(r) are *prior* (observation-free) quantities »). (3) imm_general est bien le défaut du constructeur (l.206) — fait aggravant non relevé : le docstring module (l.10) et l'exemple (l.192) prétendent à tort que h5_exact est le défaut. Lentille CONTEXTE — défenses examinées et rejetées : (a) « la remarque ne décrit que la récursion exacte, implémentée en h5_exact » ne tient pas, car §6.2 (06_experiments.tex:123-124) affirme que les deux méthodes benchmarkées « correspond[ent] to the two modes of the H5-constrained GSS filter (Sec. 3) », et rem:h5exact (03_filtering.tex:62-63) attribue au mode général une fiabilité supérieure en régime transitoire — propriété qui exige précisément le bouclage manquant (le docstring du code dit l'inverse : l'écart « can be significant in transient regimes »). (b) La divulgation n'existe que dans le docstring du code, jamais dans le papier ; le ré-étiquetage §6.2 du second bras en « standard approximate IMM of Blom » contredit §3 au lieu de divulguer le comportement réel (vérifié : aucune implémentation Blom séparée n'existe ; les tables « IMM-approx » proviennent d'imm_general). La trouvaille est donc réelle et la sévérité high défendable : le chemin par défaut du code n'implémente ni la récursion §3 ni la description §6 du baseline. Seule réserve mineure : les résultats phares h5-exact sont intacts et §6 étiquette le second bras « approx », ce qui pourrait plaider pour medium, mais la contradiction interne du papier et le mode par défaut justifient high.",
+    "severityAdjustment": "high (maintenue) — medium serait défendable uniquement si l'on crédite l'étiquette « IMM-approx » de §6.2 et le docstring du code comme divulgation partielle, mais la phrase §3 sur la fiabilité en transitoire et l'affirmation §6.2 de correspondance avec les deux modes de la Sec. 3 restent contredites par le code par défaut."
+   }
+  },
+  {
+   "title": "§3.6 initialise avec (π_0, μ_z0(k), Σ_z0(k)) fournis par le modèle ; le code remplace ces moments par le point fixe stationnaire dans LES DEUX modes",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Vérifié ligne à ligne : le papier (03_filtering.tex:330-366) initialise la récursion avec les moments du modèle (eq:init_post/init_mean/init_var sur les blocs de Σ_z0(k), puis μ₁(k)=μ_z0(k), P₁(k)=Σ_z0(k)+μ_z0μ_z0ᵀ), alors que le code (gss_filter.py) substitue systématiquement les moments stationnaires dans LES DEUX modes : _reset_state l.478 (π=π_∞) et l.486-488 (μ/P stationnaires pour imm_general), _init_step_h5 l.542-597 et _init_step_general l.700-758 n'utilisent que _mu_z/_Sigma/_pi_inf ; le commentaire l.536-539 admet explicitement éviter « the transient that would arise from an arbitrary user-supplied π_0 / Σ_z0 ». GSSParams.pi0 n'est jamais lu par GSSFilter (grep : 0 occurrence), et mu_z0/Sigma_z0 ne servent que de graine au point fixe (l.335-336). Aucune option du constructeur ne permet l'init §3.6. Deux nuances mineures qui n'invalident pas la trouvaille : (1) pour π_0 le papier lui-même le définit comme la distribution stationnaire (l.334-335), donc l'écart ne porte vraiment que sur μ_z0/Σ_z0 ; (2) « aucun mode ne peut représenter le transitoire » est un peu fort — imm_general redevient adaptatif après l'init. Le cœur de la trouvaille (l'initialisation §3.6 n'est implémentée nulle part, écart délibéré non documenté dans le papier) est exact ; medium est bien calibré.",
+    "severityAdjustment": "none — medium confirmé"
+   }
+  },
+  {
+   "title": "§3.6 initialise avec (π_0, μ_z0(k), Σ_z0(k)) fournis par le modèle ; le code remplace ces moments par le point fixe stationnaire dans LES DEUX modes",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Faits vérifiés dans gss_filter.py : _reset_state (l.478, 486-488) et les deux init steps (_init_step_h5 l.542+, _init_step_general l.700+) forcent un départ aux moments stationnaires dans LES DEUX modes ; mu_z0/Sigma_z0 ne servent que de graine au point fixe (l.335-336) et pi0 n'est jamais lu par le filtre. Le commentaire du code (l.705-709) admet lui-même la déviation (« avoids the transient that would arise from an arbitrary user-supplied π_0 / Σ_z0 »). Tentatives de réfutation CONTEXTE : (1) aucune divulgation ailleurs dans le papier — grep « stationar » sur sections+annexes ne trouve la stationnarité associée qu'au mode h5-exact, jamais à l'initialisation du mode général ; (2) choix défendable seulement à moitié : pour h5_exact, rem:h5exact (« use the stationary values at every time step ») rend le départ stationnaire cohérent, et pour π_0 le papier le définit lui-même comme la distribution stationnaire (03_filtering.tex:334-335) ; mais §3.6 est une sous-section entière (eq:init_post/init_mean/init_var, μ_1(k)=μ_z0(k), P_1(k)=Σ_z0+μ_z0μ_z0ᵀ) qu'aucun mode n'implémente, et la phrase « the general mode remains more reliable in transient or non-stationary settings » (l.61-63) est contredite puisque les deux modes forcent un départ stationnaire ; (3) impact réel : le simulateur (GSSSimulator.py l.133-135) tire bien Z_0 ~ N(μ_z0, Σ_z0), donc les données démarrent hors stationnarité pendant que le filtre non. Sévérité medium correcte : limité au transitoire initial (pas high), mais sous-section du papier sans implémentation + affirmation invalidée (pas low).",
+    "severityAdjustment": "aucun — medium est bien calibré ; le correctif suggéré (remarque dans le papier ou alignement du code, et qualification de la phrase sur la fiabilité du mode général en transitoire) est approprié ; on peut noter en atténuation que le π_∞ initial est, lui, conforme à la définition de π_0 donnée par le papier, et que le départ stationnaire du mode h5_exact est cohérent avec rem:h5exact — le cœur du problème est le mode imm_general (défaut) et les moments μ_z0/Σ_z0"
+   }
+  },
+  {
+   "title": "Précalcul stationnaire : l'itération implémentée n'est pas celle prescrite par la Remark (renversement figé à π_∞), et les conditions de validité (stationnarité, convergence) ne sont pas vérifiées",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch1",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles sont verifiees sur les fichiers reels. (a) rem:h5exact (paper/sections/03_filtering.tex:52-55) prescrit bien d'iterer eq:mu_propagate-eq:var_Z « to convergence » ; or ces equations dependent du noyau renverse eq:reverse_P (l.90-94) construit sur le posterior pi_n(j), quantite aleatoire dependant des donnees qui ne converge pas ponctuellement — la recette « off-line » est donc mal definie telle quelle. Le code (prg/filter/gss_filter.py:322-327) itere une variante bien definie avec le noyau renverse fige a pi_inf, substitution jamais decrite dans le papier. (b) La condition « time-homogeneous and stationary regime » est aux lignes 50-51 ; la promesse « an explicit characterisation of when the two modes agree » est bien dans 01_introduction.tex:69-72 et un grep sur tout le papier confirme qu'aucune caracterisation n'est fournie (seule la phrase qualitative 03_filtering.tex:59-63 et des comparaisons empiriques en section 6). Cote code : _check_h5 (l.232-288) emet un warnings.warn RuntimeWarning pour le seul residu (H5) ; aucune verification de stationnarite (mu_z0/Sigma_z0 ne servent que de graines, l.335-336) ; la non-convergence du point fixe (MAX_ITER=1000, TOL=1e-12) ne produit qu'un logger.warning (l.363-368), asymetrique avec le RuntimeWarning (H5) ; aucune garde de contraction/rayon spectral n'existe dans gss_filter.py (le commit recent a1b8487 « stationary guards » ne protege que le calcul de pi_inf dans GSSParams contre une P degeneree, pas l'iteration des moments contre des F_k instables). La severite medium est bien calibree : promesse explicite de l'introduction non tenue + algorithme sous-specifie, mais aucun resultat numerique faux demontre (l'interpretation du code est raisonnable et la section 6 soutient empiriquement le mode).",
+    "severityAdjustment": "aucun — medium est approprie"
+   }
+  },
+  {
+   "title": "Précalcul stationnaire : l'itération implémentée n'est pas celle prescrite par la Remark (renversement figé à π_∞), et les conditions de validité (stationnarité, convergence) ne sont pas vérifiées",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "medium",
+    "reasoning": "Lentille CONTEXTE. La trouvaille empile trois griefs ; après vérification du .tex et du code, le noyau réel est mince et plutôt low.\n\nSous-claim (a) — « recette mal définie / itération du code jamais décrite » : largement réfutable comme choix éditorial défendable. La Remark rem:h5exact (03_filtering.tex:48-64) conditionne TOUT explicitement à « the time-homogeneous and stationary regime » (l.50). Dans ce régime π_n → π_∞, donc le noyau renversé eq:reverse_P (l.90-94) tend vers sa forme stationnaire et la récursion eq:mu_propagate–eq:var_Z admet un point fixe. « Iterating ... to convergence » dans ce contexte stationnaire désigne sans ambiguïté l'itération sur le noyau renversé stationnaire — exactement ce que fait le code (gss_filter.py:322-327, _pi_inf ; docstring l.18-22 « constant in n under stationarity », « stationary distribution π_∞ »). Dire que l'itération est « mal définie » ou « jamais décrite » sur-lit le texte : le raccourci est lâche mais l'objet visé est clair par le contexte que la Remark pose elle-même. C'est précisément le type de raccourci que la lentille CONTEXTE doit escompter.\n\nSous-claim (b) — promesse non tenue : RÉEL et vérifié. L'introduction (01_introduction.tex:71-72) promet « an explicit characterisation of when the two modes agree » ; grep sur paper/sections/*.tex et paper/appendix/*.tex ne trouve qu'une phrase qualitative (03_filtering.tex:59-63, « less accurate when the chain is far from its stationary regime »). Aucune caractérisation explicite n'est livrée. C'est une vraie sur-promesse de l'intro, non défendable comme convention.\n\nCôté code : factuellement exact (non-convergence en logger.warning l.363-368 vs RuntimeWarning H5 l.277/286 ; aucune garde de stationnarité μ_z0/Σ_z0 vs point fixe ni de rayon spectral, confirmé par grep). Mais ce sont des suggestions de robustesse du code, secondaires pour un audit de PAPIER.\n\nBilan : la trouvaille n'est pas spurious (le grief (b) est un écart intro↔corps réel et vérifiable), donc isReal=true. Mais (a) sur-état le cas (l'intention stationnaire est claire) et l'empilement de nitpicks code gonfle le poids apparent. Le noyau authentique — promesse d'« explicit characterisation » non tenue + substitution stationnaire non explicitée mais qui est la lecture naturelle — est un défaut de rédaction/cadrage low, pas medium. D'où medium -> low.",
+    "severityAdjustment": "medium -> low"
+   }
+  },
+  {
+   "title": "Forme de Joseph : « recommended implementation » dans le papier mais joseph=False par défaut, flag ignoré en imm_general (le seul mode où elle servirait), et flooring spectral _psd_floor non documenté",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles (lignes/équations) sont vérifiées dans le dépôt. PAPIER: l'Annexe E conclut bien « it is the recommended implementation » (E_joseph.tex:82-86) et la Remark §3 affirme « switches between the short and Joseph forms via a single boolean flag » (03_filtering.tex:280-282). CODE: (a) défaut joseph=False (gss_filter.py:205, docstring 79-80) — c'est donc la forme courte qui est le défaut, contredisant « recommended implementation » ; (b) le flag est ignoré en imm_general avec un logger.warning (217-223) et la mise à jour par pas y utilise la forme courte (862, var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))) — donc l'affirmation « switches via a single boolean flag » n'est pas honorée pour ce mode ; (c) en h5_exact Joseph est calculé une seule fois à la construction (410-424, et 675 « Var_x_r.append(self._P_post[k]) # constant! ») et _psd_floor (eps=1e-9, projection spectrale, 1108-1119) est appliqué PAR-DESSUS le résultat Joseph (418-420), mécanisme effectivement absent du papier, ce qui rend Joseph largement redondante là où elle existe. Le test d'équivalence (tests/test_gss_filter.py:363-405) est bien confiné à mode='h5_exact' à covariance constante.\n\nVérification MATHS de la math sous-jacente: elle est correcte. L'Annexe E démontre Joseph≡forme courte pour le gain optimal (E_joseph.tex:64-75), et _psd_floor garantissant déjà symétrie+PSD, une forme de Joseph (dont le seul intérêt est la garantie PSD) est effectivement redondante en h5_exact. Aucune erreur mathématique n'existe ; l'écart est de fidélité documentaire papier↔code, pas de dérivation fausse.\n\nUne nuance/surévaluation à signaler (qui n'invalide pas la trouvaille): l'affirmation que imm_general serait « le seul mode où l'argument de stabilité s'applique » est légèrement trop forte — la soustraction de la forme courte est aussi évaluée (une fois) dans le pré-calcul h5_exact, donc l'argument d'arithmétique finie s'y applique aussi ; il y est simplement neutralisé par _psd_floor. Cela ne change pas le fond.\n\nVerdict: trouvaille réelle (discordances papier↔code vérifiées et reproductibles). Calibration: la sévérité 'medium' est un peu haute pour une lentille MATHS car aucune math n'est fausse — il s'agit d'un défaut de fidélité de description (« recommended »/« flag switches ») plus un _psd_floor non documenté, sans impact sur la correction numérique. Je suggère low-medium. isReal=true.",
+    "severityAdjustment": "medium -> low-medium"
+   }
+  },
+  {
+   "title": "Forme de Joseph : « recommended implementation » dans le papier mais joseph=False par défaut, flag ignoré en imm_general (le seul mode où elle servirait), et flooring spectral _psd_floor non documenté",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "medium",
+    "reasoning": "Lentille CONTEXTE (faits supposés exacts; je les ai tous confirmés dans le code et le .tex). Les trois faits matériels tiennent: joseph=False par défaut (gss_filter.py:205), flag ignoré en imm_general avec logger.warning (217-223), _psd_floor non documenté et appliqué par-dessus Joseph (418-420, 1108-1119); l'Annexe E dit bien « it is the recommended implementation » (E_joseph.tex:84) et la Remark dit « switches ... via a single boolean flag » (03_filtering.tex:280-282). MAIS la trouvaille est mal calibrée en sévérité, pour trois raisons relevant de la lentille CONTEXTE.\n\n(a) Seul vrai écart papier↔code: le papier qualifie Joseph de « recommended » alors que le défaut est la forme courte. C'est réel mais mineur: la Remark n'affirme JAMAIS que Joseph est le défaut — elle promet seulement « un flag booléen », ce que le code fournit exactement. « Recommended » est un conseil de stabilité numérique, pas une spécification de défaut. Garder la forme courte canonique (eq:kalman_var) en défaut tout en exposant la forme recommandée est un choix éditorial défendable; correctif = une ligne de clarification. Sévérité low.\n\n(b) L'argument central pour monter en medium — « imm_general est le seul mode où Joseph servirait » — est l'OPINION analytique de l'auditeur, pas un énoncé du papier. Or l'abstract (00_abstract.tex:21) et l'intro (01_introduction.tex:67-68) situent explicitement la forme de Joseph dans la mise à jour de covariance du filtre EXACT (H5): « the covariance update admitting a numerically stable Joseph form ». Le mode h5_exact est précisément là où Joseph EST implémenté ET testé pour l'équivalence (tests/test_gss_filter.py:374-401). imm_general est décrit côté code comme un mode legacy/papier-compagnon (exactIMM ≤ v0.9.0), que le papier ne met pas en avant comme « le » filtre. Affirmer que « le seul mode utile n'a pas Joseph » est donc une lecture qui ne reflète pas où le papier place réellement Joseph. Le texte du papier est cohérent avec l'implémentation h5_exact.\n\n(c) _psd_floor: garde PSD de routine; son absence du papier est normale (les papiers omettent ces garde-fous). « Rend Joseph largement redondante » est de l'éditorialisation interprétative, pas une contradiction papier↔code.\n\nConclusion: trouvaille réelle (mismatch défaut/recommandation, claim a) mais sévérité gonflée par (b) et (c) qui mêlent interprétation de l'auditeur et détails d'implémentation. Rétrograder medium -> low. La cohérence du papier (Joseph = filtre H5 exact, où il est implémenté et testé) défend le statu quo; seul un petit ajustement de phrasé est justifié.",
+    "severityAdjustment": "medium -> low"
+   }
+  },
+  {
+   "title": "Coût annoncé de la forme de Joseph « per regime per step » erroné : dans le code elle est évaluée une seule fois à la construction",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Vérification factuelle complète (lentille MATHS) : tous les faits avancés par la trouvaille sont exacts.\n\n(1) Le papier chiffre bien le surcoût de Joseph à « two additional matrix multiplications per regime per step » DEUX fois : 03_filtering.tex:279-280 (rem:joseph) et E_joseph.tex:84-86 (Numerical recommendation). Confirmé par lecture directe.\n\n(2) Côté code, Joseph n'existe QUE dans le chemin h5_exact : le flag self._joseph (gss_filter.py:211) n'est lu qu'à la ligne 413, à l'intérieur de _precompute() — appelé une seule fois à la construction (ligne 216). La covariance a posteriori P_post[k] y est calculée une fois pour toutes (boucle 411-424), puis simplement réutilisée à chaque pas : ligne 564 (batch) et ligne 675 « Var_x_r.append(self._P_post[k])  # constant! » (step). Le surcoût PAR PAS de Joseph en h5_exact est donc strictement nul.\n\n(3) En imm_general — le seul mode où la covariance est effectivement recalculée à chaque pas (ligne 862 : var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T)), forme courte) — Joseph N'EST PAS implémentée : le flag est ignoré avec un logger.warning (lignes 218-223). Le docstring du module (77-80) confirme lui-même « Both forms give the same constant covariance under stationarity ». La trouvaille est donc factuellement solide : la formulation de coût « per regime per step » ne correspond à aucun des deux modes tels qu'implémentés.\n\nNUANCE adversariale (justifie un léger ajustement de calibrage, pas un rejet) : le titre qualifie le coût d'« erroné », mais l'énoncé du papier n'est PAS mathématiquement faux en tant que description de la RÉCURSION GÉNÉRALE time-varying. La rem:joseph est posée en §3 dans un contexte où le papier déclare explicitement (03_filtering.tex:252-254) « All quantities ... are re-evaluated at every step » ; dans ce cadre algorithmique, remplacer eq:kalman_var par eq:joseph coûte bien deux matmuls supplémentaires par régime et par pas. Le mode h5-exact stationnaire (rem:h5exact:48-64) est présenté comme une OPTIMISATION particulière. Le vrai défaut est donc plus étroit que « coût erroné » : c'est un désalignement code/papier — le code n'offre Joseph que dans le mode où le coût est amorti à zéro (h5_exact), et pas dans le mode (imm_general) qui correspond au cadrage « par pas » du papier. La sévérité « low » est correctement calibrée (nuance de cadrage de coût, pas un bug de correction) et le correctif suggéré (reformuler en « coût unique au pré-calcul en h5-exact ; par pas seulement si les moments sont propagés en ligne ») capte fidèlement la situation réelle.",
+    "severityAdjustment": "Maintien à low. Reformuler le titre : il ne s'agit pas d'un coût « erroné » (l'énoncé est correct pour la récursion générale time-varying que §3 décrit), mais d'un désalignement code↔papier — Joseph n'est câblé que dans h5_exact (coût par pas nul, pré-calcul unique), pas dans imm_general (le mode qui recalcule réellement la covariance par pas). Le correctif proposé reste pertinent."
+   }
+  },
+  {
+   "title": "L'avantage de coût attribué par le papier aux « gains constants / no propagation overhead » provient en bonne partie d'une asymétrie d'implémentation (factorisations pré-calculées vs scipy par paire et par pas)",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles de la trouvaille sont vérifiées sur les sources réelles. (1) Aucune borne O(·)/de complexité dans paper/ : un grep ne renvoie que des énoncés qualitatifs (« no propagation overhead » 03_filtering.tex:60 ; « owing to its precomputed constant Kalman gains » 06_experiments.tex:167-168) plus le 1.4x empirique (309 vs 425 µs). (2) Les deux modes bouclent bien sur les paires (j,k) → O(K²) par pas (h5 : boucles imbriquées 617-619 ; general : 792/798). (3) Asymétrie d'implémentation confirmée : h5_exact pré-factorise les K² covariances Γ(j,k) par Cholesky à la construction (_precompute, lignes 447-467 ; _precompute_gaussian_logpdf 1050-1090) et n'évalue par pas qu'un produit matrice-vecteur (_fast_logpdf 632-636, 1093-1105) ; imm_general appelle scipy.multivariate_normal.logpdf avec refactorisation complète par paire ET par pas (816-821), plus un eigh par paire via _psd_floor (ligne 809, dans la boucle interne rn) et une recomposition Sig_np1 par rnp1 (793). (4) Le code documente lui-même cette asymétrie : « removes the O(N·K²) eigen-decompositions that multivariate_normal.logpdf would otherwise perform » (1063-1065). Le point de fond est légitime sous la lentille MATHS : le ratio mesuré 1.4x et l'attribution causale « owing to its precomputed constant Kalman gains » confondent un gain algorithmique réel (gains/covariances constants, pas de propagation des moments par pas) avec un artefact d'implémentation (Cholesky pré-factorisé vs appel scipy refactorisant + eigh par paire). Tentative de réfutation infructueuse : le sens ordinal (h5_exact moins coûteux) reste vrai et n'est pas contesté par la trouvaille ; il n'existe aucun énoncé mathématique de coût dans le papier à réfuter, donc ce n'est pas une erreur de math mais une nuance de protocole de benchmark / attribution causale. Sévérité « low » bien calibrée : caveat de reproductibilité/équité du chronométrage, sans erreur de correction algorithmique ni de dérivation.",
+    "severityAdjustment": "none — la trouvaille est correctement calibrée à low (caveat de benchmark/attribution, pas une erreur de correction)"
+   }
+  },
+  {
+   "title": "Docstring du module : « mode=h5_exact (default) » et exemple « (H5)-exact :: GSSFilter(params) » alors que le défaut du constructeur est imm_general — le mode divergent (acquis eq:S_jk) est sélectionné silencieusement",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Lentille MATHS (ici factuelle/code, pas de dérivation): j'ai lu gss_filter.py directement et vérifié chaque affirmation verbatim. (1) Ligne 10: « ``mode=\\\"h5_exact\\\"`` (default) — exact IMM recursion under hypothesis (H5) » — CONFIRMÉ mot pour mot. (2) Lignes 190-192: bloc « Step-by-step, (H5)-exact:: » avec « filt = GSSFilter(params)  # default mode, short form » — CONFIRMÉ mot pour mot. (3) Ligne 206: signature « mode: str = \\\"imm_general\\\" » — CONFIRMÉ mot pour mot. (4) Le docstring de classe (172-180) dit correctement « default \\\"imm_general\\\" » — il y a donc bien contradiction interne entre le docstring de module (l.10 + exemple l.190) et la signature/docstring de classe. (5) Sélection silencieuse: au branchement __init__ (l.208-226), quand mode != \\\"h5_exact\\\" le SEUL warning émis est celui de joseph=True (conditionnel, l.219-223); aucun avertissement sur le choix de mode. Donc GSSFilter(params) renvoie bien imm_general sans avertissement. (6) Conséquence opérationnelle: j'ai croisé audit/03-paper-math.md — eq:S_jk (eq.22) est une CRITICAL confirmée et imm_general est précisément le mode dont la divergence sous (H5) est établie numériquement (max|Δπ|≈0.25-0.46, l.43-49). Le cadrage « un utilisateur suivant l'exemple obtient silencieusement le mode divergent en croyant exécuter le filtre exact (H5) » est donc factuellement fondé. Toutes les preuves citées tiennent; rien de spéculatif ni de mal lu. La trouvaille est réelle.",
+    "severityAdjustment": "Conserver medium (pas d'ajustement). C'est une incohérence de documentation (docstring de module/exemple vs signature), pas une erreur de logique du code ni de maths du papier — ce qui plaiderait pour low. Mais la conséquence est réelle et active: l'exemple étiqueté « (H5)-exact » oriente l'utilisateur vers le mode imm_general qui implémente l'eq:S_jk confirmée erronée (divergence numérique acquise). Cela rejoint la calibration déjà appliquée dans l'audit pour les incohérences de documentation qui « misguide practitioners between the two implemented modes » (gardées medium, cf. 03-paper-math.md l.97). Medium est cohérent, en bas-milieu de fourchette. Léger bémol de scoping: la dim « filter-remarks-vs-code » suggère une correspondance papier↔code, alors qu'il s'agit d'un écart code-interne (le finding le reconnaît honnêtement) — n'affecte pas la sévérité."
+   }
+  },
+  {
+   "title": "Docstring du module : « mode=h5_exact (default) » et exemple « (H5)-exact :: GSSFilter(params) » alors que le défaut du constructeur est imm_general — le mode divergent (acquis eq:S_jk) est sélectionné silencieusement",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Lentille CONTEXTE : trouvaille RÉELLE, sévérité medium bien calibrée. Tous les faits cités ont été vérifiés directement dans prg/filter/gss_filter.py : (a) le docstring de module L10 affirme « mode=\\\"h5_exact\\\" (default) — exact IMM recursion under hypothesis (H5) » ; (b) l'exemple L190-192 « Step-by-step, (H5)-exact:: » construit `GSSFilter(params)` avec le commentaire « # default mode, short form » ; (c) la signature du constructeur L206 fixe `mode: str = \\\"imm_general\\\"`, et le docstring de classe L172-178 dit correctement « default \\\"imm_general\\\" ». Le comportement opérationnel est confirmé : la branche du constructeur (L214-226) part en imm_general sans aucun avertissement quand mode≠h5_exact (seul joseph=True déclenche un logger.warning). Donc un utilisateur qui copie l'exemple du module obtient silencieusement imm_general.\n\nExamen CONTEXTE (choix éditorial défendable / convention annoncée ailleurs / exagération de sévérité) : NON sur les trois points. Ce n'est pas une convention défendable car le MÊME fichier se contredit (docstring de module vs docstring de classe + signature) ; c'est une erreur factuelle de documentation, pas un choix stylistique. La conséquence (faire tourner par défaut le mode imm_general en croyant exécuter le filtre exact H5) est non triviale car imm_general implémente littéralement eq.(22)/eq:S_jk — une trouvaille CRITICAL doublement confirmée dans 03-paper-math.md, avec divergence numérique établie sous (H5) (max|Δπ| ≈ 0.25-0.46). La contradiction est par ailleurs déjà confirmée indépendamment en vague 1 (audit/01-code-core.md:33-37) et VERROUILLÉE par un test qui passe, tests/test_gss_filter.py:455 `test_default_mode_is_imm_general`, qui établit objectivement que le vrai défaut est imm_general.\n\nCalibrage : medium est juste. Défaut de documentation uniquement (le code est cohérent en interne ; le docstring de classe est correct), donc ni HIGH ni CRITICAL ; mais l'impact (sélection silencieuse du mode prouvé divergent pour qui suit l'exemple-vedette) le place au haut de la fourchette medium, pas en low. Aucun doute sérieux justifiant isReal=false.",
+    "severityAdjustment": "Maintenir medium (haut de la fourchette). Défaut de documentation pur — le code et le docstring de classe sont cohérents, donc pas HIGH ; mais sélection silencieuse du mode divergent (eq:S_jk) en suivant l'exemple-vedette → au-dessus de low."
+   }
+  },
+  {
+   "title": "RMSE: paper definition non normalisée par q, code divise par N·q — valeurs M2 publiées plus petites d'un facteur √2",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Trouvaille MATHS confirmée sur tous les points vérifiables, après tentative de réfutation infructueuse.\n\nFAITS VÉRIFIÉS:\n1. Formule papier: RMSE = sqrt((1/N)·Σ‖x̂−x‖²), SANS normalisation par q (06_experiments.tex:144-145, lue directement). Apparaît une seule fois dans tout le papier; aucune convention « par dimension/composante » documentée ailleurs (grep exhaustif sur paper/).\n2. Code: compute_rmse retourne sqrt(Σ(x_true−x_est)²/(N·q)) (metrics.py:114), docstring explicite « normalised by the state dimension q » et « RMSE = sqrt((1/(N·q))·Σ‖·‖²) » (metrics.py:92-94).\n3. Chaîne de production confirmée: run_simulations.py:183 « rmse = compute_rmse(x_true, x_est) » alimente la table.\n4. Valeurs publiées M2 = 0.4595 / 0.4616 confirmées (tab_filter_M2M3.tex:13), modèle M2 a q=2 (légende « M2 ($K=2$, $q=s=2$) »).\n5. Facteur √2 vérifié par calcul: 0.4595·√2=0.6498, 0.4616·√2=0.6528, soit ≈0.650/0.653 comme annoncé. Pour M1/M3 (q=1) aucun écart, ce que la trouvaille reconnaît.\n6. La comparaison ordinale H5-exact < IMM reste valide (même normalisation des deux côtés), ce que la trouvaille admet explicitement.\n\nRÉFUTATION ÉCHOUÉE: La seule échappatoire serait une convention de normalisation par q documentée/implicite. Or non seulement elle est absente, mais l'item NEES juste en dessous (06_experiments.tex:146) utilise explicitement 1/(qN) — preuve que les auteurs savent écrire la normalisation par q et ne l'ont PAS fait pour le RMSE. C'est donc une vraie incohérence définition↔implémentation, pas un choix éditorial implicite.\n\nCALIBRAGE: medium correct. Discordance numérique réelle entre formule imprimée et nombres publiés (facteur √2 sur les chiffres M2 d'une table publiée = problème de reproductibilité/correction), mais sans invalider la conclusion scientifique (ordre des méthodes). Plus que cosmétique, moins que critique.",
+    "severityAdjustment": "none — medium confirmé"
+   }
+  },
+  {
+   "title": "RMSE: paper definition non normalisée par q, code divise par N·q — valeurs M2 publiées plus petites d'un facteur √2",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Trouvaille CONFIRMÉE par lecture directe (lentille MATHS). (1) Le papier imprime une seule définition: RMSE = sqrt((1/N)·Σ‖x̂−x‖²) sans normalisation par q (06_experiments.tex:144-145; aucune autre définition ni caveat 'par dimension' dans la section, vérifié par grep). (2) Le code calcule sqrt((1/(N·q))·Σ‖x̂−x‖²) — metrics.py:94 (docstring 'normalised by the state dimension q') et metrics.py:114 'np.sqrt(np.sum((x_true - x_est) ** 2) / (N * q))'. (3) Câblage confirmé: run_simulations.py:183 appelle compute_rmse, alimentant les tables. (4) Arithmétique vérifiée: paper = sqrt(q)·code. Pour M2 (q=2, cf. caption tab_filter_M2M3 'q=s=2'), les valeurs publiées 0.4595/0.4616 (tab_filter_M2M3.tex:13) valent 1/√2 de la définition imprimée; selon la formule du papier on lirait 0.4595·√2≈0.6499 et 0.4616·√2≈0.6528, soit ≈0.650/0.653 comme annoncé. (5) M1/M3 ont q=1 (tab_filter_M1 caption 'q=s=1', M3 q=s=1): les deux formules coïncident, donc leurs chiffres sont corrects sous les deux lectures — cohérent avec l'affirmation de la trouvaille. Aucune mauvaise lecture: lignes, formules, valeurs de table, facteur √2 et modèle affecté sont tous exacts. Sévérité 'medium' bien calibrée: incohérence définitionnelle réelle et publiée, mais la comparaison ordinale H5-exact vs IMM reste valide (même métrique des deux côtés) et seuls les chiffres absolus M2 (q>1) sont touchés — la trouvaille reconnaît elle-même cette limite. Pas de réfutation possible.",
+    "severityAdjustment": "none — medium confirmée"
+   }
+  },
+  {
+   "title": "Loi initiale de Z : papier = marginales stationnaires par régime, simulation = N(0, I) pour tous les régimes (non documenté en §6)",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Faits vérifiés directement dans le code et le .tex. (1) Simulation : Z_0|R_0=k ~ N(0, I_{q+s}) pour TOUS les régimes, confirmé pour les 3 modèles — models_paper.py:99-100 (M1), 169-170 (M2), 233-234 (M3), tous mu_z0=zeros et Sig_z0=eye ; consommé en n==0 par GSSSimulator.py:131-137 (z_0 = mu_z0(r_0) + chol(Sig_z0(r_0))@noise). (2) Filtre : initialisé aux moments STATIONNAIRES par régime — gss_filter.py:298-368, _precompute_stationary itère un point fixe μ(k),P(k) jusqu'à stationnarité (partant de mu_z0/Sigma_z0 mais convergeant vers le point fixe), docstring 300-302 « so that the initial step can start at the stationary distribution » ; confirmé côté papier en 06_experiments.tex:127-130 (« (μ_∞(k), P_∞(k)) are precomputed once by iterating ... to stationarity »). (3) §6 ne documente nulle part la loi initiale de simulation (μ_z0, Σ_z0) : le paragraphe « Monte-Carlo protocol » (06_experiments.tex:111-115) est muet sur ce point. (4) R_0 ~ π_∞ (pi0=None) cohérent. Donc il existe un VRAI écart : le générateur de données démarre hors-stationnarité (N(0,I)) tandis que le filtre s'initialise au régime stationnaire, et §6 ne documente pas ce choix — c'est un défaut de reproductibilité et une asymétrie filtre/générateur réels, factuellement établis.\n\nNuance adversariale (lentille MATHS) qui réduit la portée : le titre/cadrage s'appuie sur la Remark 1 (02_model_h5.tex:84-91) lue comme « le modèle du §2 suppose des marginales stationnaires (loi initiale figée) ». Or la Remark dit précisément que les marginales se FACTORISENT (p(x_n,r_n,y_n)=p(r_n)p(x_n,y_n|r_n) gaussien) et qualifie « stationary in the form of its marginals » par « in this sense » : c'est un énoncé sur la FORME factorisée, pas une invariance temporelle de la loi de Z_0. Le §2 ne fixe donc pas la loi initiale de Z ; N(0,I) est un choix de modélisation licite. L'argument « le §2 impose la stationnarité » est donc une sur-lecture. Mais le cœur factuel (filtre init stationnaire vs simulation N(0,I) ; §6 silencieux) survit indépendamment de cette lecture.\n\nImpact borné : avec P fortement persistant (diag ≈0.95-0.98) et F contractif, la convergence vers la stationnarité est géométrique/rapide ; pour les N utilisés, le transitoire de quelques pas est négligeable dans les moyennes temporelles RMSE/NEES/LB, et la finding concède elle-même que les conclusions ordinales (H5-exact < IMM) ne sont pas affectées. Le défaut concret est surtout une lacune de documentation + une légère incohérence d'initialisation, sans conséquence sur les conclusions. C'est donc réel et bien sourcé, mais « medium » surestime : « low » est mieux calibré (gap de doc/repro à impact numérique borné, correctif clair : initialiser la simulation aux moments stationnaires OU documenter le démarrage N(0,I)).",
+    "severityAdjustment": "medium -> low"
+   }
+  },
+  {
+   "title": "Loi initiale de Z : papier = marginales stationnaires par régime, simulation = N(0, I) pour tous les régimes (non documenté en §6)",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Lentille MATHS, dérivation refaite indépendamment sur le .tex et le code réels.\\n\\nFAITS VÉRIFIÉS (vrais): (1) 02_model_h5.tex:23-24 imprime bien la 2e condition de (H3) sans (x_n,y_n) dans aucun conditionnement: p(x_{n+1},y_{n+1}|r_n,r_{n+1}) = p(x_{n+1},y_{n+1}|r_{n+1}). (2) GSSSimulator.py:138-144 implémente Z_{n+1}=F_{r_{n+1}}Z_n+b_{r_{n+1}}+W, soit la version conditionnelle en z_n: p(z_{n+1}|z_n,r_n,r_{n+1})=p(z_{n+1}|z_n,r_{n+1}). (3) Lue comme une marginale (sur z_n), l'egalite imprimee est effectivement fausse pour le generateur, car E[Z_{n+1}|r_n=j,r_{n+1}=k]=F_k mu(j)+b_k et Var=F_k P(j) F_k^T+Sigma_{W,k} dependent de j; c'est d'ailleurs exactement pourquoi tout le filtre existe (03_filtering.tex:84-100, eq:reverse_P, etape de melange bar-mu).\\n\\nCE QUI EST MAL CALIBRE (these centrale surestimee): le finding affirme la divergence modele/generateur << quelle que soit la lecture >>. C'est FAUX. Sous la seule lecture mathematiquement coherente — la version conditionnelle en z_n, qui est la convention standard CGPMSM/TMC et celle sur laquelle repose toute la recursion §3 — le generateur SATISFAIT (H3) exactement. La lecture marginale litterale est incompatible avec le reste du papier (elle aneantirait l'etape de melange et toute la structure IMM), donc ne peut etre l'hypothese voulue. Il n'y a donc PAS de discordance modele-vs-code: c'est uniquement une omission notationnelle de (x_n,y_n) dans une barre de conditionnement.\\n\\nLe defaut reste reel et corrigeable exactement comme le << sugg >> du finding (ajouter z_n des deux cotes): tel qu'imprime, (H3) ligne 2 est, prise au pied de la lettre, une fausse assertion marginale, et notationnellement incoherente avec (H3) ligne 1 et le comparateur (H4) (l.34) qui ecrivent tous deux le passe continu (x_n,r_n,y_n) explicitement. Donc isReal=true, mais severite a ramener de medium vers low/info: imprecision de notation editoriale, non un ecart de fond modele-generateur.",
+    "severityAdjustment": "medium -> low (closer to info/editorial): real notational omission, but NOT a substantive model-vs-generator divergence"
+   }
+  },
+  {
+   "title": "(H3), 2e condition : conditionnement sur (x_n, y_n) absent dans le papier — le simulateur implémente la version conditionnelle en z_n",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Trouvaille VÉRIFIÉE et REELLE (lentille MATHS). Faits confirmés ligne par ligne dans le .tex et le code:\n\n1) (H3) 2e condition imprimée telle que citée — 02_model_h5.tex:23-25: « p(x_{n+1}, y_{n+1} | r_n, r_{n+1}) = p(x_{n+1}, y_{n+1} | r_{n+1}) », SANS (x_n, y_n) dans les conditionnements. Contraste avec la 1ère ligne de (H3) (l.21) qui, elle, conditionne explicitement sur (x_n, r_n, y_n) — l'asymétrie est donc manifeste.\n\n2) Le calcul de la trouvaille est correct. Sous eq:dynamics (l.58-62) Z_{n+1}=F_{r_{n+1}}Z_n+b_{r_{n+1}}+W_{n+1}, on a p(z_{n+1}|r_n=j,r_{n+1}=k) = N(F_k μ(j)+b_k, F_k P(j) F_k^T + Σ_{W,k}), qui dépend de j en général. La forme marginale imprimée de (H3) est donc FAUSSE pour le modèle simulé. Cela est corroboré par le papier lui-même: l'appendice B (B_h5_derivation.tex:15,70,100) traite explicitement p(z_n,z_{n+1}|r_n=j,r_{n+1}=k) comme dépendant de j (Σ_{YY,n+1}(k,j), « for all source regimes j »).\n\n3) Le simulateur implémente bien la version conditionnelle en z_n — GSSSimulator.py:140-144: z_n = F(r_n) @ z_prev + b(r_n) + L@noise, soit p(z_{n+1}|z_n,r_n,r_{n+1})=p(z_{n+1}|z_n,r_{n+1}). Cette forme conditionnelle est aussi celle écrite ailleurs dans le papier (D_baum_welch.tex:15: p(z_n|z_{n-1}, r_n=k)=N(F_k z_{n-1}+b_k, Σ_{W,k})). Le correctif suggéré (ajouter z_n des deux côtés) coïncide donc avec la convention déjà employée à l'appendice D.\n\nTentatives de réfutation épuisées: aucune convention de conditionnement implicite sur z_n n'est annoncée; même à stationnarité F_k μ_∞(j) varie avec j; la 1ère ligne de (H3) conditionne explicitement sur l'état, ce qui exclut une lecture où l'omission serait une convention cohérente. La trouvaille tient.\n\nCALIBRATION (medium -> low): défaut RÉEL mais purement notationnel/typographique (variables de conditionnement omises), sans aucune conséquence sur les dérivations ni les résultats numériques. La forme correcte/intentionnelle est déjà présente dans le même papier (appendice D et la 1ère ligne de (H3)), le modèle/filtre/simulateur sont mutuellement cohérents avec la lecture intentionnelle, et la présentation complète du modèle est explicitement renvoyée au papier compagnon (l.27-28). Correction d'une ligne, impact nul en aval -> sévérité low plus juste que medium.\n\nFichiers: /Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/paper/sections/02_model_h5.tex:21-26; /Users/MacBook_Derrode/Documents/ProjetsRecherche/Markov/FofGss/exactIMM/prg/classes/GSSSimulator.py:140-144; corroborations: paper/appendix/B_h5_derivation.tex:15,70,100-103 et paper/appendix/D_baum_welch.tex:15.",
+    "severityAdjustment": "medium -> low"
+   }
+  },
+  {
+   "title": "(H3), 2e condition : conditionnement sur (x_n, y_n) absent dans le papier — le simulateur implémente la version conditionnelle en z_n",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Trouvaille CONFIRMEE par vérification factuelle et mathématique directe.\n\nFAITS (tous vérifiés):\n1. Le papier imprime bien (H3) 2e condition exactement comme citée: \\pk{x_{n+1},y_{n+1}}{r_n,r_{n+1}} = \\pk{x_{n+1},y_{n+1}}{r_{n+1}} (02_model_h5.tex:23-25). Macro confirmée (macros.tex:38): \\pk{A}{B} = p(A|B). Donc aucun (x_n,y_n) dans le conditionnement. Transcription exacte.\n2. Le simulateur implémente z_n = F(r_n) z_{n-1} + b(r_n) + L(r_n)·noise avec F=F(r_n), L=chol_W(r_n) (GSSSimulator.py:140-144), i.e. p(z_{n+1}|z_n,r_n,r_{n+1}) = p(z_{n+1}|z_n,r_{n+1}) — version conditionnelle en z_n. Confirmé.\n\nCOEUR MATHEMATIQUE (confirmé): sous eq:dynamics, E[Z_{n+1}|r_n=j,r_{n+1}=k] = F_k·μ(j)+b_k dépend de j dès que F_k μ(j) varie avec j. Donc la forme MARGINALE imprimée p(z_{n+1}|r_n,r_{n+1})=p(z_{n+1}|r_{n+1}) NE tient PAS pour le processus simulé, alors que la forme conditionnelle (celle du code) tient. Divergence réelle entre l'hypothèse imprimée et le générateur de données.\n\nPREUVE INTERNE RENFORÇANTE: l'Annexe B (B_h5_derivation.tex:14-42) dérive (H5) en travaillant explicitement avec la loi conditionnelle p(z_n,z_{n+1}|r_n=j,r_{n+1}=k) et conserve la dépendance en j via la covariance croisée Cov(Z_{n+1},Z_n|j,k)=F_k·P(j) (eq:cov_noise) et le conditionnement de X_{n+1} sur (r_n=j,r_{n+1}=k,y_n,y_{n+1}) (eq:mean_X_linear). La machinerie réelle du papier utilise donc la forme conditionnelle-en-z_n, pas la forme marginale imprimée — ce qui corrobore que l'énoncé imprimé est imprécis/faux tel quel.\n\nRÉFUTATIONS TENTÉES (lens MATHS) et écartées: (a) « conditionnement (x_n,y_n) implicite » — non, la forme marginale imprimée est mathématiquement fausse sous les propres dynamiques du modèle; (b) « recap compact, modèle dans le papier compagnon » — défense éditoriale qui n'efface pas le fait que l'équation imprimée est, telle quelle, une contrainte marginale fausse. La trouvaille est réelle.\n\nCALIBRATION: severity medium -> low. Justification: il s'agit d'un défaut de conditionnement/notation dans un « compact recap » explicitement déféré au papier compagnon (02_model_h5.tex:7,28); le code fait le bon calcul; aucun impact numérique aval (distinct du CRITICAL eq:S_jk déjà acté). C'est une imprécision d'hypothèse imprimée, mieux calibrée en low. Correctif suggéré valide: ajouter z_n=(x_n,y_n) des deux côtés de la 2e égalité de (H3).",
+    "severityAdjustment": "medium -> low"
+   }
+  },
+  {
+   "title": "Comparateur du benchmark : décrit comme « IMM standard de Blom 1988 avec K sous-filtres de Kalman », mais le code exécute le mode imm_general (récursion générale du papier compagnon)",
+   "severity": "medium",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "medium",
+    "reasoning": "Lentille CONTEXTE. Faits vérifiés : (1) aucune implémentation de l'IMM de Blom ni module séparé n'existe (grep \"blom\" ne touche que paper/, code dans gss_filter.py uniquement) ; (2) la colonne « IMM-approx » des tables est bien produite par mode=\"imm_general\" — make_figures.py:217-218 lit mode==\"imm_general\" et l'en-tête ligne 234 l'étiquette « IMM-approx » ; run_simulations.py:64 DEFAULT_MODES=(\"h5_exact\",\"imm_general\") ; (3) le docstring du code (gss_filter.py:44-63) décrit imm_general comme « la récursion générale du papier compagnon CS_FinaleBis » et signale explicitement un mélange NON standard (postérieur filtré π_n au lieu des marginales a priori). Le mismatch protocole↔implémentation est donc RÉEL : §6.2.1 (06_experiments.tex:131-136) attribue le comparateur à « the standard approximate IMM of Blom 1988, which collapses the per-mode mixture in the state-mixing step », alors que l'algorithme réellement exécuté est la récursion générale du compagnon avec un mélange par postérieur filtré, et non l'IMM textbook de Blom.\n\nMAIS la trouvaille est mal calibrée (medium trop élevé), pour deux raisons CONTEXTE défendables : (a) la description « K sous-filtres de Kalman tournant en parallèle » est cohérente avec le cadrage de §3 (03_filtering.tex:10-12) qui présente TOUT le filtre — les deux modes — comme un IMM = banc de K filtres de Kalman ; et _update_step_general (gss_filter.py:760-868) EST bien une récursion IMM avec étape de mélange (lignes 765-786) et K mises à jour de Kalman régime-conditionnelles (852-865). Le comparateur est donc légitimement « un IMM approximatif à K filtres », pas un comparateur fabriqué ; (b) l'écart se réduit à une imprécision d'attribution (citation « standard Blom » + « collapses the mixture ») et à la pondération exacte du mélange — l'esprit de la description (IMM approximatif vs filtre exact) reste fidèle et les conclusions ordinales du benchmark (H5-exact ≥ IMM-approx) ne sont pas affectées. C'est une imprécision de rédaction/reproductibilité du protocole, sévérité low.",
+    "severityAdjustment": "medium -> low"
+   }
+  },
+  {
+   "title": "Comparateur du benchmark : décrit comme « IMM standard de Blom 1988 avec K sous-filtres de Kalman », mais le code exécute le mode imm_general (récursion générale du papier compagnon)",
+   "severity": "medium",
+   "lens": "CONTEXTE",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations factuelles sont vérifiées sur le code et le .tex réels, et le raisonnement statistique (lentille MATHS) est correct.\n\n(1) Définition papier : 06_experiments.tex:150-152 définit « LB pass (%) : fraction of runs where the Ljung–Box whiteness test (lag 20) does not reject the null of white innovations at level 0.05 », sans préciser le cas multivarié s>1. Confirmé qu'aucune autre partie du papier (sections/, appendix/, légendes de tables tab_filter_M1/M2M3) ne documente la convention multivariée — grep exhaustif négatif sur ljung/whiteness/bonferroni/component-wise/min-p. La « convention absente du papier » est donc exacte.\n\n(2) Code : metrics.py:173-225 (compute_ljung_box) applique le test composante par composante et retourne le MINIMUM des p-values ; la docstring (l.178-180) le dit explicitement (« the test is applied to each component independently and the *minimum* p-value is returned (conservative: rejection if any component is autocorrelated) »). make_figures.py:223 compte lb_pass = (g[\\\"lb_pval\\\"] > 0.05).mean()*100. Détail « dernier lag » aussi exact : metrics.py:217-219 prend res[\\\"lb_pvalue\\\"].iloc[-1].\n\n(3) Math du niveau effectif : rejeter le run dès qu'une des s=2 composantes rejette à 0.05 donne, sous l'hypothèse nulle et sous indépendance des composantes, P(au moins un rejet) = 1 − 0.95² = 1 − 0.9025 = 0.0975, et non 0.05. Calcul correct. Le finding hedge correctement (« explique EN PARTIE » le LB% plus bas de M2) car l'indépendance des deux composantes d'innovation est une idéalisation ; le niveau exact dépend de leur corrélation, mais le mécanisme d'inflation du niveau (problème de comparaisons multiples) est réel et oriente bien dans le sens observé.\n\n(4) Données cohérentes : tab_filter_M2M3.tex:13 affiche M2 (s=2) LB% 69%/70%, nettement sous M1 (≥92%) et M3 (s=1) 90%/91% — compatible avec un niveau de rejet effectif gonflé pour le seul modèle multivarié.\n\nCalibration : severity=low est juste. L'écart est une imprécision méthodologique/documentaire qui (i) n'invalide aucun théorème ni aucun chiffre « titre », (ii) n'affecte pas la comparaison ordinale H5-exact vs IMM (les deux modes utilisent la même convention), mais (iii) rend le LB% de M2 non comparable au niveau nominal 0.05 affiché et laisse une convention non documentée. Aucune exagération de sévérité. Le finding résiste à la réfutation adversariale.",
+    "severityAdjustment": "Aucun ajustement — severity=low correcte."
+   }
+  },
+  {
+   "title": "Ljung–Box multivarié : le code prend le min des p-values par composante (niveau effectif ≈0.0975 pour M2), convention absente du papier",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Vérification MATHS confirmée sur le .tex et le code réels. (1) Citation exacte: 02_model_h5.tex:21-25 imprime bien (H3) avec une asymétrie — 1re égalité p(r_{n+1}|x_n,r_n,y_n)=p(r_{n+1}|r_n) conditionne sur (x_n,y_n), mais la 2e égalité p(x_{n+1},y_{n+1}|r_n,r_{n+1})=p(x_{n+1},y_{n+1}|r_{n+1}) ne conditionne PAS sur (x_n,y_n). La citation de la trouvaille est fidèle. (2) Code confirmé: GSSSimulator.py:140-144 tire r_n~P[r_{prev}] (dépend de r_{n-1} seul, cohérent avec la 1re égalité) puis z_n=F(r_n)@z_prev+b(r_n)+L@noise avec F et chol_W ne dépendant que de r_n — soit p(z_{n+1}|z_n,r_n,r_{n+1})=p(z_{n+1}|z_n,r_{n+1}), version conditionnelle en z_n. (3) Maths refaites: sous eq:dynamics (l.58-62), p(z_{n+1}|r_n=j,r_{n+1}=k)=N(F_k μ(j)+b_k, F_k P(j) F_k^T+Σ_{W,k}) qui dépend de j via μ(j)/P(j) (génériquement non constants entre régimes); donc la contrainte MARGINALE telle qu'imprimée n'est pas satisfaite par le processus simulé. La trouvaille est mathématiquement correcte, ce n'est ni spéculatif ni une mauvaise lecture. (4) Élément renforçant isReal: Appendix B (B_h5_derivation.tex:14-26) déclare lui-même travailler sur la loi JOINTE p(z_n,z_{n+1}|r_n,r_{n+1}) « avec Z_n|r_n=j de covariance P(j) » — c.-à-d. en conditionnant sur z_n — ce qui contredit la forme marginale imprimée en (H3) et corrobore que l'omission de (x_n,y_n) est un lapsus de notation, pas l'intention. CONTRE-ARGUMENTS (recalibrage, pas réfutation): la §2 est explicitement un « Compact recap — full presentation is in the companion paper » (l.7,28), l'erreur est une omission de variables de conditionnement (probable coquille), et surtout elle ne se PROPAGE PAS: la dérivation de la contrainte H5 (App B), la Proposition de markovianité, le filtre et les expériences reposent tous sur la loi jointe conditionnée en z_n et restent corrects. Aucun résultat n'est affecté. C'est donc un défaut notationnel réel et localisé dans une section de rappel, sans impact aval — la sévérité medium est légèrement surévaluée; low est mieux calibré. Le correctif proposé (ajouter z_n=(x_n,y_n) des deux côtés) est exact.",
+    "severityAdjustment": "medium -> low"
+   }
+  },
+  {
+   "title": "CPU (µs/step) : le chronométrage inclut la simulation des données, pas seulement le filtre",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Lentille MATHS — toutes les affirmations factuelles vérifiées dans les fichiers réels :\n\n(1) CODE : prg/experiments/metrics.py:173-225, compute_ljung_box applique le test composante par composante et retourne le MINIMUM des p-values (boucle for i in range(s) lignes 210-223 ; min_pval = min(min_pval, pval) ligne 223 ; docstring explicite 178-180 « the test is applied to each component independently and the *minimum* p-value is returned »). Confirmé. Prend la p-value au DERNIER lag (res[\"lb_pvalue\"].iloc[-1], ligne 219), cohérent avec « lag 20 » mais non explicité. Confirmé.\n\n(2) USAGE : make_figures.py:223, lb_pass = (g[\"lb_pval\"] > 0.05).mean() — donc une run « passe » ssi min_pval > 0.05, c.-à-d. rejet ssi AU MOINS une composante rejette à 0.05. Confirmé.\n\n(3) PAPIER : 06_experiments.tex:150-152, « LB pass (%): fraction of runs where the Ljung–Box whiteness test (lag 20) does not reject the null of white innovations at level 0.05 » — aucune mention du cas multivarié s>1. Confirmé. La convention min-p n'apparaît nulle part dans le papier (seulement dans le docstring du code).\n\n(4) CALCUL DU NIVEAU EFFECTIF : règle d'union sur s=2 composantes → P(au moins un rejet) = 1 − (1−0.05)^2 = 1 − 0.9025 = 0.0975 SOUS INDÉPENDANCE. Le calcul 1−0.95²≈0.0975 est mathématiquement correct.\n\n(5) VALEURS : tab_filter_M2M3.tex:13-14 → M2 (s=2) LB% = 69/70%, M3 (s=1) = 90/91% ; M1 (s=1) ≥92% (06_experiments.tex:164). L'écart M2 vs scalaires est réel. Confirmé.\n\nExamen adversarial : le chiffre 0.0975 suppose l'INDÉPENDANCE des deux statistiques de test composante ; les innovations de M2 sont en général corrélées, donc le niveau effectif réel est compris entre 0.05 (corrélation parfaite) et 0.0975 (indépendance) — 0.0975 est en fait une borne supérieure. MAIS la trouvaille écrit explicitement « ≈ 0.0975 » et « explique EN PARTIE » le LB% plus bas de M2 : elle ne sur-affirme ni l'exactitude du chiffre ni la causalité unique. C'est honnête et calibré.\n\nIl s'agit donc d'un VRAI écart papier↔code sous la lentille MATHS : la définition imprimée (« test à 0.05 ») ne correspond pas à la statistique réellement calculée pour s>1 (union de s tests → niveau gonflé), avec une conséquence mesurable (la colonne LB% de M2 n'est pas au niveau nominal 0.05, donc non directement comparable aux modèles scalaires). La sévérité « low » est bien calibrée : les conclusions ordinales (H5-exact vs IMM) sont intactes ; seule l'interprétation absolue et la comparabilité inter-modèles du LB% de M2 sont affectées. Le correctif proposé (documenter la convention min-p ou appliquer Bonferroni 0.05/s) est pertinent.",
+    "severityAdjustment": null
+   }
+  },
+  {
+   "title": "Résidu H5 des modèles : papier = norme absolue < 1e-10, code = résidu RELATIF < 1e-8",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Lentille MATHS — j'ai vérifié chaque affirmation contre les fichiers réels et tout tient.\n\nFAITS (tous confirmés):\n- Papier (06_experiments.tex:150-152): « LB pass (%): fraction of runs where the Ljung–Box whiteness test (lag 20) does not reject the null of white innovations at level 0.05 » — aucune précision du cas multivarié s>1. Confirmé verbatim.\n- Code (metrics.py:173-225): le test est appliqué composante par composante et retourne le MINIMUM des p-values (docstring l.178-180 « the test is applied to each component independently and the *minimum* p-value is returned (conservative: rejection if any component is autocorrelated) »; boucle l.209-223 avec min_pval = min(min_pval, pval)). Confirmé.\n- make_figures.py:223: lb_pass = (g[\"lb_pval\"] > 0.05).mean()*100. Confirmé. Donc un run « passe » ssi TOUTES les composantes ont p>0.05 (min>0.05).\n- M2 a bien s=2 (models_paper.py:135 « K, q, s = 2, 2, 2 »); M1 et M3 ont s=1.\n- Valeurs publiées: M2 LB% = 69%/70% (tab_filter_M2M3.tex:13) vs M1 92-97% (tab_filter_M1.tex:13-15) et M3 90%/91% (tab_filter_M2M3.tex:14). Le contraste cité est exact.\n- Dernier lag seulement (metrics.py:217-219, p-value à .iloc[-1]), cohérent avec « lag 20 » mais non explicité dans le papier. Confirmé.\n\nMATHS du niveau effectif: rejeter si l'une des 2 composantes rejette à 5% donne, sous indépendance, 1 − 0.95² = 0.0975. Arithmétique correcte. L'indépendance des deux composantes d'innovation est une approximation, mais la trouvaille écrit « ≈ 0.0975 » et présente l'effet comme explication PARTIELLE (« explique en partie »), donc pas de surinterprétation.\n\nCALIBRATION: severity « low » justifiée. C'est un problème de convention non documentée / niveau nominal non comparable entre modèles scalaires et M2, pas une erreur numérique invalidant les résultats. La comparaison ordinale H5-exact vs IMM au sein de M2 reste valide (même convention des deux côtés). La sugg (documenter min-p ou correction de Bonferroni 0.05/s) est pertinente.\n\nImprécision mineure sans impact: l'evid cite metrics.py:191-194 pour le texte min-p, alors que le texte opérationnel est aux l.178-180 (les l.194-195 confirment quand même « Minimum p-value across all observation components »). N'affecte pas la conclusion.",
+    "severityAdjustment": "Aucune — severity « low » correcte. Trouvaille réelle, bien étayée et correctement calibrée (effet de tests multiples sur le niveau effectif + convention min-p absente du papier, présentée comme explication partielle)."
+   }
+  },
+  {
+   "title": "M2 : la matrice de transition P n'est jamais donnée dans le papier (le code utilise celle de M1)",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Toutes les affirmations de la trouvaille (lentille MATHS) sont vérifiées dans les fichiers réels. (1) Le papier (06_experiments.tex:150-152) définit « LB pass : fraction of runs where the Ljung–Box whiteness test (lag 20) does not reject at level 0.05 » sans préciser le cas s>1 ; un grep sur tout paper/ confirme qu'aucune convention multivariée (min-p, Bonferroni, composante par composante) n'y figure. (2) Le code applique bien le test composante par composante et retourne le MINIMUM des p-values (metrics.py:179-180 docstring « the minimum p-value is returned (conservative: rejection if any component is autocorrelated) » ; boucle min_pval=min(min_pval,pval) lignes 209-223). (3) make_figures.py:223 compte (g[\\\"lb_pval\\\"]>0.05).mean() : un run « passe » ssi le min des p-values > 0.05, donc rejet si UNE composante rejette — exactement la règle d'union décrite. (4) M2 a s=2 (models_paper.py:135 K,q,s=2,2,2), donc sous l'hypothèse nulle de deux composantes blanches indépendantes le niveau effectif de rejet par run ≈ 1−0.95² = 0.0975, conforme au chiffre avancé ; les valeurs M2 (LB% 69/70) et M1/M3 (≥90/91) correspondent bien aux tables générées (tab_filter_M2M3.tex:13-14, tab_filter_M1, et 06_experiments.tex:164). (5) Le code prend la p-value au DERNIER lag (metrics.py:218-219 « Take the p-value at the last lag »), cohérent avec « lag 20 » mais non explicité — confirmé. La trouvaille est donc factuellement exacte et n'est pas un choix éditorial annoncé ailleurs. Le cadrage « explique en partie » le LB% plus bas de M2 est correctement nuancé (M2 est aussi plus difficile/multivarié). La sévérité « low » est bien calibrée : écart méthodologique/documentaire réel affectant la comparabilité d'une colonne diagnostique secondaire (le niveau nominal effectif diffère entre modèles scalaires et M2), sans erreur de correction du filtre ni invalidation d'un résultat principal.",
+    "severityAdjustment": "Aucun ajustement : la sévérité « low » est appropriée. C'est une lacune de documentation/comparabilité (convention d'agrégation multivariée non spécifiée, niveau effectif gonflé pour s>1), pas une erreur de correction. Correctif suggéré pertinent : documenter la convention min-p ou appliquer Bonferroni (0.05/s) et noter que le LB% de M2 n'est pas comparable au niveau nominal des modèles scalaires."
+   }
+  },
+  {
+   "title": "BIC : ℓ*_K défini comme log-vraisemblance MAXIMISÉE mais calculé avec les paramètres VRAIS ; dof compte le biais pour M2/M3 où b est fixé à 0",
+   "severity": "low",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Lentille MATHS — j'ai refait la vérification factuelle ligne par ligne sur le .tex et le code, et les deux sous-affirmations tiennent.\n\n(a) MISLABEL CONFIRMÉ. Le papier écrit BIC(K)=d_H5(K,q,s)·log N − 2·ℓ*_K « where ℓ*_K is the MAXIMISED log-likelihood under the K-regime H5-constrained model » (06_experiments.tex:382-384). Or run_simulations.py:151 construit le filtre sur les paramètres VRAIS (GSSFilter(params) avec params=get_params(model_name)), accumule log_lik_total += result.log_lik (l.171), puis appelle compute_bic(log_lik_total, N, K, q, s) (l.187). Aucun ajustement / EM nulle part. La quantité injectée est donc la log-vraisemblance plug-in/oracle ℓ(θ_vrai), pas la maximisée ℓ(θ̂_MLE) ; mathématiquement ℓ(θ_vrai) ≤ ℓ*, les deux diffèrent en général. Le BIC̄₂=1846.8 publié (l.386-388) est donc un BIC oracle, pas un BIC à vraisemblance maximisée — le libellé « maximised » est incorrect. Affirmation réelle.\n\n(b) SUR-COMPTAGE DDL CONFIRMÉ EN CODE. dof_h5 compte (q+s) ddl de biais par régime sans condition : per_regime = q*s + s**2 + dim_z*(dim_z+1)//2 + dim_z, dim_z=q+s (metrics.py:80-82), identique à eq:bic_d (06_experiments.tex:369) et à l'exemple d_H5(2,1,1)=17 (l.380, doctest l.75-76). M2 (K=2,q=2,s=2) a b_list=[zeros,zeros] (models_paper.py:168) → K·(q+s)=2·4=8 ddl comptés mais b≡0 : sur-comptage de 8, exactement la valeur du finding. M3 (K=3,q=1,s=1) fixe b^(2)=0 (models_paper.py:230) → 2 ddl de trop. compute_bic est bien appelé sans condition pour tous les modèles (run_simulations.py:187).\n\nCALIBRATION (low) JUSTIFIÉE et bien hedgée. Le papier ne PUBLIE le BIC que pour M1 (l.386-388), où b est réellement libre (b_list non nuls, models_paper.py:95-98) — donc le sur-comptage M2/M3 ne corrompt AUCUN nombre publié, ce que le finding reconnaît explicitement (« SI ces BIC étaient publiés »). De plus toute la §6 BIC est annoncée comme préliminaire/différée à une étude compagnon et « does not affect the theoretical contributions » (l.389-393). Impact réel limité : mislabel sémantique + bookkeeping latent dans une sous-section flaggée préliminaire. La sévérité « low » est correcte ; le correctif proposé (qualifier de « plug-in/oracle BIC » et soustraire les ddl des blocs nuls) est pertinent. Aucun ajustement nécessaire.",
+    "severityAdjustment": null
+   }
+  },
+  {
+   "title": "Le protocole BIC évoque des modèles K=1, mais GSSParams rejette K < 2",
+   "severity": "info",
+   "lens": "MATHS",
+   "timestamp": "4a-batch2",
+   "verdict": {
+    "isReal": true,
+    "confidence": "high",
+    "reasoning": "Lentille MATHS — j'ai refait la vérification factuelle sur les .tex et le code.\n\nSous-claim (a) [VÉRIFIÉ, central]: le papier définit BIC(K)=d_H5·log N − 2·ℓ*_K avec « ℓ*_K is the maximised log-likelihood under the K-regime H5-constrained model » (06_experiments.tex:382-384). Or la valeur publiée BIC̄₂=1846.8 (l.387) provient de run_simulations.run_one_trial qui accumule log_lik_total via un filtre construit sur les paramètres VRAIS (GSSFilter(params), aucune estimation/EM ; run_simulations.py:160-187) puis appelle compute_bic (pénalité dof_h5=17). C'est donc une log-vraisemblance plug-in/oracle, pas une vraisemblance MAXIMISÉE. Corroboration indépendante décisive: le docstring du code lui-même (make_figures.py make_tab_bic, l.306-310) admet « the BIC here comes from the *true* K=2 filter log-likelihood penalised by the DOF of a fitted K-regime model. This is only a rough BIC approximation; for a proper BIC the EM should be run for each K… placeholder… will be replaced by EM-based BICs ». L'écart papier↔code est réel.\n\nSous-claim (b) [VÉRIFIÉ comme mécanisme, hedgé correctement]: M2 a b_list=zeros (models_paper.py:168 ; papier l.55-56 « All biases are set to zero »), M3 fixe b^(2)=0 (models_paper.py:230) ; compute_bic est appelé sans condition et dof_h5 (metrics.py:80-82) compte (q+s) biais par régime, soit 8 ddl surcomptés pour M2 si son BIC était publié. La trouvaille hedge explicitement « si ces BIC étaient publiés » : j'ai vérifié qu'AUCUN BIC M2/M3 n'est publié (tab_bic.tex ne couvre que M1 K=1..4 et n'est même pas \\\\input dans le papier ; le texte ne cite que la valeur M1 1846.8). Le surcomptage est donc latent dans le code mais ne corrompt aucun nombre imprimé — la trouvaille le reconnaît.\n\nVérifications annexes: la formule dof_h5 du code est strictement identique à eq:bic_d (06_experiments.tex:367-380), exemple dof_h5(2,1,1)=17 conforme.\n\nConclusion: trouvaille exacte et honnêtement calibrée. La comparaison ordinale n'est pas revendiquée (aucune sélection d'ordre publiée), l'impact est limité à la précision/reproductibilité d'un seul nombre cité dans une sous-section qui diffère explicitement la vraie sélection BIC à une étude compagnon. Pas un choix éditorial défendable car la définition imprimée (« maximised log-likelihood ») contredit directement le calcul effectif (paramètres vrais).",
+    "severityAdjustment": "Severity low confirmée et bien calibrée. Aucun ajustement. La discordance définition/calcul est réelle (sous-claim a, corroborée par le commentaire du code) mais sans conséquence théorique et sans nombre M2/M3 publié affecté ; impact = reproductibilité/précision d'une seule valeur dans une sous-section déjà marquée comme différée."
+   }
+  }
+ ],
+ "_dimtitles": {
+  "estimation-vs-code": "Section 5 + annexe D ↔ prg/learning/",
+  "filter-remarks-vs-code": "Remarques §3 + annexe E ↔ prg/filter/gss_filter.py",
+  "model-defs-vs-code": "Définitions §2 et §6 ↔ classes & modèles"
+ }
+}

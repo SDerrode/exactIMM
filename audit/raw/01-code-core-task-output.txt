@@ -1,0 +1,1057 @@
+{
+  "summary": "Audit du cœur scientifique: filtre, contrainte H5/AB, classes, apprentissage",
+  "agentCount": 69,
+  "logs": [
+    "Audit du cœur scientifique : 4 dimensions en parallèle",
+    "Terminé: 48 trouvailles (47 confirmées, 0 incertaines, 1 réfutées)"
+  ],
+  "result": [
+    {
+      "dimension": "filter-math",
+      "scope_summary": "Audit complet de prg/filter/gss_filter.py (1136 lignes) et prg/filter/main.py (319 lignes), avec vérification croisée contre prg/utils/h5_constraint.py, prg/classes/GSSParams.py, le papier (sections/02_model_h5.tex, 03_filtering.tex) et des expériences numériques dans le venv du projet (scipy 1.17.1, numpy 2.4.4). Le mode h5_exact est mathématiquement correct et conforme au papier : gains, P_post (formes courte et Joseph équivalentes), moyennes/covariances de paire (M̃ = C_k K_j + D_k, Γ = C_k P_post C_kᵀ + Σ_V), normalisations log-sum-exp avec replis sains ; le chemin rapide Cholesky est exactement équivalent à scipy (1.8e-15 end-to-end) et n'est utilisé que là où Γ est time-invariant. Le problème principal est dans le mode imm_general (défaut, et seul mode accessible via la CLI) : la covariance prédictive de paire mélange la variance marginale du mélange régime-k avec la cross-covariance pair-(j,k), produisant des Γ indéfinis (12.5% des paires sur le modèle contrast, pire vp −6.9) que _psd_floor écrase à 1e-9 en gaussiennes quasi-dégénérées — d'où des π pouvant diverger de 0.46 du filtre exact même sous (H5). S'y ajoutent des incohérences de documentation (le docstring de module annonce h5_exact comme défaut), l'absence d'option --mode dans la CLI (rendant --constraint + filtre exact impossible), et des validations d'entrée manquantes (longueur de y, NaN ; observations manquantes non gérées). Santé globale : cœur h5 solide et bien testé ; mode général numériquement fragile sur modèles à covariances contrastées.",
+      "findings": [
+        {
+          "file": "prg/filter/gss_filter.py",
+          "line": "793-821",
+          "severity": "high",
+          "category": "math",
+          "title": "imm_general : Γ(j,k) construit avec une variance marginale mélangée — fréquemment non-PSD, puis écrasé à 1e-9",
+          "description": "Dans _update_step_general, la covariance prédictive de paire est Γ = S_YY_np1 − M_t·Covᵀ où S_YY_np1 = Var(Y_{n+1} | r_{n+1}=k) est la variance du MÉLANGE sur r_n (incluant le terme de dispersion des moyennes inter-régimes), tandis que Cov_Ynp1_Yn = (F_k Σ_n(j))[q:,q:] est conditionnelle à la paire (j,k). Le conditionnement gaussien exige les trois moments sous le MÊME conditionnement ; la formule cohérente est Var(Y_{n+1}|j,k) = (F_k Σ_n(j) F_kᵀ + Σ_W(k))[q:,q:], qui rend Γ un complément de Schur, PSD par construction. La version implémentée (fidèle à l'éq. (S_jk) du papier, sections/03_filtering.tex) produit des Γ indéfinis : mesuré sur model_gss_K2_q1_s1_contrast, 1001/7996 paires (j,k) ont une valeur propre négative avant le floor (pire : −6.94). _psd_floor les écrase alors à 1e-9, créant une gaussienne quasi-dégénérée dont la log-vraisemblance explose (log-normalisation ≈ +10 par direction écrasée ; scipy allow_singular garde la direction 1e-9 car son cutoff ≈ 2e-10·max), ce qui distord brutalement la mise à jour de π. C'est exactement le biais systématique que le commentaire des lignes 439-443 documente et corrige... uniquement pour h5_exact. Conséquence mesurée : même sous (H5) (modèle contrast + apply_AB_constraint), imm_general diverge de h5_exact avec max|Δπ| = 0.46 et −7.3 nats de log-vraisemblance sur 1000 pas. imm_general est le mode PAR DÉFAUT, le seul accessible depuis la CLI (main.py:247) et celui utilisé par scripts/e3_bw_em.py:113.",
+          "evidence": "L809: Gamma = _psd_floor(_sym(S_YY_np1 - M_t @ Cov_Ynp1_Yn.T)) avec S_YY_np1 = Sig_np1[q:, q:] (mélange sur r_n, L793-794) mais Cov_Ynp1_Yn = (F @ Sig_n)[q:, q:] (conditionnel à r_n=j, L807). Expérience : 1001/7996 Γ pré-floor indéfinis (pire vp −6.94) sur model_gss_K2_q1_s1_contrast ; max|π_h5 − π_general| = 0.464 sous (H5).",
+          "suggestion": "Remplacer S_YY_np1 par la variance pair-conditionnelle (F_k Σ_n(j) F_kᵀ + Σ_W(rnp1))[q:, q:] dans le calcul de Γ (complément de Schur ⇒ PSD garanti, plus de dépendance au _psd_floor). Si la fidélité au papier prime, corriger aussi l'éq. (S_jk) du papier — le commentaire L439-443 du code démontre déjà que la version mélangée biaise systématiquement un régime.",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur le code réel. (1) Lignes exactes: L793-794 S_YY_np1 = bloc Y de Sig_np1, variance du mélange sur r_n (P_np1 construit via w_P mixé L778, inclut la dispersion des moyennes); L807 Cov_Ynp1_Yn conditionnel à r_n=j; L809 Gamma = _psd_floor(S_YY_np1 − M_t·Covᵀ) — conditionnements incohérents confirmés. (2) Le commentaire L426-443 (h5_exact uniquement) dérive la formule pair-conditionnelle correcte (L461) et documente explicitement le biais de la version marginale. (3) Le papier (03_filtering.tex:174, eq S_jk) utilise bien Σ_{YY,n+1}(k) marginal — le code est fidèle au papier, qui partage l'erreur. (4) _psd_floor eps=1e-9; lognorm d'une direction 1e-9 = +9.44 nats ≈ \"+10\". (5) imm_general est le défaut (L206), seul mode du CLI (prg/filter/main.py:247, GSSFilter(params) sans mode) et de e3_bw_em.py:113. (6) Reproduction expérimentale (seed 42, N=1000, contrast + apply_AB_constraint): 693 Γ pré-floor indéfinis (pire vp −1.27), max|Δπ| = 0.245, −6.1 nats vs h5_exact — mêmes ordres de grandeur que les chiffres avancés (seed différent). (7) Test décisif du correctif: en remplaçant uniquement S_YY_np1 par (F Σ_n(j) Fᵀ + Σ_W(k))[q:,q:], 0/3920 Γ indéfinis et imm_general coïncide avec h5_exact à la précision machine (max|Δπ|=2.9e-15, Δll=2.3e-13) — preuve que la formule Γ est l'unique source de divergence sous (H5) et que le correctif proposé est exact. Sévérité high justifiée: chemin de filtrage par défaut, distorsion systématique de π et de la vraisemblance. Seule imprécision mineure: \"main.py:247\" sans le préfixe prg/filter/.",
+              "severityAdjustment": ""
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits sont confirmés sur le code réel. (1) gss_filter.py L793-809 : Γ = S_YY_np1 − M_t·Covᵀ mélange bien une variance marginale sur r_n (S_YY_np1, issue des moments mixés w_P/w_mu) avec une covariance pair-conditionnelle (Cov = (F·Σ_n(j))[q:,q:]) — conditionnements incompatibles. (2) Le papier (03_filtering.tex, éq. S_jk L169-175) contient la même formule ; le code y est fidèle. (3) Le commentaire L431-443 documente exactement ce biais et le corrige uniquement pour h5_exact (L461). (4) Chemin d'impact réel : mode par défaut = \"imm_general\" (L206), CLI prg/filter/main.py:247 construit GSSFilter(params) sans option --mode, scripts/e3_bw_em.py:113 utilise imm_general. (5) Reproduction numérique (contrast + apply_AB_constraint, seeds 0/1/42) : 12-16% des Γ pré-floor indéfinis (pire vp −2,2 sur mes seeds ; le −6,94 de la trouvaille est dépendant du seed mais du même ordre), max|Δπ| = 0,25-0,46 (trouvaille : 0,46), déficit de log-vraisemblance −4 à −9 nats / 1000-2000 pas (trouvaille : −7,3). (6) Test causal décisif : en remplaçant Γ par la forme pair-conditionnelle (complément de Schur) proposée, imm_general coïncide avec h5_exact à la précision machine sous (H5) (max|Δπ| = 0.000000, Δll = 0.0000 nats, zéro Γ négatif) — la divergence est donc imputable à 100% à cette formule, et le correctif proposé est validé. Seule imprécision mineure : les chiffres exacts (1001/7996, −6,94) ne sont pas reproduits à l'identique faute de seed spécifié, mais l'ordre de grandeur et le phénomène sont robustes sur tous les seeds testés. Sévérité high justifiée : mode par défaut et seul mode CLI, sortie principale (π, log-vraisemblance) distordue, bug présent aussi dans l'équation du papier."
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/gss_filter.py",
+          "line": "10, 190-199 vs 172-175, 206",
+          "severity": "medium",
+          "category": "api",
+          "title": "Docstring de module contradictoire : annonce h5_exact comme mode par défaut alors que le défaut réel est imm_general",
+          "description": "Le docstring de module (L10) dit « ``mode=\"h5_exact\"`` (default) » et l'exemple L190-193 présente `filt = GSSFilter(params)` sous le titre « Step-by-step, (H5)-exact », alors que la signature (L206 : mode: str = \"imm_general\") et le docstring de classe (L172) fixent le défaut à imm_general — confirmé par tests/test_gss_filter.py::test_default_mode_is_imm_general. Un utilisateur suivant le docstring de module croit exécuter le filtre exact alors qu'il exécute le filtre approché (avec le biais du finding Γ ci-dessus).",
+          "evidence": "L10: ``mode=\"h5_exact\"`` (default) — exact IMM recursion under hypothesis (H5)\" ; L192: `filt = GSSFilter(params)  # default mode, short form` sous l'en-tête « Step-by-step, (H5)-exact:: » ; L206: `mode: str = \"imm_general\"`.",
+          "suggestion": "Corriger L10 en ``mode=\"imm_general\"`` (default) et passer mode=\"h5_exact\" explicitement dans l'exemple L192.",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes, vérifiées sur le code réel. prg/filter/gss_filter.py L10 dit verbatim « ``mode=\"h5_exact\"`` (default) » dans le docstring de module ; l'exemple L190-192 sous l'en-tête « Step-by-step, (H5)-exact:: » utilise `filt = GSSFilter(params)  # default mode, short form` ; or la signature L206 est `mode: str = \"imm_general\"` et le docstring de classe L172/L175 marque imm_general comme défaut. Le test tests/test_gss_filter.py:455 (test_default_mode_is_imm_general) confirme que GSSFilter(params).mode == \"imm_general\". L'exemple étiqueté « (H5)-exact » construit donc en réalité le filtre IMM approché, et le commentaire « default mode » renforce l'erreur amorcée en L10. La contradiction interne du docstring est réelle et le piège utilisateur décrit est plausible (le docstring de module est la première documentation lue, et la distinction exact/approché est le cœur du paquet « exactIMM »). Sévérité medium correctement calibrée : impact documentation uniquement (aucun défaut d'exécution), mais induit l'utilisateur en erreur sur la fonctionnalité centrale. Le correctif proposé (corriger L10 et passer mode=\"h5_exact\" explicitement en L192) est adéquat."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits sont vérifiés mot pour mot dans prg/filter/gss_filter.py : L10 annonce « mode=\"h5_exact\" (default) », la signature L206 fixe mode=\"imm_general\", le docstring de classe L172/175 confirme imm_general comme défaut, et l'exemple L190-192 sous l'en-tête « Step-by-step, (H5)-exact:: » montre `GSSFilter(params)  # default mode, short form` — qui exécute en réalité imm_general. Le test tests/test_gss_filter.py:455 (test_default_mode_is_imm_general) verrouille le défaut. Le scénario d'impact est atteignable et silencieux : aucun warning n'est émis en mode imm_general, donc un utilisateur suivant le docstring de module ou copiant l'exemple croit exécuter le filtre exact alors qu'il exécute l'IMM approché (différence reconnue « significant in transient regimes » par le docstring lui-même, L59-63). Pour un code nommé exactIMM dont l'exactitude est la contribution scientifique du papier accompagnant, medium est justifié bien que ce soit un bug de documentation pure. Correctif proposé correct et minimal."
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/main.py",
+          "line": "247 (et 176-181)",
+          "severity": "medium",
+          "category": "api",
+          "title": "CLI : aucune option --mode/--joseph — le filtre exact h5 est inatteignable, même avec --constraint",
+          "description": "main() construit toujours `GSSFilter(params)` (L247), donc mode=imm_general. Le flag --constraint (L176-181) applique la contrainte AB pour rendre le modèle (H5)-compatible « before filtering », mais le filtrage qui suit reste le filtre IMM approché — la combinaison naturelle --constraint + h5_exact (la raison d'être du papier) est impossible depuis la CLI. Le GUI (prg/gui/workers.py:78) expose mode et joseph ; seule la CLI est limitée.",
+          "evidence": "main.py L247: `filt = GSSFilter(params)` — aucun argument mode ; _build_parser ne définit ni --mode ni --joseph alors que --constraint existe (L176).",
+          "suggestion": "Ajouter --mode {imm_general,h5_exact} (et éventuellement --joseph) au parser, et envisager mode='h5_exact' implicite quand --constraint est passé (ou au minimum le documenter).",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées exactes : main.py L247 construit `GSSFilter(params)` sans argument mode/joseph ; le défaut du constructeur est mode='imm_general' (gss_filter.py L206), donc la CLI exécute toujours le filtre IMM approché. _build_parser (L124-191) ne définit ni --mode ni --joseph ; --constraint existe bien (add_argument L175-181) et applique apply_AB_constraint avant filtrage (L232-242), mais le mode reste imm_general — la combinaison contrainte AB + filtre exact h5 est impossible depuis la CLI, et aucun fallback via config.toml n'existe (seuls log_level et paths sont lus). Le GUI expose bien les deux paramètres (workers.py L78 : GSSFilter(self._params, joseph=self._joseph, mode=self._mode)). Détail aggravant : la docstring de gss_filter.py (L10) prétend que h5_exact est le défaut alors que c'est imm_general, ce qui peut induire un utilisateur CLI en erreur. Sévérité medium correcte : pas de bug de justesse (l'IMM général produit des résultats valides), mais la fonctionnalité phare du papier est inatteignable depuis la CLI."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits sont confirmés dans le code réel. (1) prg/filter/main.py:247 construit bien `filt = GSSFilter(params)` sans argument mode, et le constructeur (prg/filter/gss_filter.py:202-206) a `mode: str = \"imm_general\"` par défaut — confirmé aussi par tests/test_gss_filter.py::test_default_mode_is_imm_general. (2) _build_parser (main.py:124-191) ne définit ni --mode ni --joseph, mais définit --constraint (L176-181). (3) Le GUI expose bien mode et joseph (prg/gui/workers.py L78: `GSSFilter(self._params, joseph=self._joseph, mode=self._mode)`; combo de mode dans prg/gui/main_window.py:263). (4) Le scénario d'impact est trivialement atteignable: `python -m prg.filter.main --model M --constraint -N 1000` applique la contrainte AB puis exécute silencieusement le filtre IMM approché. L'impact est aggravé par le fait que la docstring du module et la description du parser annoncent « Run the GSS fast optimal filter » alors que le mode exécuté est l'approximation IMM — les deux modes sont des récursions réellement différentes (h5_exact: moments stationnaires pré-calculés; imm_general: heuristique IMM avec mixing, documentée comme approximation), et les expériences du papier les comparent précisément parce qu'elles diffèrent. Atténuations (qui empêchent de monter en high mais justifient medium): le mode h5_exact reste atteignable ailleurs — GUI, prg/experiments/run_simulations.py (CLI avec --modes {h5_exact,imm_general}), run_supervised.py, run_real_data.py — donc les résultats du papier ne sont pas affectés; aucune sortie numériquement fausse n'est produite (juste un filtre sous-optimal non annoncé). Sévérité medium correcte: gap fonctionnel CLI + documentation trompeuse sur la fonctionnalité phare du papier, sans corruption de résultats. Note annexe découverte: la docstring de gss_filter.py marque h5_exact comme « (default) » alors que le défaut réel est imm_general (signalé séparément)."
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/gss_filter.py",
+          "line": "1108-1119",
+          "severity": "medium",
+          "category": "numerical-stability",
+          "title": "_psd_floor : plancher absolu eps=1e-9 indépendant de l'échelle — transforme une matrice indéfinie en covariance quasi-singulière",
+          "description": "Le floor des valeurs propres à eps=1e-9 absolu a deux défauts : (1) quand la matrice est structurellement indéfinie (cas Γ du mode général, vp jusqu'à −6.9), la « réparation » produit une covariance avec vp 1e-9 ⇒ précision 1e9 dans cette direction ⇒ vraisemblances explosives/écrasées au lieu d'un comportement dégradé raisonnable ; (2) pour des modèles d'échelle très petite (Σ ~ 1e-12), le floor gonfle des vp légitimes. Pour de très grandes échelles (‖M‖ ~ 1e12+), l'erreur de reconstruction eigh (~‖M‖·eps_machine) peut excéder 1e-9, donc le résultat n'est même pas garanti PD pour la factorisation Cholesky aval (testé OK à 1e12, mais sans garantie).",
+          "evidence": "L1119: `return vecs @ np.diag(np.maximum(vals, eps)) @ vecs.T` avec eps=1e-9 fixe ; utilisé sur Γ à L461 et L809. Mesuré : floor déclenché sur des vp de −6.94 (modèle contrast, mode général).",
+          "suggestion": "Utiliser un plancher relatif (p.ex. eps_rel·max(vals.max(), tiny)) et logger un avertissement quand vals.min() est significativement négatif (signe d'une formule incohérente en amont plutôt que d'un bruit d'arrondi).",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles vérifiées sur le code réel (prg/filter/gss_filter.py). L1108-1119 : plancher absolu eps=1e-9, L1119 conforme au verbatim cité, aucun site d'appel ne passe d'eps ; utilisé sur Γ à L461 et L809. Reproduction empirique (modèle contrast, mode imm_general, N=1000) : 7–11% des appels à _psd_floor reçoivent une entrée négative selon la graine, min mesuré −5.10 (graine 3) — même ordre que le −6.94 de l'audit (graine/N différents) ; attribution par traceback : 100% des négatifs viennent de L809 (le Γ du mode général), zéro des autres sites. La cause est structurelle : L809 soustrait un terme pair-conditionnel d'une variance marginalisée sur r_n — pas un complément de Schur d'une même loi jointe, donc indéfini possible. Impact vraisemblance confirmé : Γ plancher à 1e-9 ⇒ logpdf = +9.4 (dev≈0) ou −5e6…−5e8 (dev=0.1…1), soit « explosif/écrasé » comme décrit. La claim petite échelle est vraie par inspection (np.maximum lève toute vp légitime < 1e-9, y compris le raccourci 1×1 L1115). La claim grande échelle est théoriquement correcte (erreur de reconstruction eigh ~‖M‖·ε ≈ 1e-4 à 1e12 ≫ 1e-9) et honnêtement annoncée comme non déclenchée. Seule nuance mineure : _precompute_gaussian_logpdf (L1075-1090) a un fallback pseudo-inverse sur LinAlgError, donc un échec Cholesky ne planterait pas — cela adoucit la sous-claim (3) sans la réfuter, et ce chemin Cholesky ne consomme que les Γ h5_exact (structurellement PSD). Sévérité medium bien calibrée : pas de crash, mode h5_exact non affecté structurellement, mais ~10% des vraisemblances de branches du mode imm_general sur un modèle livré sont calculées contre une covariance dégénérée 1e-9, distordant silencieusement poids de régime et log-vraisemblance."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Reproduit sur le code réel. (1) Faits exacts : _psd_floor (gss_filter.py:1108-1119) applique un plancher absolu eps=1e-9 ; utilisé sur Γ à L461 (h5_exact) et L809 (imm_general). Point aggravant non souligné par la trouvaille : imm_general est le mode PAR DÉFAUT (L206), donc le chemin d'impact est le chemin par défaut. (2) Impact reproduit : sur le modèle contrast (bundled), le floor se déclenche sur des Γ structurellement négatifs — min mesuré −1.27 (seed 42, N=1000) et −1.5 à −5.1 sur seeds 0-5 (N=2000) ; le chiffre exact −6.94 de l'audit n'a pas été reproduit mais est du même ordre (dépend du seed) et crédible. 693/3934 (17.6%) des évaluations logpdf par paire utilisent la cov plancher 1e-9 ; 690/693 sont annihilées (log-lik médiane −1.04e7, min −1.9e11, contre une plage normale [−4.6e3, +1.15]) — la moitié « écrasées » du scénario est massivement confirmée ; la moitié « explosives » (log_norm≈+9.4) est possible mais observée 0 fois sur 1000 pas. Aucun avertissement n'est loggé. (3) Nuances : le chemin h5_exact (L461) ne floore jamais de vraies vp négatives (Γ PSD par construction, inputs mesurés 0.08-0.43) — le défaut est confiné au mode général ; le sous-point « petite échelle 1e-12 » est vérifié mécaniquement (vp [1e-12,2e-12] → [1e-9,1e-9]) mais hypothétique (aucun modèle bundled à cette échelle) ; le sous-point Cholesky aval est sur-affirmé car _precompute_gaussian_logpdf (L1081-1090) a un fallback eigen explicite et le mode général utilise scipy allow_singular=True — pas de chemin de crash. Sévérité medium juste : distorsion silencieuse des postérieurs de régime et des vraisemblances dans le mode par défaut sur un modèle fourni, mais pas de crash, mode exact h5 (contribution du papier) non affecté, et les termes annihilés correspondent à des paires où l'approximation amont est déjà incohérente."
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/gss_filter.py",
+          "line": "1081-1090",
+          "severity": "low",
+          "category": "numerical-stability",
+          "title": "_precompute_gaussian_logpdf : le fallback singulier n'est PAS identique à scipy (pas de test de support → jamais −inf)",
+          "description": "Le chemin Cholesky est vérifié exactement équivalent à scipy (diff 0.0 sur cas PD ; 1.8e-15 max sur les log-vraisemblances d'un run complet h5_exact de 300 pas). Mais le fallback pseudo-inverse diverge de scipy.stats.multivariate_normal.logpdf(allow_singular=True) sur trois points : (1) pas de vérification d'appartenance au support — pour Γ singulière, un y hors du sous-espace porteur reçoit une log-densité FINIE (vérifié : scipy 1.17.1 → −inf, fast → −1.044) car la composante hors-support est silencieusement projetée ; (2) le cutoff utilise vals.max() (signé) au lieu de max(abs(vals)) chez scipy ; (3) scipy lève ValueError pour une matrice indéfinie, le fallback tronque silencieusement les vp négatives. En pratique ce chemin est quasi inatteignable (Γ est PSD-floored à 1e-9 ⇒ Cholesky réussit), mais le docstring « mathematically identical to scipy » est inexact, et aucun test unitaire ne verrouille l'équivalence (grep _fast_logpdf dans tests/ : vide).",
+          "evidence": "Expérience : cov=[[1,0],[0,0]], x=[0.5,1.0] → scipy logpdf = −inf, _fast_logpdf = −1.0439. L1084: `eps = 1e6 * np.finfo(np.float64).eps * max(float(vals.max()), 0.0)` vs scipy `cond * np.max(np.abs(s))`.",
+          "suggestion": "Soit ajouter le test de support (‖dev − Vᵀ_keep V_keep dev‖ > tol ⇒ −inf) dans _fast_logpdf quand rank < s, soit nuancer le docstring. Ajouter un test unitaire d'équivalence fast-path vs scipy (PD et singulier).",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur le code réel et reproduites numériquement avec le venv du projet (scipy 1.17.1, numpy 2.4.4). (1) Le fallback (lignes 1081-1090 exactes) n'a aucun test de support : cov=[[1,0],[0,0]], x=[0.5,1.0] donne scipy logpdf=-inf vs _fast_logpdf=-1.0439385332046727 — valeur citée exacte. (2) L1084 utilise bien max(vals.max(), 0.0) (signé) alors que scipy _eigvalsh_to_eps utilise cond*np.max(abs(spectrum)) — vérifié dans le source scipy. (3) scipy lève ValueError sur une matrice indéfinie (diag(1,-0.5)) tandis que le fallback tronque silencieusement et retourne une valeur finie. Le docstring (lignes 1059-1061) affirme bien « mathematically identical to scipy ... allow_singular=True » et lignes 1070-1072 « the same tolerance scipy uses » — inexact pour le fallback. Les faits atténuants sont aussi exacts : Γ est _psd_floor-é à 1e-9 (ligne 461) avant la factorisation (ligne 465), Cholesky réussit sur une matrice floorée à 1e-9 (vérifié), donc le fallback est quasi inatteignable ; le chemin Cholesky est exactement équivalent à scipy (diff 0.0 sur cas PD). Aucun test ne référence _fast_logpdf ni _precompute_gaussian_logpdf (grep vide). La sévérité « low » est bien calibrée : impact réel limité à un docstring inexact et à l'absence de test de verrouillage sur un chemin pratiquement mort."
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/gss_filter.py",
+          "line": "515, 603-606, 624",
+          "severity": "low",
+          "category": "robustness",
+          "title": "step() : aucune validation de la dimension de y (broadcast silencieux au 1er pas) ; NaN non gérés (pas d'observations manquantes)",
+          "description": "step() fait reshape(-1,1) sans vérifier que y a s éléments. Vérifié : sur un modèle s=2, passer un y à 1 élément est ACCEPTÉ silencieusement au pas initial (broadcast (1,1)−(2,1)) et produit des estimées fausses sans erreur ; l'erreur ne surgit qu'au 2e pas (y_pred_acc non broadcastable). Par ailleurs un y contenant NaN n'est pas traité comme manquant : il produit E_x=NaN au pas courant, log_lik=−inf à CE pas ET au suivant (y_prev=NaN contamine mean_jk via L624), avec repli silencieux de π — vérifié expérimentalement. Aucun support d'observations manquantes (le point 5 de l'audit : non géré).",
+          "evidence": "Expérience modèle K2_q1_s2 : `f.step(np.array([1.0]))` → « WRONG-LENGTH y ACCEPTED silently, pi=[0.541, 0.459] » ; NaN : pas n → E_x=[nan], log_lik=−inf ; pas n+1 (y valide) → log_lik=−inf encore.",
+          "suggestion": "Dans step(), valider `y.size == self._p.s` (ValueError sinon) et soit rejeter les NaN explicitement, soit implémenter le saut d'observation (étape de prédiction pure : π_{n+1} = πᵀP, moments propagés sans correction).",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles ont été vérifiées sur le code réel et reproduites expérimentalement. (1) prg/filter/gss_filter.py:515 fait bien reshape(-1,1) sans valider y.size == s. (2) Sur ModelGss_K2_q1_s2 (s=2), f.step(np.array([1.0])) est accepté silencieusement au pas initial et retourne pi=[0.541, 0.459] (valeur identique à celle de la trouvaille), log_lik fini, aucun avertissement — le broadcast (1,1)−(2,1) passe dans _init_step_h5 et dans scipy logpdf. (3) L'erreur ne surgit qu'au 2e pas : ValueError « non-broadcastable output operand with shape (1,1) doesn't match the broadcast shape (2,1) » à la ligne 627 (y_pred_acc += w*mean_jk, y_pred_acc initialisé np.zeros_like(y_new) ligne 615). (4) NaN reproduit : au pas n, E_x=[nan], log_lik=−inf, repli de π sur marg_rnp1 ; au pas n+1 avec y valide, log_lik=−inf à nouveau car y_prev=NaN contamine mean_jk via la ligne 624 ; récupération au pas n+2 ; au pas initial NaN → E_x=nan, log_lik=−inf, π=π_∞. Aucun support d'observations manquantes. Seule nuance mineure : le repli de π n'est pas totalement « silencieux » (logger.warning émis, lignes 576/649), mais le message n'identifie pas la cause (NaN) et l'acceptation du y de mauvaise taille est, elle, réellement silencieuse. Sévérité low correctement calibrée (robustesse/validation d'entrée, pas de bug sur entrées valides)."
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/gss_filter.py",
+          "line": "1029-1042 (et 803-808)",
+          "severity": "low",
+          "category": "numerical-stability",
+          "title": "_safe_solve : le docstring promet un fallback pour matrices mal conditionnées, mais seul LinAlgError (singularité exacte) est intercepté",
+          "description": "np.linalg.solve ne lève pas pour une matrice mal conditionnée mais inversible : il retourne un résultat imprécis silencieusement ; le fallback lstsq n'est atteint que pour une singularité exacte. Or dans le mode général, S_YY_n provient de la soustraction non-floorée Sig_n = P_z − µµᵀ (L803-805) et peut être quasi singulière ; M_t = _safe_solve(S_YY_n.T, ...) amplifie alors le bruit sans avertissement.",
+          "evidence": "L1037-1042 : `try: return np.linalg.solve(A, B) except np.linalg.LinAlgError: ... lstsq` ; docstring L1034 : « If A is singular or ill-conditioned, falls back » — la seconde moitié est fausse.",
+          "suggestion": "Soit corriger le docstring, soit tester cond(A) (ou utiliser scipy.linalg.solve(..., assume_a='sym') + contrôle du résidu) avant de basculer sur lstsq.",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur le code réel. (1) L1037-1042 : seul np.linalg.LinAlgError est intercepté ; le docstring L1033-1035 promet bien un fallback « if A is singular or ill-conditioned ». (2) Vérifié empiriquement avec le Python du projet : np.linalg.solve retourne silencieusement un résultat pour des matrices inversibles avec cond ~4e12 à 3.5e15 (aucune exception) ; LinAlgError n'est levée que pour une singularité exacte (pivot nul en LU). La moitié « ill-conditioned » du docstring est donc fausse — le fallback lstsq est inatteignable dans ce cas. (3) L803-808 dans _update_step_general : Sig_n = _sym(P_z − µµᵀ) sans _psd_floor (le floor n'est appliqué qu'à Gamma L809 et var_x L862), S_YY_n = Sig_n[q:,q:], M_t = _safe_solve(S_YY_n.T, ...). Le scénario de quasi-singularité est correctement présenté comme conditionnel (« peut être »). Sévérité low bien calibrée : écart docstring/comportement + lacune de robustesse, sans sortie incorrecte démontrée (S_YY_n contient le bruit d'observation, donc quasi-singularité seulement si Σ_V dégénérée). Correctif proposé (corriger le docstring ou tester cond(A)) proportionné.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/gss_filter.py",
+          "line": "478, 542-563, 700-731",
+          "severity": "info",
+          "category": "math",
+          "title": "Les deux modes ignorent π₀/µ_z0/Σ_z0 de l'utilisateur au filtrage : démarrage forcé à la stationnarité, alors que le simulateur tire R₀~π₀, Z₀~N(µ_z0,Σ_z0)",
+          "description": "L'init (deux modes) utilise π_∞ et les moments stationnaires (µ_z0/Σ_z0 ne servent que de point de départ à l'itération de point fixe). GSSSimulator (GSSSimulator.py:133-135) tire en revanche R₀ ~ pi0 et Z₀ ~ N(mu_z0, Sigma_z0). Si pi0 ≠ π_∞ ou si les conditions initiales ne sont pas stationnaires, le filtre est mal spécifié sur les premiers pas et la log-vraisemblance initiale est biaisée. C'est documenté pour h5_exact (commentaire L535-539 : sous (H5) Γ constant EXIGE la stationnarité, donc choix cohérent), mais le mode imm_general — qui n'a pas cette contrainte — applique le même choix silencieusement.",
+          "evidence": "L478: `self._pi = self._pi_inf.copy()` ; L555: `np.log(self._pi_inf[r] + 1e-300)` — p.pi0 n'est jamais lu par le filtre ; GSSSimulator.py:133: `r_n = int(self._rng.choice(params.K, p=params.pi0))`.",
+          "suggestion": "Pour imm_general, initialiser depuis (pi0, mu_z0, Sigma_z0) ou au minimum documenter dans le docstring de classe que pi0/mu_z0/Sigma_z0 sont ignorés par le filtre.",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes. (1) gss_filter.py L478 contient bien `self._pi = self._pi_inf.copy()` dans _reset_state(), commun aux deux modes. (2) L555 (h5_exact) et L719 (imm_general) utilisent bien `np.log(self._pi_inf[r] + 1e-300)` à l'init. (3) `p.pi0` n'est jamais lu par le filtre (grep : zéro occurrence) ; mu_z0/Sigma_z0 ne servent qu'à initialiser l'itération de point fixe des moments stationnaires (L335-336), convergée à 1e-12, donc effacés. (4) GSSSimulator.py L133-135 tire bien R₀~pi0 et Z₀~N(mu_z0, Σ_z0). (5) Le choix est documenté pour h5_exact (commentaire L535-539) mais pas dans la docstring de classe ni dans le bloc de commentaires imm_general (L688-698) — \"silencieux\" est juste du point de vue utilisateur (seule la docstring interne de _init_step_general L701 le mentionne). La conséquence math (mis-spécification transitoire + biais de la log-vraisemblance initiale si pi0 ≠ π_∞ ou moments initiaux non stationnaires) est correcte. Nuance modératrice : GSSParams résout pi0=None en distribution stationnaire (GSSParams.py:104-106), donc le décalage n'existe que si l'utilisateur fournit explicitement des conditions initiales non stationnaires, et l'effet décroît avec le mixing de la chaîne — la sévérité [info] est bien calibrée.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/main.py",
+          "line": "215",
+          "severity": "low",
+          "category": "bug",
+          "title": "seed=0 traité comme falsy : tag de log « seedrandom » pour une graine légitime",
+          "description": "`tag = f\"{args.model}_N{args.N or 'csv'}_seed{args.seed or 'random'}\"` : avec --seed 0, `0 or 'random'` donne 'random' ; le nom du fichier de log est trompeur. Les chemins de sortie réels (run() L947 et _resolve_output L310) utilisent correctement `if seed is not None`.",
+          "evidence": "L215: `seed{args.seed or 'random'}` vs gss_filter.py L947: `seed_str = str(seed) if seed is not None else \"random\"`.",
+          "suggestion": "`seed{args.seed if args.seed is not None else 'random'}` (idem pour N).",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Vérifié dans le code réel : prg/filter/main.py L215 contient exactement `tag = f\"{args.model}_N{args.N or 'csv'}_seed{args.seed or 'random'}\"`. L'argument --seed est type=int default=None (L151-157), donc --seed 0 est légitime et `0 or 'random'` donne bien 'random'. Le tag sert de nom au fichier de log (`filter_{tag}_{ts}.log`, L81 de _setup_logging), donc le log est nommé 'seedrandom' pour une graine 0 — trompeur. Les contrepoints cités sont exacts : _resolve_output (main.py L310) et gss_filter.py L947 utilisent correctement `if seed is not None`. Aucun impact fonctionnel (le seed réel est passé tel quel au simulateur L263/L280) ; défaut purement cosmétique de nommage de log. Sévérité 'low' bien calibrée. Le correctif proposé est correct."
+            }
+          ]
+        },
+        {
+          "file": "prg/filter/gss_filter.py",
+          "line": "444-467, 603-686",
+          "severity": "info",
+          "category": "math",
+          "title": "Vérifications positives : récursion h5_exact conforme au papier, chemin rapide exact, log-sum-exp partout, hypothèse Γ time-invariant respectée",
+          "description": "Audit de correction sans anomalie sur le cœur h5_exact : (1) M̃_{j,k} = (F_k Σ(j))[q:,q:] Σ_YY(j)⁻¹ se développe en C_k K_j + D_k, cohérent avec la moyenne C_k(µ_X(j)+K_j(y_n−µ_Y(j))) + D_k y_n + b_Y(k) ; (2) Γ(j,k) = C_k P_post(j) C_kᵀ + Σ_V(k) coïncide avec l'éq. (Gamma_jk) du papier (P_post = Σ_U − ΔΣ_V⁻¹Δᵀ et K_j = Δ_jΣ_{V,j}⁻¹ sous (H5)) ; (3) forme de Joseph algébriquement égale à la forme courte (le gain Σ_XY Σ_YY⁻¹ est optimal pour H=Σ_YX Σ_XX⁻¹, R=S_YY−HΣ_XX Hᵀ) ; (4) le chemin rapide n'est utilisé QUE là où Γ est time-invariant (h5_exact, L632) — imm_general garde scipy par pas (L816), et les inits utilisent scipy une fois ; équivalence end-to-end fast vs scipy : max|Δloglik|=1.8e-15, max|Δπ|=6.7e-16 sur 300 pas ; (5) pondérations : joint = π_n(j)P(j,k) (Σ=1), normalisations en log-domaine avec replis sains (π_∞ / marg_rnp1, qui somment à 1) ; innovation = y − Σ_{j,k} w·mean_jk correcte ; (6) point fixe stationnaire : renversement temporel p_rev = π_∞(j)P(j,k)/π_∞(k) correct, garde de non-convergence loggée ; (7) T=1 et q≠s OK ; K=1 rejeté en amont par FMatrix (« K must be >= 2 »), donc hors périmètre du filtre.",
+          "evidence": "Tests numériques exécutés dans le venv du projet (scipy 1.17.1, numpy 2.4.4) : diff fast-vs-scipy = 0.0 (cas PD s∈{1,2,4}), 1.8e-15 end-to-end ; π_h5 vs π_general ≈ 1e-5 sous (H5) sur modèle bien conditionné (K2_q1_s1).",
+          "suggestion": "Rien à corriger ; envisager d'ajouter le test unitaire d'équivalence fast-path (cf. finding _precompute_gaussian_logpdf).",
+          "dimension": "filter-math",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles vérifiées sur le code réel et reproduites numériquement. (1) Lignes exactes : 444-467 = précalcul des constantes de paire, 603-686 = _update_step_h5, L632 = appel _fast_logpdf (seul site fast-path), L816 = scipy logpdf par pas dans imm_general, inits scipy à L555/L718. (2) M̃ = (FΣ(j))[q:,q:]Σ_YY(j)⁻¹ (L459-460) = C_kK_j+D_k vérifié à 5.6e-17 ; moyenne conforme à la forme énoncée. (3) Sous (H5) forme AB exacte (testé K=3,q=2,s=1, biais non nuls) : K_j=Δ_jΣ_{V,j}⁻¹ (1.1e-16), P_post(j)=Σ_{U,j}−Δ_jΣ_{V,j}⁻¹Δ_jᵀ (4.4e-16), Γ_code vs éq. (Gamma_jk) du papier (02_model_h5.tex L113-117) à 2.2e-16. (4) Joseph ≡ forme courte (algèbre + 4.4e-16 numérique). (5) Équivalence end-to-end fast vs scipy sur 300 pas : max|Δloglik|=8.9e-16, max|Δπ|=6.9e-16 — même ordre que les 1.8e-15/6.7e-16 cités. (6) joint=π·P (L610), replis π_∞ (L575/582) et marg_rnp1 (L648/658, somme=1), innovation L627/679, p_rev L322-327, garde de non-convergence loggée L362-368 : tous conformes. (7) T=1 et q≠s OK ; K=1 rejeté à FMatrix.py:100 (« K must be an integer >= 2 »). π_h5 vs π_general = 1.5e-5 reproduit sur K2_q1_s1+AB. Aucun test existant d'équivalence fast-path, donc le correctif proposé n'est pas redondant. Seule nuance hors périmètre des claims : l'éq. (mu_jk) imprimée du papier omet la constante C_k(b_{X,j}−K_jb_{Y,j}) que le code inclut correctement (identité vérifiée à 1.1e-16) — écart côté papier, pas côté code. Sévérité [info] appropriée pour une vérification positive."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dimension": "h5-constraint",
+      "scope_summary": "Audit de la contrainte H5/AB : lecture intégrale de prg/utils/h5_constraint.py (241 l.) et prg/utils/matrix_checks.py (341 l.), survol de tests/test_h5_constraint.py, du consommateur GSSFilter._check_h5, des classes FMatrix/NoiseCovariance/GSSParams et de l'appendice B du papier, avec vérifications numériques exécutées dans le venv du projet (numpy 2.4.4). La forme close compute_AB et le résidu compute_h5_residual sont mathématiquement corrects — toutes les transpositions vérifiées par re-dérivation indépendante (F = transposée du numérateur de β₁), résidu exactement nul sur la variété AB, et la propriété « toutes paires (r₁,r₂) » de la forme AB est prouvée et confirmée numériquement ; aucun reliquat du bug Δᵀ A historique, et ni inv ni pinv ne sont utilisés. Le problème principal est sémantique : le résidu n'évalue que l'équation de la paire diagonale (j=k), qui est nécessaire mais pas suffisante pour le (H5) complet — contre-exemple construit (résidu diagonal 4e-16, résidu croisé 4.62) contredisant les docstrings « ⇔ / source of truth » et la réduction j=k de l'appendice B du papier (dont l'étape 4 contient en outre deux identités fausses, bien que l'équation finale soit juste). Problèmes secondaires : contrat d'exception violé pour Σ_V non fini (LinAlgError au lieu de ValueError), absence de garde de conditionnement sur M, aucune validation de formes (Δ transposé accepté silencieusement quand q=s), tolérance de symétrie absolue non invariante d'échelle dans matrix_checks qui bloque des covariances légitimes à grande échelle, et compute_SU_from_h5 (cité dans la demande) qui n'existe plus depuis v0.12.0. Santé générale du périmètre : bonne sur le plan algébrique, perfectible sur la robustesse des entrées et la rigueur des prétentions documentaires.",
+      "findings": [
+        {
+          "file": "prg/utils/h5_constraint.py",
+          "line": "39-42, 65-102",
+          "severity": "high",
+          "category": "math",
+          "title": "Le résidu (H5) par régime n'est qu'une condition NÉCESSAIRE : résidu nul ≠ (H5) complet (équations de paires croisées non vérifiées)",
+          "description": "compute_h5_residual évalue uniquement l'équation de la paire diagonale (j=k) — les 7 matrices passées appartiennent à un seul régime. Or (H5) (indépendance conditionnelle, eq:H5 du papier) exige β₁=0 pour TOUTES les paires (j,k) avec p_jk>0, où l'équation de paire fait intervenir A_k,B_k,C_k,D_k,Δ_k,Σ_V,k ET les blocs de bruit du régime source j (Σ_U,j, Δ_j, Σ_V,j). Le docstring affirme « ‖F‖ = 0 ⇔ (H5) holds exactly » (l.88) et « source of truth for (H5)-compatibility » (l.40-42) : c'est faux dans le sens ⇒. L'équation diagonale seule donne s équations par ligne de [A B] pour q+s inconnues — toujours sous-déterminée — donc il existe des (A,B) non-AB de résidu diagonal nul qui violent les équations croisées. Contre-exemple numérique construit (q=s=1, K=2) : (a,b)=(-5.2638, 0.7250) donne résidu diagonal 4.4e-16 mais résidu de paire croisée (j≠k) = 4.62. Conséquence : GSSFilter._check_h5 (prg/filter/gss_filter.py:232-276, boucle sur k seulement) peut valider un modèle non-(H5) et le filtre 'h5_exact' serait silencieusement biaisé. Noter aussi que le docstring du module (l.22-30) est lui-même incohérent avec cette prétention : il fonde la nécessité de AB sur l'élimination des K équations de régimes sources (K·s ≥ q+s), ce qui reconnaît implicitement que l'équation diagonale seule ne suffit pas. Cas limite supplémentaire : si p_kk=0, l'équation diagonale n'est même pas requise par (H5) (la paire (k,k) n'apparaît jamais) — le check est alors trop strict. En pratique, l'exposition est limitée car tous les modèles (H5) du dépôt sont construits via compute_AB (qui, lui, satisfait bien toutes les paires — vérifié), mais le contrat documenté de « vérité terrain » est erroné.",
+          "evidence": "h5_constraint.py:88 « F : ndarray of shape (s, q). ‖F‖ = 0 ⇔ (H5) holds exactly. » ; l.40-42 « This is the source of truth for (H5)-compatibility » ; gss_filter.py:249 « for k in range(p.K): ... compute_h5_residual(A,B,C,D,SU,Dt,SV) » (jamais de paires j≠k). Contre-exemple exécuté : résidu diagonal 4.44e-16, résidu paire (j,k) 4.6187 pour (a,b)=(-5.263793, 0.725000) avec C=0.4, D=0.6, Σ_U,k=1, Δ_k=0.3, Σ_V,k=0.8 et régime source Σ_U,j=2, Δ_j=-0.5, Σ_V,j=1.5.",
+          "suggestion": "Généraliser compute_h5_residual en compute_h5_pair_residual(A_k,B_k,C_k,D_k,Δ_k,Σ_V,k, Σ_U,j,Δ_j,Σ_V,j) avec T_jk = A_k Σ_U,j C_kᵀ + A_k Δ_j D_kᵀ + B_k Δ_jᵀ C_kᵀ + B_k Σ_V,j D_kᵀ + Δ_k et M_jk = C_k Σ_U,j C_kᵀ + ... + Σ_V,k, puis faire boucler _check_h5 sur les K² paires (ou seulement celles avec p_jk>0). Alternative en régime déterminé (K·s ≥ q+s) : comparer directement (A_k,B_k) à compute_AB(C_k,D_k,Δ_k,Σ_V,k). Reformuler les docstrings : résidu diagonal nul = condition nécessaire (si p_kk>0), pas suffisante.",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Trouvaille CONFIRMÉE par relecture du code et reproduction numérique complète. (1) Citations exactes : h5_constraint.py l.39-42 (\"source of truth\") et l.88 (\"‖F‖=0 ⇔ (H5)\") ; gss_filter.py _check_h5 (l.232-288) boucle uniquement sur k (l.249), jamais sur les paires j≠k. (2) Math : l'appendice B du papier dérive bien β₁=0 par paire (j,k) avec les blocs de bruit du régime source j (eq:beta1), puis affirme sans preuve (l.100-104) que j=k est \"sufficient and necessary\" — affirmation réfutée numériquement ; le docstring du module (l.17-30, \"K² regime-pair equations\", élimination K·s ≥ q+s) contredit lui-même le \"⇔\". (3) Contre-exemple reproduit avec le code du dépôt : (a,b)=(-5.263793, 0.725) donne résidu diagonal ≈5e-9 (≈0 ; le 4.44e-16 cité correspond au point non arrondi — écart cosmétique) et résidu croisé 4.6187 (= 4.62 annoncé). L'ensemble diagonal-nul est bien une droite affine ; compute_AB satisfait l'équation de paire pour TOUTE covariance source (≤4e-16 sur 50 tirages PD). (4) Conséquence vérifiée au-delà de la preuve avancée : modèle K=2 stable avec régime 1 = (0.5, 0.1927) (résidu diag 6e-17, résidu croisé 0.299) → GSSFilter(mode='h5_exact') n'émet AUCUN warning ; Monte-Carlo sur le vrai processus simulé : coefficient de y_n dans E[x_{n+1}|y_n,y_{n+1}, j=0→k=1] = -0.244 (z=-22.8) → (H5) réellement violée (contrôle AB : z=+0.9) ; filtre h5_exact vs postérieur exact par énumération de séquences de régimes : écart max 0.112 sur E[x_n] (contrôle AB : 1e-15) → biais silencieux démontré. Le cas p_kk=0 et l'exposition pratique limitée (modèles du dépôt construits via compute_AB) sont aussi exacts. Sévérité high justifiée : contrat documenté faux, même erreur dans l'appendice B du papier, mode de défaillance = filtre \"exact\" silencieusement biaisé."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits vérifiés sur le code réel. (1) compute_h5_residual (h5_constraint.py:65-102) n'évalue que l'équation de la paire diagonale j=k avec les 7 matrices d'un seul régime ; le docstring affirme bien « ‖F‖ = 0 ⇔ (H5) » (l.88) et « source of truth » (l.40-42). (2) GSSFilter._check_h5 (gss_filter.py:249-258) boucle sur k seulement. (3) La math est correcte : eq:H5 du papier conditionne sur (r_n, y_n), donc β₁=0 est requis pour toute paire (j,k) avec p_jk>0, et l'équation de paire (appendix B, eq:h5_beta1) fait intervenir Σ_U,j, Δ_j, Σ_V,j du régime source. L'équation diagonale est linéaire sous-déterminée en (A,B). (4) Contre-exemple reproduit exactement contre le code du dépôt : (a,b)=(-5.263793, 0.725) donne résidu diagonal 2.2e-16 et résidu croisé 4.6187 (valeur identique à celle annoncée). J'ai testé une objection possible — le F du contre-exemple est instable (ρ≈5.3) — mais un point stable sur la même droite ((0.4207, 0.200), ρ(F)=0.807) donne aussi diag≈0 / croisé=-0.231 : le défaut n'est pas un artefact de paramètres inadmissibles. Le point AB satisfait toutes les paires (croisé 5.6e-17), confirmant compute_AB. (5) L'appendice B du papier (Step 3, l.100-103) contient la même affirmation fausse (« sufficient and necessary... j=k »). MAIS la sévérité « high » sous la lentille IMPACT est surestimée : tous les chemins du dépôt construisent (A,B) via compute_AB/apply_AB_constraint (models_paper.py, learning/supervised.py:261, learning/semi_supervised.py:253, gui/param_panel.py:320, filter/main.py:235), qui satisfait les K² paires — aucun chemin interne ne produit de faux négatif. L'ensemble des faux négatifs est de mesure nulle (une droite dans l'espace (a,b) par régime) : un modèle non-H5 fourni par l'utilisateur déclenche le warning avec probabilité 1 ; le biais silencieux exige une construction délibérée. Enfin _check_h5 n'est qu'un avertissement (RuntimeWarning, jamais bloquant) : la pire conséquence est un warning manquant, pas un nouveau mode de défaillance. Trouvaille réelle (contrat documenté faux + check incomplet + erreur mathématique dans l'appendice B du papier, à corriger), mais impact runtime quasi nul → medium.",
+              "severityAdjustment": "medium"
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/h5_constraint.py",
+          "line": "95-102, 108-150",
+          "severity": "info",
+          "category": "math",
+          "title": "Forme close et résidu vérifiés corrects : aucune erreur de transposition résiduelle",
+          "description": "Audit positif des points 1 du périmètre. (a) Dérivation indépendante : F = Z − P M⁻¹ W est exactement la transposée du numérateur du coefficient de régression partielle β₁ (N = Cov(X+,Yn) − Cov(X+,Y+) M⁻¹ Cov(Y+,Yn) = Fᵀ, avec Wᵀ = T et Rᵀ = P), donc ‖F‖=0 ⇔ β₁=0 pour la paire diagonale (S = Σ_V − P M⁻¹ R inversible). Toutes les transpositions de l.95-101 (Dt.T @ C.T, Q @ A.T, Dt.T @ A.T...) sont conformes — le bug historique Δᵀ A vs Δᵀ Aᵀ (commit 141fd11) est bien purgé, y compris dans le consommateur gss_filter.py:270. (b) Dimensions cohérentes : P,R,M (s,s), Q,W,Z,F (s,q), A (q,q), B (q,s). (c) compute_AB : A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D vérifié algébriquement (Z = P Σ_V⁻¹ Δᵀ, W = M Σ_V⁻¹ Δᵀ ⇒ F = 0, en utilisant la symétrie de Σ_V) et numériquement (résidu 0.0 exact). (d) La prétention du docstring de compute_AB (l.119-121) que la forme AB satisfait TOUTES les paires (r₁,r₂) indépendamment de Σ_U est vraie : prouvé analytiquement (Cov(X+,Y+|j,k) = Δ_k Σ_V,k⁻¹ M_jk pour tout j) et confirmé numériquement (résidu croisé 5.6e-17). (e) solve est utilisé partout, jamais inv ni pinv (aucun pinv dans prg/ ni scripts/). (f) apply_AB_constraint préserve les covariances inchangées, donc aucune question de PSD de covariances reconstruites ne se pose dans le module actuel.",
+          "evidence": "Vérification numérique : « diag residual at AB : 0.0 ; cross residual at AB: 5.55e-17 » et dérivation Wᵀ = A Qᵀ + B Rᵀ + Δ = T, Rᵀ = P ⇒ F = (numérateur de β₁)ᵀ.",
+          "suggestion": "Rien à corriger sur la forme close elle-même. Ajouter éventuellement un test de paires croisées (j≠k) dans tests/test_h5_constraint.py pour verrouiller la propriété « toutes paires » de compute_AB (actuellement non testée : tous les tests sont mono-régime ou diagonaux).",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations centrales sont exactes et reproduites indépendamment. (1) Lignes 95-102 de prg/utils/h5_constraint.py conformes mot pour mot (P,Q,R,M,W,Z, solve, jamais inv/pinv dans CE module) ; gss_filter.py:270 contient bien `Z = Dt.T @ A.T + SV @ B.T` ; le commit 141fd11 est bien le fix Δᵀ A → Δᵀ Aᵀ. (2) Identité F = Nᵀ (numérateur de régression partielle) re-vérifiée numériquement : ‖F − Nᵀ‖ = 5.6e-17 sous le modèle génératif Xₙ=Uₙ, Yₙ=Vₙ. (3) Forme close : Z = P Σ_V⁻¹ Δᵀ, W = M Σ_V⁻¹ Δᵀ ⇒ F=0, résidu diagonal 3.2e-17 (le « 0.0 exact » du rapport dépend du run mais reste un zéro machine — immatériel). (4) Propriété toutes-paires du docstring (l.119-120) re-dérivée analytiquement (télescopage valable pour tout j) et re-vérifiée numériquement avec blocs croisés correctement mélangés : résidu ~2e-17, invariant en Σ_U,j ; Wⱼₖᵀ = Δ_k Σ_V,k⁻¹ Mⱼₖ confirmé (9e-17). (5) apply_AB_constraint préserve bien noise_cov (l.236). (6) Lacune de test confirmée : tests/test_h5_constraint.py ne contient que des appels mono-régime/diagonaux, aucune paire j≠k ; le correctif proposé est pertinent (et nécessitera de construire les blocs croisés à la main, la signature de compute_h5_residual étant mono-régime — un appel naïf mixte donne 0.196). Seule sur-affirmation mineure : « solve est utilisé partout, jamais inv ni pinv » n'est vrai que dans le module audité ; np.linalg.inv apparaît ailleurs (prg/gui/workers.py:122 inv(Σ_V) dans le chemin diagnostics h5_exact, gss_filter.py:1077 inv d'un facteur de Cholesky, scripts/verify_19_20_equivalence.py:323, kalman_single.py:177,201) ; « aucun pinv » est littéralement vrai (zéro occurrence), malgré un fallback pseudo-inverse manuel par décomposition propre dans gss_filter. Cette nuance ne change ni le verdict ni la sévérité [info] d'un constat d'audit positif."
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/h5_constraint.py",
+          "line": "138-147",
+          "severity": "medium",
+          "category": "api",
+          "title": "compute_AB laisse fuir numpy.linalg.LinAlgError pour Σ_V non fini, violant le contrat documenté (ValueError)",
+          "description": "Le garde-fou cond(Σ_V) (l.138) appelle np.linalg.cond → SVD, qui lève LinAlgError('SVD did not converge') si Σ_V contient NaN/Inf, AVANT le try/except qui n'enveloppe que les solve (l.143-147). Le docstring promet « Raises ValueError If Σ_V is singular or ill-conditioned » : pour une entrée non finie (cas typique d'une itération EM divergente), l'appelant reçoit une LinAlgError brute. Dans apply_AB_constraint, le `except ValueError` (l.204) ne l'attrape pas, donc le message contextuel « regime k=... » est perdu. Vérifié : compute_AB(C, D, Dt, SV_nan) → LinAlgError. Par ailleurs cond(matrice nulle) = inf sous numpy 2.4, donc le chemin Σ_V=0 testé (test_singular_SV_raises) passe bien par le garde-fou, mais c'est un comportement de numpy susceptible de varier (anciennes versions renvoyaient parfois NaN, et NaN > 1e12 est False — le garde-fou serait alors contourné).",
+          "evidence": "Exécution : « 1. NaN SV -> LinAlgError : SVD did not converge ». Code : le try (l.143) ne couvre pas np.linalg.cond(SV) (l.138).",
+          "suggestion": "Ajouter en tête de compute_AB : `if not np.all(np.isfinite(SV)): raise ValueError(\"Σ_V contains NaN/Inf\")`, ou envelopper l'appel à cond dans le même try/except LinAlgError → ValueError.",
+          "dimension": "h5-constraint",
+          "status": "refuted",
+          "votes": [
+            {
+              "isReal": false,
+              "confidence": "high",
+              "reasoning": "Réfutée sur ses deux affirmations centrales. (1) numpy.linalg.LinAlgError EST une sous-classe de ValueError (vérifié sous numpy 2.4.4 du venv du projet : MRO = LinAlgError → ValueError → Exception). Le contrat documenté « Raises ValueError » n'est donc pas violé : l'exception levée par np.linalg.cond sur un Σ_V NaN est attrapable par except ValueError et isinstance(exc, ValueError) est vrai. (2) L'affirmation « le except ValueError (l.204) ne l'attrape pas, donc le contexte regime k=... est perdu » est empiriquement fausse : en reproduisant exactement le motif des l.202-205 avec Σ_V NaN, l'appelant reçoit bien « ValueError - AB constraint cannot be applied for regime k=1: SVD did not converge ». (3) Le scénario d'amorce (EM divergente → NaN atteint apply_AB_constraint) est bloqué en amont : GSSNoiseCovariance.__init__ (prg/classes/NoiseCovariance.py:109-119) rejette tout bloc non-SPD/non-fini à la construction (CovarianceError vérifié), or apply_AB_constraint lit Σ_V depuis params.noise_cov. (4) La caveat « anciennes versions numpy renvoyaient NaN pour cond » date de numpy <1.14 (2018) alors que le projet exige numpy>=2.4 — sans objet. Seul reste un point cosmétique : pour une entrée NaN le message est « SVD did not converge » au lieu du libellé « Σ_V is singular: ... » de l'enveloppe l.147 — aucun impact fonctionnel. L'auditeur a vu le nom LinAlgError et conclu à tort qu'il échappait à except ValueError sans vérifier l'héritage."
+            },
+            {
+              "isReal": false,
+              "confidence": "high",
+              "reasoning": "Réfuté empiriquement sur le code réel avec le numpy du projet (2.4.4). Le mécanisme décrit est exact (cond(Σ_V) à la l.138 de prg/utils/h5_constraint.py lève LinAlgError('SVD did not converge') pour Σ_V contenant NaN, hors du try/except des l.143-147), mais l'impact allégué est factuellement faux : numpy.linalg.LinAlgError est une SOUS-CLASSE de ValueError (MRO vérifié : LinAlgError → ValueError → Exception ; comportement numpy documenté et stable). Conséquences : (1) le contrat du docstring « Raises ValueError » est respecté au sens Python — isinstance(exc, ValueError) est True ; (2) l'affirmation centrale « dans apply_AB_constraint, le except ValueError (l.204) ne l'attrape pas, donc le message contextuel regime k=... est perdu » est démontrée fausse — test reproduit : l'appelant reçoit ValueError(\"AB constraint cannot be applied for regime k=0: SVD did not converge\"), contexte préservé. (3) Le cas Inf ne passe même pas par la SVD défaillante : cond = inf déclenche le garde-fou qui lève le ValueError prévu. (4) La spéculation sur d'anciennes versions de numpy (cond(0) → NaN) est hors sujet : le projet impose numpy>=2.4. Seul résidu : pour NaN, le message d'erreur dit « SVD did not converge » au lieu d'un explicite « Σ_V contains NaN » — pure question de lisibilité du diagnostic, sans violation de contrat ni perte de contexte, très en deçà d'un « medium ». L'auditeur a visiblement constaté le nom du type d'exception sans vérifier la hiérarchie de classes.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/h5_constraint.py",
+          "line": "84",
+          "severity": "low",
+          "category": "math",
+          "title": "Affirmation fausse : « M ... ≻ 0 if Σ_U, Σ_V ≻ 0 » — la PD de M exige la PSD de la covariance jointe Σ(r)",
+          "description": "M = [C D] Σ [C D]ᵀ + Σ_V avec Σ = [[Σ_U, Δ],[Δᵀ, Σ_V]]. Si Δ est incompatible avec la PSD jointe, M peut être indéfini même avec Σ_U, Σ_V ≻ 0. Contre-exemple exécuté : q=s=1, C=D=Σ_U=Σ_V=1, Δ=-10 ⇒ M = -17. La condition correcte est Σ(r) ⪰ 0 et Σ_V ≻ 0 (alors M ⪰ Σ_V ≻ 0). La même affirmation imprécise figure dans le papier (paper/sections/04_constraint.tex:38-40 : « M = Mᵀ ≻ 0 whenever Σ_U, Σ_V ≻ 0 »). En pratique le code en aval (GSSNoiseCovariance) impose Σ_W(k) SPD donc la jointe est PD, mais compute_h5_residual est une fonction publique appelée avec des blocs arbitraires (GUI param_panel.py:402, EM) où la jointe peut ne pas être PSD : M singulier/indéfini est alors possible et seul le cas exactement singulier lève LinAlgError.",
+          "evidence": "Exécution : « M for indefinite joint Sigma = -17.0 (docstring claims M>0 if SU,SV>0) » avec Σ_U=Σ_V=1, Δ=-10.",
+          "suggestion": "Corriger le docstring (l.84) et le papier : « M ≻ 0 dès que la covariance jointe Σ(r) ⪰ 0 et Σ_V ≻ 0 ».",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur le code réel. (1) Le docstring l.84 de prg/utils/h5_constraint.py dit bien « ≻ 0 if Σ_U, Σ_V ≻ 0 ». (2) L'identité M = [C D] Σ [C D]ᵀ + Σ_V est exacte (vérifiée numériquement contre Q@C.T + R@D.T + SV). (3) Contre-exemple reproduit par exécution : C=D=Σ_U=Σ_V=1, Δ=−10 ⇒ M = −17, jointe d'eigenvalues [−9, 11] non PSD alors que Σ_U=Σ_V=1 ≻ 0 ; compute_h5_residual s'exécute sans erreur et renvoie un résidu dénué de sens (seul M exactement singulier lève LinAlgError). (4) La condition corrigée est juste : Σ(r) ⪰ 0 et Σ_V ≻ 0 ⇒ M ⪰ Σ_V ≻ 0. (5) Le papier (04_constraint.tex:38-40) contient mot pour mot « M = Mᵀ ≻ 0 whenever Σ_U, Σ_V ≻ 0 » — vrai dans le contexte (Σ(r) covariance jointe donc PSD) mais l'hypothèse citée est la mauvaise. (6) GSSNoiseCovariance impose bien Σ_W(k) SPD (CovarianceError + Cholesky, NoiseCovariance.py:113-119), mais compute_h5_residual est appelé avec des blocs bruts non validés depuis la GUI (param_panel.py:402, matrices éditées par l'utilisateur), donc le cas M indéfini est atteignable et le badge (H5) affiche alors une valeur dénuée de sens au lieu de « ? ». Sévérité low correcte : problème de précision documentaire (docstring + papier) avec un cas limite silencieux dans un diagnostic GUI, pas de bug sur le chemin principal."
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/h5_constraint.py",
+          "line": "95-101",
+          "severity": "low",
+          "category": "numerical-stability",
+          "title": "compute_h5_residual sans garde de conditionnement sur M (asymétrie avec compute_AB)",
+          "description": "compute_AB refuse Σ_V si cond > 1e12, mais compute_h5_residual résout M sans aucun contrôle : pour M presque singulier (covariance jointe quasi dégénérée, fréquent en EM), solve renvoie un résultat dominé par l'erreur d'arrondi et le résidu devient non significatif sans avertissement. Le consommateur gss_filter._check_h5 (l.257-269) ne capte que LinAlgError exact (singularité détectée par LAPACK), pas le quasi-singulier : le diagnostic « (H5) ok/violé » peut alors être arbitraire alors qu'il conditionne le choix d'un filtre prétendu exact. Accessoirement, M est symétrique (PD sous les hypothèses) — scipy.linalg.solve(..., assume_a='pos') ou cho_solve serait à la fois plus stable et plus rapide, scipy étant déjà une dépendance.",
+          "evidence": "l.101 : `residual = Z - P @ np.linalg.solve(M, W)` sans vérification de cond(M), à comparer aux l.138-141 de compute_AB qui imposent cond(SV) ≤ 1e12.",
+          "suggestion": "Vérifier cond(M) (ou rcond via np.linalg.lstsq / scipy cho_factor) et lever/avertir au-delà d'un seuil cohérent avec H5_TOL=1e-6 du filtre ; utiliser une factorisation de Cholesky avec repli explicite.",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits cités sont exacts : (1) compute_h5_residual l.101 résout M via np.linalg.solve sans aucun contrôle de conditionnement ; (2) compute_AB l.138-141 impose cond(SV) ≤ 1e12 — l'asymétrie est réelle ; (3) gss_filter._check_h5 l.257-269 ne capte que LinAlgError (singularité exacte LAPACK) ; (4) M est bien symétrique PD sous les hypothèses (docstring l.84 le dit lui-même : M = [C D] Σ_joint [C D]ᵀ + Σ_V), donc cho_solve/assume_a='pos' est pertinent, et scipy>=1.14 est déjà dans pyproject.toml. Démonstration empirique : avec Σ_V exactement singulière, M reste numériquement inversible (cond ≈ 1.4e16), solve réussit sans exception et un modèle satisfaisant H5 en arithmétique exacte renvoie un résidu relatif de 0.318 — résultat arbitraire, silencieux. Réserves (la trouvaille exagère sur trois points sans être fausse) : (a) « fréquent en EM » est surévalué — supervised.py:254-255 et semi_supervised.py:247 plafonnent les valeurs propres de Σ_V à 1e-8 via _nearest_spd, et λ_min(M) ≥ λ_min(Σ_V) quand la covariance jointe est PSD, donc M quasi-singulier exige des échelles de signal extrêmes après apprentissage ; (b) sur un balayage de 200 graines, la corruption ne dépasse H5_TOL=1e-6 qu'à partir de cond(M) ≳ 1e13-1e14 (à cond=4e11 l'erreur reste ~1e-8) ; (c) _check_h5 est purement consultatif (RuntimeWarning), il ne « conditionne » pas le choix du filtre ; (d) la direction d'erreur réaliste est une fausse violation (résidu gonflé → avertissement intempestif, conservateur), pas un faux « ok » masquant un filtre biaisé. Le défaut est réel, le correctif proposé est sain, mais l'impact pratique est étroit et limité au diagnostic : la sévérité [low] est correctement calibrée.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/h5_constraint.py",
+          "line": "108-150, 65-102",
+          "severity": "low",
+          "category": "robustness",
+          "title": "Aucune validation de formes ni de symétrie : Δ transposé accepté silencieusement quand q=s",
+          "description": "Ni compute_AB ni compute_h5_residual ne vérifient la cohérence des dimensions (Dt de forme (q,s) avec q=C.shape[1], s=SV.shape[0]) ni la symétrie de Σ_V (dont dépend la preuve de suffisance de la forme AB : Σ_V⁻ᵀ=Σ_V⁻¹). Pour q≠s, numpy lève des ValueError de matmul cryptiques (sans mention du paramètre fautif) ; pour q=s — configuration majoritaire du dépôt (q1_s1) — passer Δᵀ au lieu de Δ produit silencieusement un (A,B) faux. Vérifié : avec q=s=2, compute_AB(C,D,Dt.T,SV) renvoie ‖A_ok−A_bad‖=1.04 et un résidu (H5) de 0.72 au lieu de 0. Vu l'historique du projet (commit 141fd11 : bug de transposition ayant survécu parce que projecteur et vérificateur partageaient la même erreur), des asserts de forme peu coûteux sont justifiés dans ce module précisément.",
+          "evidence": "Exécution : « 4. transposed Dt accepted silently; ||A_ok - A_bad|| = 1.0449 ; residual with wrong Dt orientation: 0.7200 ». Aucun check de shape dans les deux fonctions (l.108-150, 65-102).",
+          "suggestion": "En tête de chaque fonction : valider C.shape=(s,q), D.shape=(s,s), Dt.shape=(q,s), SV.shape=(s,s) à partir de s=SV.shape[0], q=C.shape[1], et `np.allclose(SV, SV.T)` (tolérance relative). La transposition q=s reste indétectable par les formes, mais la symétrie de SV et les autres formes seraient verrouillées.",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes. (1) Lignes correctes : compute_h5_residual l.65-102 et compute_AB l.108-150 de prg/utils/h5_constraint.py ne contiennent aucune validation de forme ni de symétrie de Σ_V (compute_AB ne vérifie que conditionnement/singularité de SV). (2) Reproduit indépendamment : avec q=s=2 et Δ asymétrique, compute_AB(C,D,Dt.T,SV) s'exécute sans erreur et renvoie un (A,B) faux (‖A_ok−A_bad‖=0.147, résidu H5 = 0.389 vs ~2e-15 pour le bon Δ ; les chiffres de l'auditeur 1.0449/0.7200 dépendent de ses matrices aléatoires mais le phénomène est confirmé). (3) Pour q≠s, l'erreur est bien un ValueError matmul cryptique ('mismatch in its core dimension 0, gufunc signature...') sans mention du paramètre fautif. (4) Σ_V asymétrique accepté silencieusement. (5) Le commit 141fd11 existe et correspond exactement : bug de transposition Δᵀ A → Δᵀ Aᵀ ayant survécu parce que projection et vérificateur partageaient l'erreur. Seule imprécision mineure : pour la config q1_s1 (majoritaire), Δ est 1×1 donc Δᵀ=Δ et le risque de transposition est sans conséquence là ; il ne mord que pour q=s≥2. Cela n'invalide pas la trouvaille, dont la sévérité [low] est bien calibrée (manque de garde-fous, pas un bug actuel, mais précédent historique documenté dans ce module précis).",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "paper/appendix/B_h5_derivation.tex",
+          "line": "100-103, 139-152",
+          "severity": "medium",
+          "category": "math",
+          "title": "Appendice B du papier : l'étape 4 contient des identités fausses et la réduction « j=k nécessaire et suffisant » est incorrecte",
+          "description": "Deux problèmes dans la source mathématique citée par le docstring du module. (1) l.100-103 : « For this to hold for all source regimes j, it is sufficient and necessary to enforce (h5_beta1) in the special case j=k » — la direction « suffisant » est fausse : le contre-exemple numérique (voir finding sur le résidu) exhibe (A,B) satisfaisant l'équation diagonale mais violant la paire (j,k), j≠k. Ce qui est vrai (et prouvé ici) : la forme AB satisfait toutes les paires ; mais l'équation diagonale seule ne les implique pas. (2) l.139-152 : l'expansion de T M⁻¹ R s'appuie sur « Q_Aᵀ = C Σ_U + D Δᵀ = Q » — faux : Q_A = A Σ_U + B Δᵀ donc Q_Aᵀ = Σ_U Aᵀ + Δ Bᵀ ≠ Q ; et « Q_A Cᵀ + Q_B Dᵀ + Σ_V = M » — faux aussi (c'est le bloc XY de F P Fᵀ, de forme q×s, dimensionnellement incompatible avec M (s×s) dès que q≠s ; le bloc YY est Q Cᵀ + R Dᵀ). L'équation finale (eq:h5_compact_app, l.155-158) reste néanmoins CORRECTE : elle s'obtient directement en transposant A Δ + B Σ_V = T M⁻¹ R puisque Tᵀ = Q Aᵀ + R Bᵀ + Δᵀ et Rᵀ = P — c'est la dérivation propre, vérifiée ici symboliquement et numériquement. Le code implémente la bonne équation finale ; seul le chemin de preuve du papier est cassé.",
+          "evidence": "B_h5_derivation.tex:151 « where we used Q_Aᵀ = C Σ_U + D Δᵀ = Q (Q_A = Qᵀ) » alors que Q_A := A Σ_U + B Δᵀ (l.140) ; l.145-146 « Q_A Cᵀ + Q_B Dᵀ + Σ_V is exactly [F·P(r)·Fᵀ + Σ_W]_YY = M » (bloc XY, pas YY ; forme q×s vs s×s). Contre-exemple du caractère non-suffisant de j=k : résidu diagonal 4e-16, résidu croisé 4.62.",
+          "suggestion": "Remplacer l'étape 4 par la transposition directe (Tᵀ = Q Aᵀ + R Bᵀ + Δᵀ, Rᵀ = P, M = Mᵀ). Reformuler la réduction j=k : l'équation diagonale est nécessaire (si p_kk>0) ; la suffisance pour toutes les paires vaut pour la solution AB spécifiquement (preuve par substitution dans la paire (j,k) générale), pas pour toute solution de l'équation diagonale.",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur les fichiers réels et reproduites numériquement. (1) B_h5_derivation.tex:100-103 affirme bien « sufficient and necessary » pour la réduction j=k ; contre-exemple reproduit indépendamment (seed différent) : (A,B) non-AB résolvant l'équation diagonale (résidu 4.4e-16) viole la paire croisée (j,k) (résidu 3.84) — la suffisance est fausse. La forme AB, elle, satisfait toutes les paires (résidus ~2e-16 ; preuve structurelle : Cov(U−GV, V)=0 avec G=ΔΣ_V⁻¹ rend le résidu indépendant de (Y_n,Y_{n+1}) quelle que soit la loi source). (2) l.151 « Q_Aᵀ = CΣ_U + DΔᵀ = Q » est fausse : Q_A = AΣ_U + BΔᵀ donc Q_Aᵀ = Σ_U Aᵀ + ΔBᵀ ; écart numérique 4.25, et formes (3,3) vs (1,3) pour q=3,s=1 — dimensionnellement impossible. (3) l.145-146 « Q_A Cᵀ + Q_B Dᵀ + Σ_V = M » est fausse : c'est le bloc XY de FPFᵀ (forme q×s vs s×s) ; écart 20.3 dans le cas carré ; le vrai bloc YY est QCᵀ + RDᵀ + Σ_V = M (écart 0.0, conforme à eq:def_RM dans 04_constraint.tex:35). (4) L'équation finale eq:h5_compact_app (l.155-158) est correcte : Tᵀ = QAᵀ + RBᵀ + Δᵀ vérifié à 1e-16 pour (A,B) quelconque, donc transposition directe de eq:h5_first. (5) compute_h5_residual dans prg/utils/h5_constraint.py implémente la bonne équation finale, et son docstring énonce déjà correctement la nuance suffisance/nécessité que le papier rate. Sévérité medium bien calibrée : pas d'impact code, mais preuve du papier cassée (identités fausses + équivalence incorrecte)."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tout vérifié indépendamment (lecture de paper/appendix/B_h5_derivation.tex, paper/sections/04_constraint.tex, prg/utils/h5_constraint.py + vérification numérique). (1) l.100-103 : la direction « suffisant » de la réduction j=k est fausse — l'équation diagonale est linéaire en (A,B) avec une famille affine de dimension q² de solutions ; j'ai construit une solution non-AB (résidu diagonal 1.0e-15) dont le résidu de la paire croisée j≠k vaut 4.76e-1 ≠ 0, alors que la forme AB satisfait toutes les paires à la précision machine (pire cas 9.2e-16 sur 50 lois sources aléatoires ; aussi prouvé analytiquement : sous AB, T_jk = Δ_k Σ_V,k⁻¹ M_jk). La nécessité (si p_kk>0) tient. (2) l.139-152 : « Q_Aᵀ = C Σ_U + D Δᵀ = Q » est faux (Q_A est q×q, Q est s×q — dimensionnellement impossible pour q≠s) ; « Q_A Cᵀ + Q_B Dᵀ + Σ_V = [F P Fᵀ + Σ_W]_YY = M » est faux (vérifié : Q_A Cᵀ + Q_B Dᵀ = T − Δ = bloc XY de F P Fᵀ, q×s ; le bloc YY est Q Cᵀ + R Dᵀ) ; l'équation l.147-150 ne compose même pas dimensionnellement pour q≠s. (3) L'équation finale eq:h5_compact_app est correcte et s'obtient par transposition directe (Tᵀ = Q Aᵀ + R Bᵀ + Δᵀ vérifié numériquement, R = Pᵀ, M = Mᵀ) — c'est exactement ce qu'implémente compute_h5_residual (h5_constraint.py:95-101). Chemin d'impact réel : l'appendice est inclus dans le build (paper.tex:57), cité comme source par le docstring du module, et l'équivalence fausse justifie le check de résidu par régime utilisé pour valider mode='h5_exact' (gss_filter.py:244-272). Sévérité medium bien calibrée : erreur mathématique détectable par un reviewer dans la dérivation de la contrainte centrale du papier, mais aucun code ni résultat numérique affecté (le code implémente la bonne équation et tous les modèles de référence utilisent la forme AB qui satisfait réellement toutes les paires)."
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/matrix_checks.py",
+          "line": "36, 191-203",
+          "severity": "medium",
+          "category": "robustness",
+          "title": "Tolérance de symétrie ABSOLUE (1e-10) non invariante d'échelle : rejette des covariances légitimes à grande échelle, accepte des asymétries grossières à petite échelle",
+          "description": "CovarianceMatrix utilise max|M−Mᵀ| < _EPS_SYM = 1e-10 en absolu. Une covariance d'entrées ~1e8 (données non normalisées, prix, volumes) avec une asymétrie purement due aux arrondis float64 (relative ~5e-9, soit l'epsilon machine accumulé) échoue : vérifié, FAIL avec value=1.0. Comme ce checker GATE la construction de GSSNoiseCovariance (NoiseCovariance.py:112-117) et de GSSParams (GSSParams.py:123-128), une boucle EM sur données à grande échelle peut planter avec CovarianceError alors que la matrice est symétrique au sens flottant. Inversement, une matrice 2×2 d'entrées ~1e-11 avec asymétrie relative de 200% passe le check de symétrie (2e-11 < 1e-10). Le même problème d'absolu existe en principe pour _EPS_STOCH mais les matrices stochastiques sont O(1), donc sans conséquence.",
+          "evidence": "Exécution : M=[[1e8, 2e8+1],[2e8, 5e8]] → « Symmetric FAIL value=1.0 » (asymétrie relative 5e-9) ; M=[[1e-12,3e-11],[1e-11,1e-12]] → check Symmetric OK malgré une asymétrie relative de 2x.",
+          "suggestion": "Rendre la tolérance relative : sym_err < _EPS_SYM * max(1.0, np.max(np.abs(M))) (ou comparer à ‖M‖∞), et symétriser en amont ((M+Mᵀ)/2) dans les producteurs EM avant validation.",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits vérifiés sur le code réel. (1) prg/utils/matrix_checks.py:36 définit bien _EPS_SYM = 1e-10 et la vérification de symétrie (lignes 191-203) utilise max|M−Mᵀ| < 1e-10 en ABSOLU. (2) Les gates existent et sont inconditionnels (hors __debug__) : NoiseCovariance.py:112-117 (Sigma_W) et GSSParams.py:123-128 (Sigma_z0) lèvent CovarianceError si report.is_valid est faux. (3) Les deux repros numériques de la trouvaille sont exacts : M=[[1e8,2e8+1],[2e8,5e8]] → Symmetric FAIL value=1.0 (asymétrie relative 5e-9, pur arrondi float) ; et à petite échelle, M=[[1e-11,1e-12],[5e-12,1e-11]] (asymétrie relative 400%) passe TOUT le gate avec overall=OK car np.linalg.cholesky ne lit qu'un triangle — le faux-accept est donc complet, pas seulement sur le check de symétrie. (4) Le scénario « apprentissage à grande échelle plante » est démontré de bout en bout : fit_supervised sur données ~1e5 d'écart-type (covariances ~1e10) produit des blocs dont l'asymétrie d'arrondi atteint ~4.5e-7, et GSSNoiseCovariance(...) lève CovarianceError. Point aggravant non noté par la trouvaille : les producteurs symétrisent DÉJÀ ((SigW+SigWᵀ)/2 à supervised.py:237 et semi_supervised.py:316, et _nearest_spd symétrise en entrée), mais la reconstruction spectrale (vecs*vals)@vecs.T de _nearest_spd (supervised.py:178) réintroduit une asymétrie au niveau ulp PROPORTIONNELLE à l'échelle (mesuré : 1.5e-8 à l'échelle 1e8, 1.6e-6 à 1e10), donc la simple consigne « symétriser en amont » est insuffisante telle quelle — il faut la tolérance relative ET/OU une symétrisation finale après _nearest_spd. Seule imprécision mineure : le gate ne se déclenche pas DANS les itérations EM (semi_supervised ne construit pas de GSSParams en boucle, seulement compute_AB), mais à la consommation du dict appris (GUI main_window.py:2032-2036/2198, run_simulations.py:88-96, h5_constraint.py:230) — le pipeline plante bien, juste à la construction des objets params. Sévérité medium correcte : crash réel et reproductible sur le chemin principal apprentissage→params pour des données non normalisées (échelle covariance ≥ ~1e8), mais contournable par normalisation et sans corruption silencieuse côté grande échelle (le faux-accept à petite échelle est lui silencieux mais concerne des matrices quasi dégénérées)."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Faits vérifiés sur le code réel : _EPS_SYM=1e-10 absolu (prg/utils/matrix_checks.py:36, check lignes 191-203), et ce checker gate bien la construction de GSSNoiseCovariance (prg/classes/NoiseCovariance.py:112-117) et de GSSParams (GSSParams.py:122-129). Les deux repros du finding sont reproduits : M=[[1e8,2e8+1],[2e8,5e8]] → Symmetric FAIL value=1.0 ; la matrice ~1e-11 avec asymétrie relative 2x passe le check Symmetric (2e-11<1e-10) — nuance : dans cet exemple précis, PositiveDefinite la rattrape ensuite ; le côté « accepte des asymétries grossières » reste démontrable (Cholesky n'utilise que le triangle inférieur) mais est contrived et de faible impact.\n\nLe scénario d'impact est ATTEIGNABLE et démontré de bout en bout : le propre producteur du projet, _nearest_spd (supervised.py:167-178, utilisé aussi partout dans semi_supervised.py), retourne (vecs*vals)@vecs.T qui n'est PAS exactement symétrique en float (asymétrie mesurée jusqu'à 2.4e-7 à l'échelle 1e8, ~40% des tirages 2x2 dépassent 1e-10). Chemin d'appel réel sans round-trip fichier : fit_supervised/fit_semi_supervised → scripts/params_utils.params_from_dict → GSSNoiseCovariance/GSSParams, consommé par scripts/e2_filter_comparison.py, scripts/e3_bw_em.py, prg/experiments/run_em.py, run_supervised.py, run_real_data.py. Test end-to-end exécuté : mêmes données simulées (prix régime-switching), simple changement d'unité x100 (covariances ~1e10) → CovarianceError sur 13/20 seeds, avec asymétrie purement float (relative ~5e-17). La matrice est symétrique au sens flottant mais rejetée comme « not symmetric positive definite ».\n\nImprécisions mineures qui ne changent pas la conclusion : (1) la boucle EM elle-même (_em_run) n'appelle jamais le checker — le crash survient juste APRÈS l'EM, à la conversion params_from_dict avant filtrage (même effet utilisateur : le pipeline plante) ; (2) le chemin CLI supervisé standard est protégé par hasard car le modèle généré est sérialisé en %.10g, ce qui tue les asymétries d'ulp ; (3) l'expérience real-data livrée standardise ses données (O(1)), donc les workflows actuels du dépôt ne déclenchent pas le bug. Le seuil de déclenchement observé est covariances ≳1e9 (à ~2e6 l'asymétrie reste sous 1e-10) — atteignable avec volumes ou prix en centimes non normalisés.\n\nSévérité medium correcte : bug réel, démontré, sur un chemin d'API destiné à la réutilisation (params_from_dict, GUI, GSSParams), crash non-silencieux avec message trompeur ; mais nécessite des données non normalisées à grande échelle, workaround trivial (normaliser), et les workflows livrés du dépôt ne le déclenchent pas. Le correctif proposé (tolérance relative ‖M‖∞ + symétrisation chez les producteurs — noter que _nearest_spd symétrise en ENTRÉE mais pas sa SORTIE) est approprié."
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/matrix_checks.py",
+          "line": "45-49, 205-229",
+          "severity": "info",
+          "category": "style",
+          "title": "Le niveau Status.WARNING est du code mort ; PD strict exigé (PSD-singulier rejeté) ; pas d'alerte de quasi-singularité",
+          "description": "Trois observations mineures liées. (1) Aucun check n'émet jamais Status.WARNING : l'enum, overall_status et is_ok/is_valid gèrent un niveau qui ne peut pas se produire. (2) CovarianceMatrix exige la PD stricte via Cholesky : une covariance PSD-singulière légitime (ex. Σ_z0 déterministe, diag(1,0)) est classée FAIL — choix cohérent avec l'hypothèse Σ(r) ≻ 0 du cadre (H5), mais non documenté comme tel (le terme « covariance » suggère PSD). (3) Une matrice PD avec valeur propre 1e-300 ou cond=1e15 passe OK sans avertissement, alors que compute_AB refusera ensuite cond>1e12 : le niveau WARNING serait l'endroit naturel pour signaler la quasi-singularité et rendre les diagnostics cohérents avec les seuils du module h5.",
+          "evidence": "Exécution : CovarianceMatrix(np.diag([1.0, 0.0])).check() → FAIL. Grep : aucun `Status.WARNING` n'est construit dans matrix_checks.py en dehors de l'enum et de l'agrégation.",
+          "suggestion": "Émettre WARNING quand cond(M) > 1e12 (aligné sur compute_AB) ou min_eig < eps·trace ; documenter explicitement que la PD stricte est requise par conception (H5).",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur le code réel. (1) Status.WARNING n'est jamais émis : grep confirme qu'il n'apparaît que dans l'enum (l.47), __str__ (l.53) et l'agrégation overall_status (l.93-94) ; tous les CheckResult construits utilisent OK ou FAIL, et aucun autre module du dépôt ne construit de CheckResult — is_ok et is_valid sont donc toujours équivalents. (2) Exécution confirmée : CovarianceMatrix(np.diag([1.0, 0.0])).check() → FAIL (FAIL:PositiveDefinite, Cholesky l.205-229). Seule micro-nuance : la docstring de classe (l.126) dit explicitement « symmetric positive definite (SPD) », donc la PD stricte est documentée localement, même si le lien avec H5 ne l'est pas. (3) Exécution confirmée : diag(1, 1e-300) → OK et diag(1, 1e-15) (cond=1e15) → OK, alors que compute_AB (h5_constraint.py l.138-141) lève ValueError si cond(Σ_V) > 1e12 — l'incohérence de seuils est réelle. Les numéros de ligne cités (45-49, 205-229) sont exacts. Sévérité [info] bien calibrée : observation de qualité/cohérence des diagnostics, pas de bug d'exécution.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/h5_constraint.py",
+          "line": "156-241",
+          "severity": "low",
+          "category": "robustness",
+          "title": "apply_AB_constraint peut produire un modèle non stationnaire en moyenne quadratique sans aucun avertissement",
+          "description": "La forme close remplace A et B par Δ Σ_V⁻¹ C et Δ Σ_V⁻¹ D, dont la norme n'est pas contrôlée : avec Σ_V petit et Δ grand (cas EM réaliste), le F(k) reconstruit peut avoir un rayon spectral (ou un rayon spectral du système commuté) ≥ 1. Ni apply_AB_constraint, ni le constructeur GSSParams ne le détectent ; en aval, _precompute_stationary (gss_filter.py:339-371) itère alors un point fixe divergent pendant 1000 itérations et se contente d'un logger.warning « did not fully converge », laissant potentiellement des inf/NaN dans les moments stationnaires utilisés par le filtre. Notons aussi que la validation de formes de FMatrix appelée lors de la reconstruction est enveloppée dans `if __debug__:` (FMatrix.py:75-77) : sous `python -O`, le GSSParams reconstruit n'est plus validé du tout. Enfin, le nouveau GSSParams partage noise_cov par référence avec l'ancien (l.236) et les accesseurs renvoient les tableaux internes sans copie (NoiseCovariance.py:191-199) — aliasing mutable théorique entre l'objet « nouveau » promis par le docstring et l'original.",
+          "evidence": "l.230-241 : reconstruction sans contrôle spectral, `noise_cov=params.noise_cov` partagé ; gss_filter.py:364-371 : divergence du point fixe réduite à un warning de log.",
+          "suggestion": "Après calcul des A_new/B_new, évaluer le rayon spectral de chaque F(k) (et idéalement du produit pondéré par p_rev) et émettre un warning explicite (« le modèle AB-contraint n'est plus stable ») ; documenter le partage de noise_cov ou en faire une copie.",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles vérifiées sur le code réel, avec reproduction numérique. (1) apply_AB_constraint (h5_constraint.py:156-241) reconstruit A,B sans aucun contrôle spectral ; compute_AB ne vérifie que cond(Σ_V)>1e12, invariant d'échelle, qui ne borne pas ‖Δ Σ_V⁻¹‖. Reproduction : Σ_U=4, Δ=0.19, Σ_V=0.01 (covariance strictement DP), C=0.1, D=0.05 → rho(F(k))=1.95, sans avertissement. (2) Aucune vérification de stabilité dans GSSParams ni dans prg/learning/. (3) _precompute_stationary (gss_filter.py:338-371) diverge alors : les seconds moments débordent vers inf puis NaN, et le filtre cache des _Sigma entièrement NaN. La trouvaille est même en-deçà de la réalité : à cause de max(0, nan)==0 dans le calcul de diff (l.357), la boucle journalise faussement « converged in 532 iterations (Δ=0.00e+00) » en DEBUG — le logger.warning « did not fully converge » ne se déclenche même pas dans le cas overflow. (4) Validation FMatrix sous `if __debug__:` confirmée (lignes 73-75, la trouvaille dit 75-77, décalage de 2 lignes sans incidence) ; la validation de GSSParams.__init__ est elle aussi sous `if __debug__:` (GSSParams.py:88-94), donc sous python -O le modèle reconstruit n'est effectivement plus validé. (5) Aliasing confirmé empiriquement : p2.noise_cov is p.noise_cov == True, les accesseurs (NoiseCovariance.py:181-201) renvoient les tableaux internes writeable, et muter Sigma_V(0) du « nouveau » objet mute l'original. Sévérité [low] correcte : le déclenchement exige un ratio Σ_U/Σ_V extrême et l'échec se manifeste par des NaN visibles en aval (pas des résultats faussement plausibles), même si le faux message « converged » est un défaut de diagnostic aggravant.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/h5_constraint.py",
+          "line": "55-59",
+          "severity": "info",
+          "category": "api",
+          "title": "compute_SU_from_h5 (cité dans la demande d'audit) n'existe plus : supprimé en v0.12.0 et interdit par test",
+          "description": "La fonction compute_SU_from_h5 mentionnée dans le périmètre d'audit a été supprimée au commit 3089e5d (« replace per-matrix H5 projections with Lehmann's closed form », v0.12.0) avec les autres projections par matrice (compute_A_from_h5, compute_B_from_h5, compute_C_from_h5), et son nom est désormais activement interdit par tests/test_no_stale_refs.py:35-44. Le module actuel n'expose que compute_AB, apply_AB_constraint et compute_h5_residual ; aucune reconstruction de covariance n'y subsiste, donc les préoccupations de symétrie/PSD d'un Σ_U reconstruit sont sans objet dans le code courant. L'historique confirme par ailleurs que le bug de transposition Δᵀ A → Δᵀ Aᵀ (141fd11) touchait l'ancienne famille de fonctions ; la version actuelle est saine sur ce point.",
+          "evidence": "git log : 3089e5d « feat(h5)!: replace per-matrix H5 projections with Lehmann's closed form (v0.12.0) » ; tests/test_no_stale_refs.py:35-36 bannit le nom compute_SU_from_h5 ; __all__ = [apply_AB_constraint, compute_AB, compute_h5_residual] (l.55-59).",
+          "suggestion": "Aucune action code. Mettre à jour les consignes/documents d'audit internes qui référencent encore compute_SU_from_h5.",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur le dépôt réel : (1) prg/utils/h5_constraint.py:55-59 expose exactement __all__ = [apply_AB_constraint, compute_AB, compute_h5_residual] et aucune reconstruction de Σ_U ne subsiste (Σ_U n'est qu'une entrée de compute_h5_residual) ; (2) git show 3089e5d confirme le message « feat(h5)!: replace per-matrix H5 projections with Lehmann's closed form (v0.12.0) » et le diff montre la suppression de compute_SU_from_h5, compute_A/B/C_from_h5 et apply_h5_constraint ; (3) tests/test_no_stale_refs.py bannit \\bcompute_SU_from_h5\\b (lignes 34-38, le finding cite 35-44 — décalage mineur sans incidence) et un grep repo-wide ne trouve le nom que dans CHANGELOG.md et le test lui-même, tous deux whitelistés ; (4) le commit 141fd11 (« correct LHS typo (Δᵀ A → Δᵀ Aᵀ) and rederive compute_SU_from_h5 », 6 mai 17:13) corrigeait bien l'ancienne famille de fonctions et précède 3089e5d (18:25) ; la version actuelle utilise la forme correcte Z = Dt.T @ A.T + SV @ B.T (ligne 100). La trouvaille est factuellement exacte, le correctif proposé (mise à jour des consignes d'audit, aucune action code) est approprié, et la sévérité [info] est bien calibrée."
+            }
+          ]
+        },
+        {
+          "file": "tests/test_h5_constraint.py",
+          "line": "76-203",
+          "severity": "low",
+          "category": "robustness",
+          "title": "Lacunes du contrat de test : pas de paires croisées, pas de q≠s pour apply_AB_constraint, pas de comparaison à une vérité indépendante",
+          "description": "La suite teste : formes de sortie, résidu nul sur la variété AB (y compris indépendance en Σ_U — bon test), Σ_V=0 → ValueError, Δ=0 → A=B=0, préservation/idempotence d'apply_AB_constraint, résidu non nul pour (A,B) aléatoires. Manques notables au vu des findings : (1) aucun test des équations de paires croisées (j≠k) — la propriété « K² regime-pair equations » revendiquée par le module n'est jamais vérifiée, et la non-suffisance du résidu diagonal n'est pas documentée par un test ; (2) apply_AB_constraint n'est testé que sur model_gss_K2_q1_s1 (q=s=1), où toute erreur de transposition est invisible — l'expérience du commit 141fd11 montre que résiduel et projection peuvent être faux de manière auto-cohérente, seul un cas rectangulaire q≠s end-to-end le détecterait ; (3) pas de test du contrat d'exception pour Σ_V non fini (qui échoue aujourd'hui : LinAlgError au lieu de ValueError) ; (4) compute_h5_residual n'est jamais confronté à une référence indépendante (ex. β₁ estimé par régression Monte-Carlo sur des tirages gaussiens), seule l'auto-cohérence avec compute_AB est testée — précisément le mode de défaillance qui a masqué le bug historique.",
+          "evidence": "tests/test_h5_constraint.py : fixture unique params_K2_q1_s1 (l.62-70) pour tout TestApplyABConstraint ; aucune occurrence de paire (j,k) croisée ; compute_AB testé en q=2,s=3 mais seulement contre compute_h5_residual.",
+          "suggestion": "Ajouter : un test de paires croisées sur la forme AB (résidu (j,k) nul pour tout j) et un test négatif (solution diagonale non-AB → résidu croisé non nul) ; un fixture q≠s pour apply_AB_constraint ; un test Monte-Carlo de β₁≈0 sous AB ; un test NaN/Inf → ValueError une fois le contrat d'exception corrigé.",
+          "dimension": "h5-constraint",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles vérifiées sur le code réel. (1) tests/test_h5_constraint.py ne contient aucun test de paire croisée (j≠k) alors que h5_constraint.py (l.18, 119-120) revendique les K² équations de paires ; vérification numérique : la forme AB annule bien le β₁ croisé (~4e-17), mais le système diagonal a un noyau de dimension q² — une solution diagonale non-AB (résidu diagonal ~3e-17) donne un β₁ croisé de 0.073, donc la non-suffisance du résidu diagonal est réelle et les tests proposés sont faisables. (2) apply_AB_constraint n'est testé que via la fixture params_K2_q1_s1 (l.61-70, modèle q=1, s=1, scalaires) et n'apparaît dans aucun autre fichier de test ; le commit 141fd11 existe et son message confirme mot pour mot le masquage par auto-cohérence (\"tests passed because the buggy projection and the buggy verifier were aligned with each other\"). (3) Exécution confirmée : compute_AB avec Σ_V=NaN lève LinAlgError (\"SVD did not converge\") au lieu du ValueError documenté ; nuance mineure : Σ_V=Inf lève bien ValueError via le garde cond>1e12, donc \"non fini\" est légèrement trop large. (4) Aucun test Monte-Carlo/référence indépendante dans tests/ ; compute_h5_residual n'est confronté qu'à compute_AB (auto-cohérence). Deux légères exagérations (\"seul un cas rectangulaire le détecterait\" — un test MC le détecterait aussi, et q≠s ne discrimine pas A vs Aᵀ pour les blocs carrés ; le cas Inf) ne changent pas le fond. Sévérité [low] bien calibrée pour une lacune de couverture de tests sans bug actuel.",
+              "severityAdjustment": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dimension": "model-classes",
+      "scope_summary": "Audit intégral des quatre classes du modèle (GSSParams.py 425 l., GSSSimulator.py 289 l., NoiseCovariance.py 235 l., FMatrix.py 197 l.) plus prg/simulate.py, avec lecture des dépendances (matrix_checks.py, exceptions.py, h5_constraint.py, base_gss_model.py) et vérifications numériques exécutées dans le venv du dépôt (numpy 2.4.4). Santé générale bonne: le simulateur échantillonne exactement le modèle génératif documenté (ordre régime→état, conditionnement sur le nouveau régime, graine reproductible — validé statistiquement sur 4·10^5 pas), les entrées sont copiées à la construction, et les gardes récents de _compute_stationary sont mathématiquement corrects sur les cas périodiques, réductibles et transitoires (le cas « signes mixtes » produit en fait encore une loi exactement stationnaire grâce aux supports disjoints des classes récurrentes; seuls les libellés des warnings surinterprètent). Les points sérieux sont d'ordre robustesse/API: toute la validation structurelle disparaît sous `python -O` (P non stochastique et formes invalides acceptées silencieusement), x_n/y_n retournés sont des vues de l'état interne du simulateur (mutation par l'appelant = trajectoire corrompue), FMatrix n'a aucun contrôle de finitude (NaN acceptés), b_list n'est pas validée en longueur, tous les accesseurs exposent les tableaux internes par référence mutable, et l'option CLI --output ignore silencieusement le nom de fichier fourni.",
+      "findings": [
+        {
+          "file": "prg/classes/GSSParams.py",
+          "line": "88-94",
+          "severity": "high",
+          "category": "robustness",
+          "title": "Toute la validation structurelle est désactivée sous `python -O` (gardée par `__debug__`)",
+          "description": "GSSParams._validate_* (stochasticité de P, forme de pi0, dimensions de mu_z0/Sigma_z0, cohérence K/q/s) n'est exécutée que `if __debug__:`. Idem FMatrix.py:73-75, NoiseCovariance.py:85-87, et le contrôle de finitude du simulateur (GSSSimulator.py:146-148). Sous `python -O`, vérifié empiriquement: une P avec ligne sommant à 1.4 ET un pi0 sommant à 1.4 sont acceptés à la construction (l'échec ne survient que plus tard dans rng.choice, ou jamais si numpy tolère); un mu_z0 de forme (2,) au lieu de (2,1) passe et produit par broadcasting un x_n de forme (1,2) — données silencieusement fausses. Cela contredit la docstring ('It validates every parameter at construction time so that downstream code can assume correctness'). Seuls les contrôles SPD (GSSParams.py:121-129, NoiseCovariance.py:110-119) survivent à -O car hors du bloc __debug__.",
+          "evidence": "GSSParams.py:88 `if __debug__:` englobe _validate_P/_validate_pi0/_validate_initial_conditions. Test sous -O: « non-stochastic P AND pi0 sum=1.4 ACCEPTED at construction »; « mu shape (2,) accepted; x_n shape = (1, 2) -> silent garbage ».",
+          "suggestion": "Sortir la validation du bloc `if __debug__:` (le coût est négligeable, une fois à la construction), ou réserver __debug__ aux seuls contrôles per-step du simulateur. A minima, corriger la docstring.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits sont exacts et reproduits indépendamment. (1) Les numéros de ligne sont corrects: GSSParams.py:88-94 (`if __debug__:` englobe _validate_scalars/_validate_P/_validate_fmatrix/_validate_noise_cov/_validate_pi0/_validate_initial_conditions), FMatrix.py:73-75, NoiseCovariance.py:85-87, GSSSimulator.py:146-148 (contrôle isfinite). (2) Les contrôles SPD (GSSParams.py:121-129, NoiseCovariance.py ~110-119) sont bien hors bloc __debug__ et survivent à -O. (3) Reproduction empirique sous `python -O`: P avec ligne sommant à 1.4 ET pi0 sommant à 1.4 acceptés à la construction sans erreur; mu_z0 de forme (2,) accepté, le simulateur produit x_n de forme (1,2) au lieu de (1,1) par broadcasting — données silencieusement fausses, et le contrôle de finitude est lui aussi désactivé. Sous python normal, ParamError est levée dans les deux cas. (4) La docstring (GSSParams.py:12-13) promet bien la validation à la construction, contredite sous -O. Cependant la sévérité 'high' est surcalibrée: le déclencheur exige le flag non-défaut `python -O`/PYTHONOPTIMIZE, rare pour du code de recherche (tests, scripts et GUI tournent en mode normal). Vrai anti-pattern (validation de données gardée par __debug__) avec conséquence grave mais exposition faible → medium.",
+              "severityAdjustment": "medium"
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits sont vérifiés: les gardes `if __debug__:` existent bien aux quatre emplacements cités (GSSParams.py:88, FMatrix.py:73, NoiseCovariance.py:85, GSSSimulator.py:146) et seuls les contrôles SPD survivent à -O. Reproduction empirique exacte sous `python -O`: P avec ligne sommant à 1.4 + pi0 sommant à 1.4 acceptés à la construction (échec différé dans rng.choice), et mu_z0 de forme (2,) produit silencieusement x_n/y_n de forme (1,2) au lieu de (1,1) — corruption silencieuse confirmée. La contradiction avec la docstring (GSSParams.py:12-13) est réelle. MAIS la sévérité 'high' est surcalibrée: rien dans le dépôt (Makefile, scripts, pyproject, docs, tests) n'invoque jamais `python -O` ou PYTHONOPTIMIZE; le garde est présent depuis le premier commit du fichier (idiome délibéré, sémantique documentée de Python, équivalente à `assert`); le scénario exige qu'un utilisateur active volontairement un mode rare ET fournisse des paramètres malformés qui auraient été attrapés lors de tout run de développement sans -O. Le potentiel de corruption silencieuse et le fait que le paquet soit installable (un downstream pourrait tourner sous PYTHONOPTIMIZE) justifient 'medium' plutôt que 'low'. Le correctif proposé (sortir la validation à coût unique du bloc __debug__, garder __debug__ pour le check per-step du simulateur) est raisonnable.",
+              "severityAdjustment": "medium"
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSSimulator.py",
+          "line": "150-158",
+          "severity": "medium",
+          "category": "bug",
+          "title": "x_n et y_n retournés sont des VUES de l'état interne _z_prev — une mutation par l'appelant corrompt la trajectoire",
+          "description": "`x_n = z_n[:q, :]` et `y_n = z_n[q:, :]` sont des slices (vues) du même tableau qui est conservé comme `self._z_prev` (ligne 151). Vérifié: `x.base is sim._z_prev` est True; après `x[0,0] = 999.0` par l'appelant, le pas suivant part de z_prev corrompu et la trajectoire diverge silencieusement. Risque réel en code de recherche où l'utilisateur post-traite les tableaux retournés (normalisation in place, etc.).",
+          "evidence": "Test: « x is view of z_prev: True | y view: True »; « trajectory corrupted by caller mutation: True ». Code: `self._z_prev = z_n` (l.151) puis `x_n = z_n[:q, :]` (l.156).",
+          "suggestion": "Retourner des copies: `x_n = z_n[:q, :].copy()` et `y_n = z_n[q:, :].copy()` (coût négligeable pour des vecteurs (q,1)/(s,1)).",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes et reproduites: (1) self._z_prev = z_n à la ligne 151; x_n = z_n[:q,:] ligne 155 et y_n = z_n[q:,:] ligne 156 (la trouvaille cite l.156 pour x_n, décalage d'une ligne, sans incidence). (2) Vérifié empiriquement avec ModelGssK2Q1S1: x.base is sim._z_prev → True, idem pour y. (3) Mutation x[0,0]=999 par l'appelant → la trajectoire diverge dès le pas suivant (F @ self._z_prev, l.144, lit le buffer corrompu); reproduit avec deux runs même seed. Le correctif .copy() est correct. MAIS la sévérité est surcalibrée: j'ai audité tous les consommateurs du dépôt (run_simulations.py:164, run_supervised.py:229, run_em.py:201, gss_filter.py:926, filter/main.py:264, gui/workers.py:40, simulate.py:312) — aucun ne mute x/y (uniquement ravel().tolist(), np.array(), append, ou filt.step(y) qui ne fait que lire et où asarray/reshape ne copie pas mais _y_prev n'est jamais écrit). Aucun chemin de code actuel ne déclenche la corruption; c'est un piège latent d'API (contrat non documenté: les tableaux retournés sont des vues d'un état interne mutable), pas un bug actif. Sévérité low recommandée — durcissement défensif justifié, impact actuel nul.",
+              "severityAdjustment": "low"
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Faits intégralement confirmés par reproduction: dans prg/classes/GSSSimulator.py:150-156, z_n est conservé comme self._z_prev puis découpé en vues x_n=z_n[:q,:] et y_n=z_n[q:,:] (x.base is sim._z_prev → True, idem y). Une mutation par l'appelant (x[0,0]=999.0) corrompt silencieusement le pas suivant (step-1: 0.789 vs 800.09, reproduit avec ModelGssK2Q1S1). L'aliasing va même plus loin que la trouvaille: x.ravel()/y.ravel() restent des vues, et GSSFilter.step() stocke self._y_prev=y (alias de l'état interne du simulateur). MAIS, lentille impact: les 8+ sites d'appel du dépôt (run_simulations.py:164, run_supervised.py:229, run_em.py:201, gss_filter.py:926, filter/main.py:264, gui/workers.py:40, scripts, tests) sont tous strictement en lecture seule sur x/y; _y_prev n'est jamais muté (lectures aux lignes 606/763). Aucun chemin d'appel existant ne déclenche la corruption — le scénario exige un appelant futur/externe mutant en place. Le hasard est plausible (API publique documentée invitant au post-traitement, échec silencieux en code de recherche) mais latent, pas actif: c'est du durcissement d'API, pas un bug en exercice. Le correctif .copy() est correct et quasi gratuit. Sévérité medium surévaluée → low.",
+              "severityAdjustment": "low"
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/FMatrix.py",
+          "line": "106-124",
+          "severity": "medium",
+          "category": "robustness",
+          "title": "FMatrix n'effectue aucun contrôle de finitude: NaN/Inf dans A/B/C/D acceptés silencieusement",
+          "description": "`_validate_blocks` ne vérifie que les formes. Vérifié: A(0)=[[nan]] est accepté par FMatrix ET par GSSParams; la simulation n'échoue qu'au premier pas qui visite le régime 0 (SimulationError au runtime, et uniquement avec __debug__ actif — sous -O, les NaN se propagent jusque dans le CSV). Pour les filtres (gss_filter.py), un F non fini corromprait les résultats sans aucune alerte. Contraste avec CovarianceMatrix/StochasticMatrix qui ont un check 'Finite'.",
+          "evidence": "Test: « NaN in A accepted by FMatrix: True »; « simulation with NaN F raised: SimulationError Non-finite values generated at step n=3, r=0 » (détection tardive, et seulement si __debug__).",
+          "suggestion": "Ajouter `if not np.all(np.isfinite(arr)): raise ParamError(...)` dans FMatrix._validate_blocks (et idem pour b_list et mu_z0_list dans GSSParams).",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Cœur de la trouvaille vérifié empiriquement : FMatrix._validate_blocks (lignes 106-124, exactes) ne vérifie que les formes ; A(0)=[[nan]] est accepté par FMatrix et GSSParams ; le check isfinite du simulateur (GSSSimulator.py:146-148) est bien sous `if __debug__:` — sous -O la simulation produit 19/20 échantillons non finis sans erreur ; CovarianceMatrix/StochasticMatrix (matrix_checks.py:177, 294) ont bien un check de finitude, l'incohérence est réelle. MAIS la sous-affirmation sur les filtres est réfutée : GSSFilter avec F=NaN émet un logger.warning à la construction (Δ=nan dans les moments stationnaires) puis lève ValueError « array must not contain infs or NaNs » (check_finite de scipy) dès le premier step(), dans les deux modes h5_exact et imm_general, avec et sans -O. Le filtre échoue bruyamment, pas silencieusement. Le seul chemin de corruption réellement silencieuse exige -O (rare en pratique recherche) ; sous exécution par défaut, la détection est tardive et le message opaque, mais il y a détection. Trouvaille réelle (gap de validation + incohérence avec les classes sœurs, correctif trivial) mais sévérité surévaluée puisque le vecteur principal de « corruption silencieuse » (les filtres) ne tient pas.",
+              "severityAdjustment": "low"
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Faits vérifiés empiriquement dans le venv du projet : (1) FMatrix._validate_blocks (FMatrix.py:106-124) ne vérifie que les formes — A(0)=[[nan]] accepté par FMatrix ET GSSParams (b_list n'est même pas validé, mu_z0_list forme seule) ; (2) le contraste avec CovarianceMatrix/StochasticMatrix (check 'Finite' explicite, matrix_checks.py:176-188 et 293-305) est réel ; (3) la simulation lève SimulationError au premier pas visitant le régime NaN, check sous `if __debug__:` (GSSSimulator.py:146-148), et sous `python -O` la simulation aboutit avec des NaN écrits dans le CSV (reproduit). MAIS la claim d'impact la plus grave est réfutée : pour les deux modes de filtre (imm_general et h5_exact), un F non fini ne corrompt PAS silencieusement les résultats — le constructeur logue un WARNING explicite (« Stationary moments did not fully converge… Δ=nan ») et le premier step() lève ValueError « array must not contain infs or NaNs » (scipy). Le filtre crashe bruyamment avec un message peu informatif, il ne produit pas de résultats faux sans alerte. Côté atteignabilité : la GUI valide les cellules via float(text) qui accepte « nan »/« inf » (chemin plausible mais marginal) ; l'apprentissage OLS sur données NaN lève LinAlgError avant de produire un F NaN ; le scénario -O est rare pour du code de recherche et, sous -O, TOUTE la validation __debug__ saute (y compris le check Finite de P), donc le manque n'est plus spécifique à FMatrix. Impact réel : erreur tardive et confuse plutôt que corruption silencieuse → trouvaille réelle (incohérence de validation, correctif pertinent) mais sévérité surévaluée : low, pas medium.",
+              "severityAdjustment": "low"
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSParams.py",
+          "line": "115-118",
+          "severity": "medium",
+          "category": "bug",
+          "title": "Longueur de b_list jamais validée (même avec __debug__)",
+          "description": "Contrairement à mu_z0_list/Sigma_z0_list (validées via _validate_initial_conditions), b_list n'a aucun contrôle de longueur: `self._b = [np.array(b).reshape(q+s,1) for b in b_list]` accepte une liste de longueur != K. Vérifié: b_list de longueur 1 avec K=2 est accepté; `params.b(1)` lève IndexError seulement à l'usage (potentiellement au milieu d'une simulation ou d'un filtrage). Une liste trop longue serait tronquée de fait sans erreur du tout côté b(k) pour k<K. Le reshape attrape les tailles incohérentes mais accepte silencieusement (q+s,) ou (1,q+s).",
+          "evidence": "Test: « b_list of wrong length accepted: 1 » puis « IndexError only at access time: b(1) ». Code l.118: `self._b = [np.array(b, dtype=float).reshape(q + s, 1) for b in b_list]` sans `len(b_list) != K` check.",
+          "suggestion": "Ajouter dans __init__ (hors __debug__): `if b_list is not None and len(b_list) != K: raise ParamError(...)`, plus contrôle de finitude.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes et reproduites: l.118 de prg/classes/GSSParams.py construit self._b sans contrôle de longueur (le bloc __debug__ l.88-94 valide tout sauf b_list); b_list de longueur 1 avec K=2 est accepté et b(1) lève IndexError seulement à l'accès; une liste trop longue est acceptée et les entrées surnuméraires ignorées; reshape accepte (q+s,) et (1,q+s) et lève ValueError (pas ParamError) pour une taille incohérente; NaN accepté. Facteur aggravant: la docstring promet explicitement la validation à la construction et ParamError \"if list lengths are wrong\" (l.61-65) — contrat documenté violé. Cependant la sévérité medium est surcalibrée: tous les producteurs internes de b_list (learning supervisé/semi-supervisé, h5_constraint.py l.240) construisent la liste en boucle sur K donc toujours de bonne longueur; l'exposition se limite aux fichiers de modèles écrits à la main. Et il n'existe aucun chemin de corruption silencieuse: liste trop courte → erreur bruyante (IndexError) au premier usage; liste trop longue → extras ignorés sans effet numérique; reshape lenient → vecteur colonne correct dans tous les cas acceptés. Le coût réel est une erreur retardée mais bruyante (potentiellement en milieu de run EM) au lieu d'un ParamError à la construction → low.",
+              "severityAdjustment": "low"
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits vérifiés et reproduits: GSSParams.__init__ (lignes 88-94) valide mu_z0_list/Sigma_z0_list sous __debug__ mais b_list n'a aucun contrôle (ligne 118). Reproduit: b_list de longueur 1 avec K=2 accepté, IndexError seulement à params.b(1); liste trop longue acceptée avec entrées surnuméraires ignorées; NaN accepté. Le chemin d'impact existe: GSSSimulator.py:144 appelle params.b(r_n) avec régime tiré aléatoirement (crash possible au milieu d'une simulation), gss_filter.py:346/454/776/811 et h5_constraint.py:240 bouclent sur K. Entrées plausibles via modèles écrits à la main (prg/models/*_custom.py) et run_simulations.py:106 (dict). Contradiction documentaire avérée: le docstring promet validation à la construction et ParamError si « list lengths are wrong ». MAIS la sévérité medium est surévaluée: le cas liste-trop-courte échoue bruyamment (IndexError diagnosticable), pas de résultats silencieusement faux; le cas liste-trop-longue est numériquement inoffensif (b(k) correct pour k<K, un K incohérent serait attrapé par la validation de mu_z0_list); le reshape de (q+s,)/(1,q+s) préserve les valeurs (permissivité bénigne, pas corruption); l'absence de contrôle de finitude n'est pas spécifique à b_list. Pire impact atteignable: crash retardé et confus en code de recherche — gap de robustesse réel mais sévérité low.",
+              "severityAdjustment": "low"
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSParams.py",
+          "line": "360-394",
+          "severity": "medium",
+          "category": "api",
+          "title": "Tous les accesseurs exposent les tableaux internes par référence — mutation externe silencieuse possible après validation",
+          "description": "GSSParams.P/pi0/b(k)/mu_z0(k)/Sigma_z0(k)/chol_z0(k), FMatrix.F(k)/A(k)/B(k)/C(k)/D(k) (FMatrix.py:150-174) et GSSNoiseCovariance.Sigma_W(k)/Sigma_U(k)/Delta(k)/Sigma_V(k)/chol_W(k) (NoiseCovariance.py:181-212) retournent les ndarray internes sans copie ni flag read-only. Vérifié: `params.P[0,0] = -5.0` mute l'objet validé; `f_matrix.F(0)[0,0] = 123.0` mute le F caché alors que A(0) reste inchangé — car F(k) (np.block, copie) et les blocs _A/_B/_C/_D sont des stockages indépendants, on peut donc créer une INCOHÉRENCE interne F(k) != [[A,B],[C,D]] sans aucune erreur. Idem Sigma_W(k) vs ses blocs et vs le chol caché. Point positif: les entrées sont bien copiées à la construction (np.array(...) partout, GSSParams.py:100,110-111; FMatrix.py:83-86; NoiseCovariance.py:94-96), donc pas d'aliasing entrant.",
+          "evidence": "Test: « params.P mutated in place: True »; « F(0) mutated in place: True »; « A(0) unchanged while F(0) was mutated independently: 0.8 ».",
+          "suggestion": "Après construction, poser `arr.flags.writeable = False` sur tous les tableaux internes (P, pi0, _b, _mu_z0, _Sigma_z0, _chol, _F, _A.., _Sigma_W..). Coût nul, et toute mutation accidentelle lève ValueError immédiatement.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur le code réel et reproduites empiriquement. (1) Lignes exactes: GSSParams.py:360-394 (P, pi0, b, mu_z0, Sigma_z0, chol_z0), FMatrix.py:150-174 (F, A, B, C, D), NoiseCovariance.py:181-212 (Sigma_W, Sigma_U, Delta, Sigma_V, chol_W) — tous font `return self._X[k]` sans copie ni flag read-only. (2) Tests reproduits: `params.P[0,0]=-5.0` mute l'objet validé; `fm.F(0)[0,0]=123.0` mute le cache _F (np.block, lignes 89-91 de FMatrix.py) tandis que A(0) reste 0.8 — l'incohérence interne F(k) != [[A,B],[C,D]] est bien créable silencieusement; idem Sigma_W(0) muté avec Sigma_U(0) et chol_W(0) désormais périmés. (3) Copies entrantes confirmées (GSSParams.py:100,110-111; FMatrix.py:83-86; NoiseCovariance.py:94-96) — pas d'aliasing entrant, comme l'affirme la trouvaille. (4) Correctif viable: grep exhaustif — aucun code interne (prg/, scripts/, tests/) n'écrit via ces accesseurs (seule utilisation indexée: lecture params.P[r] dans GSSSimulator.py:140), donc writeable=False ne casserait rien. Sévérité medium défendable: défaut latent (aucun déclencheur interne actuel, 219 tests passent) mais les classes sont des conteneurs validés-à-la-construction avec invariants cachés (F vs blocs, Sigma_W vs Cholesky cachée) dont la violation est silencieuse et produirait des résultats numériquement faux sans erreur dans un code de recherche manipulé interactivement."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Faits vérifiés et reproduits: tous les accesseurs cités (GSSParams.py:360-394, FMatrix.py:150-174, NoiseCovariance.py:181-212) retournent les ndarray internes par référence, sans copie ni flag read-only (aucune occurrence de 'writeable' dans le dépôt). PoC rejoué: muter F(0) laisse A(0) intact — l'incohérence F(k) != [[A,B],[C,D]] est réelle car np.block copie; idem pour Sigma_W vs blocs vs Cholesky caché. Les copies à la construction sont également confirmées. MAIS, lentille impact: grep exhaustif sur prg/ et scripts/ — aucun consommateur existant ne mute ces tableaux (filter, h5_constraint, learning, GUI sont tous strictement read-only; le learning ne détient même pas de GSSParams; la GUI reconstruit l'objet). Aucun chemin d'appel actuel ne déclenche le scénario; il faut un code utilisateur hypothétique qui écrit volontairement dans un tableau retourné. C'est un vrai défaut d'encapsulation (danger latent) avec un correctif trivial et justifié, mais pas un bug atteignable aujourd'hui — sévérité 'medium' surcalibrée, 'low' est juste.",
+              "severityAdjustment": "low"
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSParams.py",
+          "line": "257-327",
+          "severity": "low",
+          "category": "math",
+          "title": "_compute_stationary: gardes mathématiquement sains pour P stochastique validée; message de la garde 1 surinterprète, garde 2 sur-pessimiste",
+          "description": "Audit math des trois gardes, vérifié numériquement. (a) Chaînes périodiques: OK sans faux positif — 2-cycle donne [0.5,0.5], 3-cycle [1/3,1/3,1/3] (valeurs propres e^{±2πi/3} loin de 1). (b) États transitoires: OK, pi=0 dessus, pas d'alerte (vp 1 simple). (c) Réductible: garde 1 détecte correctement (multiplicité de la vp 1 = nb de classes récurrentes pour une matrice stochastique, vp semi-simple donc bien séparée numériquement, erreurs eig ~1e-15 << tol 1e-8). (d) Garde 2 (signes mixtes): pour une P stochastique, l'espace propre gauche de la vp 1 est engendré par les lois stationnaires des classes récurrentes, à SUPPORTS DISJOINTS; donc |αpi1+βpi2| = |α|pi1+|β|pi2 et le résultat après renormalisation EST exactement stationnaire — vérifié: vecteur mixte trouvé (trial 44), ||piP-pi||=1.2e-16. Le texte « may not be a valid stationary distribution » est donc trop pessimiste dans les cas atteignables; le vrai problème (arbitraire du mélange) est déjà couvert par la garde 1. (e) Tolérance 1e-8 de la garde 1: une chaîne IRRÉDUCTIBLE à mélange très lent (trou spectral < 1e-8, testé avec couplage eps=1e-10) déclenche le message « the Markov chain is reducible » alors qu'elle ne l'est pas (le pi retourné [0.5,0.5] était pourtant correct). (f) Garde 3 (fallback uniforme): saine — atteignable en pratique seulement via NaN (LAPACK normalise les vecteurs propres à norme 1, donc somme après abs >= 1/sqrt(K) > 0); `not np.isfinite(total)` couvre bien NaN/Inf; l'uniforme est une loi valide quoique non stationnaire en général, acceptable comme dernier recours documenté. (g) Pas de garde sur dist_to_one[idx] lui-même: sans conséquence pour une P validée (vp 1 existe toujours), mais la statique appelée sur une matrice sous-stochastique retournerait silencieusement le vecteur de Perron normalisé.",
+          "evidence": "Tests: réductible bloc-diagonale → pi=[2/3,1/3,0,0], ||piP-pi||=0, 1 warning; périodique → [0.5,0.5] sans warning; transitoire → [0,0.43,0.57] sans warning; vecteur à signes mixtes → pi stationnaire à 1.2e-16 près avec 2 warnings; quasi-réductible eps=1e-10 → warning « is reducible » faux mais pi correct.",
+          "suggestion": "Reformuler la garde 1: « reducible or nearly reducible (spectral gap < 1e-8) »; reformuler la garde 2 (le résultat reste une loi stationnaire admissible si P est stochastique, seul le mélange est arbitraire). Alternative plus robuste: résoudre le système bordé (I-Pᵀ)pi=0, somme(pi)=1 par moindres carrés.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Vérification adversariale complète sur prg/classes/GSSParams.py:257-327 (lignes exactes, tol 1e-8 ligne 255). Tous les faits reproduits indépendamment: (1) chaînes périodiques et transitoires → pi correct sans warning; (2) P réductible bloc-diagonale → pi=[2/3,1/3,0,0], résidu 0, 1 seul warning (garde 1); (3) claim central (d) confirmé: avec des P réductibles stochastiques permutées, np.linalg.eig retourne bien des vecteurs propres à signes mixtes (3 cas trouvés en <30 essais), la garde 2 se déclenche, et le résultat |·|-renormalisé est EXACTEMENT stationnaire (||piP-pi|| ~ 1e-16) — l'argument mathématique (supports disjoints des lois stationnaires des classes récurrentes) est correct pour P stochastique, donc le message « may not be a valid stationary distribution » est bien sur-pessimiste dans les cas atteignables; (4) claim (e) confirmé: chaîne IRRÉDUCTIBLE à couplage eps=1e-10 déclenche le message « the Markov chain is reducible » (factuellement faux) alors que pi=[0.5,0.5] retourné est correct; (5) claim (g) exact: idx=argmin|λ-1| ligne 283 sans garde sur dist_to_one[idx]; (6) claim (f) correct (||v||₁≥||v||₂=1, garde 3 atteignable seulement via NaN/Inf). La prémisse « P validée » tient (_validate_P ligne 90 avant les deux appels, sous __debug__). Aucune affirmation factuellement fausse; le correctif proposé (reformulation des deux messages) est proportionné. Sévérité low bien calibrée: les gardes sont mathématiquement saines, pi retourné correct dans tous les scénarios testés, seul le libellé des warnings est imprécis."
+            }
+          ]
+        },
+        {
+          "file": "prg/simulate.py",
+          "line": "316-323",
+          "severity": "medium",
+          "category": "bug",
+          "title": "Option --output: le nom de fichier fourni est silencieusement ignoré",
+          "description": "Le code n'extrait de `args.output` que le répertoire parent (`out_path.parent`, et seulement s'il diffère de '.'); le nom de fichier lui-même n'est jamais transmis à `sim.run()`, qui auto-génère toujours `simulated_<model>_N<N>_seed<seed>.csv` (GSSSimulator.py:208). Donc `--output results.csv` n'a strictement AUCUN effet (le fichier va dans data/simulated avec le nom auto), et `--output dir/results.csv` n'honore que `dir/`. L'aide annonce pourtant « Output CSV filename (auto-generated if omitted) ».",
+          "evidence": "simulate.py:319-323: `out_path = pathlib.Path(args.output); if out_path.parent != pathlib.Path('.'): out_dir = out_path.parent` puis `sim.run(output_dir=out_dir, model_name=args.model)` — out_path.name jamais utilisé.",
+          "suggestion": "Ajouter un paramètre `filename` (ou `output_path`) à GSSSimulator.run() et passer out_path.name; ou retirer l'option/corriger l'aide.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations sont exactes. (1) prg/simulate.py:316-323 correspond mot pour mot à la preuve avancée: seul `out_path.parent` est extrait (et uniquement s'il diffère de '.'), `out_path.name` n'est jamais utilisé. (2) GSSSimulator.run() (prg/classes/GSSSimulator.py:182-209) ne prend que `output_dir` et `model_name` et génère toujours le nom à la ligne 208: f\"simulated_{model_name}_N{self._N}_seed{seed_str}.csv\". (3) L'aide (simulate.py:204) annonce bien « Output CSV filename (auto-generated if omitted) », ce qui est trompeur. (4) Conséquences vérifiées: `--output results.csv` n'a aucun effet (Path('results.csv').parent == Path('.')), et `--output dir/results.csv` n'honore que le répertoire. Sévérité medium correctement calibrée: pas de bug de calcul, mais une option CLI documentée qui ment silencieusement à l'utilisateur et peut casser des scripts aval attendant le fichier au chemin demandé."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Vérifié ligne par ligne. (1) prg/simulate.py:316-323: seul out_path.parent est utilisé, et uniquement s'il diffère de '.'; out_path.name n'apparaît nulle part — donc `--output results.csv` est un no-op total (le test parent != '.' échoue, out_dir reste data_simulated_dir) et `--output dir/results.csv` n'honore que dir/. (2) prg/classes/GSSSimulator.py:182-209: run(output_dir, model_name) n'a aucun paramètre filename et la ligne 208 auto-génère toujours simulated_<model>_N<N>_seed<seed>.csv. (3) La contradiction documentaire est même pire que décrite: help (simulate.py:204), docstring du module (ligne 16), README.md ligne 203 (tableau d'options) ET un exemple concret README.md ligne 190 (`--output my_run.csv`) qui ne fait rien. (4) Chemin d'appel trivialement atteignable: c'est le point d'entrée CLI documenté. (5) Argument supplémentaire: prg/filter/main.py:_resolve_output (lignes 298-308) honore, lui, le chemin complet y compris le nom de fichier — preuve que c'est la convention du projet et donc un vrai défaut, pas un choix de design. Sévérité medium justifiée: pas de perte de données ni d'impact sur les résultats scientifiques (le chemin réel est loggé), mais violation silencieuse du contrat documenté qui casserait tout pipeline scripté attendant le fichier nommé."
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSParams.py",
+          "line": "421-425",
+          "severity": "low",
+          "category": "bug",
+          "title": "__repr__ affiche toujours pi0='given', jamais 'stationary'",
+          "description": "Le repr teste `self._pi0 is None`, mais _pi0 n'est jamais None après __init__ (résolu lignes 105-108 vers la distribution stationnaire). Vérifié: un GSSParams construit avec pi0=None affiche `pi0=given`. Information trompeuse en debug/logs.",
+          "evidence": "Test: `repr: <GSSParams(K=2, q=1, s=1, pi0=given)>` pour pi0=None. Code l.424: `pi0={'stationary' if self._pi0 is None else 'given'}`.",
+          "suggestion": "Mémoriser un drapeau `self._pi0_was_stationary = pi0 is None` dans __init__ et l'utiliser dans __repr__.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Vérifié sur le code réel et reproduit empiriquement. (1) Lignes exactes: __repr__ à GSSParams.py:421-425, ligne 424 = `pi0={'stationary' if self._pi0 is None else 'given'}` verbatim. (2) `_pi0` n'est assigné qu'aux lignes 106 (distribution stationnaire si pi0=None) et 108 (np.array sinon) — toujours un ndarray, jamais None; aucun setter ni autre chemin d'assignation (grep exhaustif). (3) Repro exécutée: un GSSParams construit avec pi0=None affiche `<GSSParams(K=2, q=1, s=1, pi0=given)>`, identique à la preuve avancée; la branche 'stationary' est du code mort inatteignable. Sévérité low bien calibrée: impact purement cosmétique (debug/logs), la propriété pi0 (l.367) retourne la valeur résolue correcte et rien de fonctionnel n'en dépend. Le correctif proposé (drapeau mémorisé dans __init__) est approprié."
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSParams.py",
+          "line": "184-191",
+          "severity": "low",
+          "category": "api",
+          "title": "isinstance(.., int) rejette les entiers numpy et accepte bool (K/q/s, et N du simulateur)",
+          "description": "Vérifié: K=np.int64(2) lève ParamError avec le message déroutant « K must be an integer >= 2, got np.int64(2) » (l'utilisateur voit un 2 valide rejeté); q=True est accepté et devient silencieusement q=1; N=True est accepté par GSSSimulator (GSSSimulator.py:81) et N=np.int64(10) rejeté. Friction réelle: K/q/s issus de `P.shape[0]` sont des int Python, mais des valeurs chargées de fichiers/np peuvent être np.integer. Schéma dupliqué à l'identique dans FMatrix.py:97-104 et NoiseCovariance.py:125-132 (duplication de code aussi).",
+          "evidence": "Test: « np.int64 K: REJECTED -> K must be an integer >= 2, got np.int64(2) »; « q=True: accepted (silently becomes q=1) »; « N=True accepted (1 step) »; « N=np.int64(10) rejected ».",
+          "suggestion": "Utiliser `isinstance(K, (int, np.integer)) and not isinstance(K, bool)` (idem q, s, N), et factoriser _validate_dims dans un helper commun.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes et reproduites sur le code réel. (1) GSSParams.py:184-191 contient bien `isinstance(K, int)` etc., appelé depuis __init__ (ligne 89) ; exécution réelle : `_validate_scalars(np.int64(2), 1, 1)` lève ParamError avec le message exact « K must be an integer >= 2, got np.int64(2). » (numpy 2.4.4 : np.int64 n'est pas une sous-classe de int). (2) `q=True` est accepté (bool sous-classe de int, True >= 1) et vaut silencieusement 1. (3) GSSSimulator.py:81 est exactement `if not (isinstance(N, int) and N > 0)` : N=True passe, N=np.int64(10) est rejeté (vérifié empiriquement sur la sémantique isinstance). (4) _validate_dims est dupliqué à l'identique dans FMatrix.py:97-104 et NoiseCovariance.py:125-132 (trois copies). (5) P.shape[0] retourne bien un int Python, donc les chemins internes sont sains ; seules les valeurs numpy fournies par l'utilisateur (ex. chargées de fichiers npz) déclenchent la friction. Le correctif proposé est techniquement correct. Sévérité « low » bien calibrée : paper-cut d'utilisabilité (message trompeur, coercition silencieuse de bool), pas de bug de calcul, contournement trivial via int(K)."
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSSimulator.py",
+          "line": "207-209",
+          "severity": "low",
+          "category": "bug",
+          "title": "Collision de nom CSV pour seed=None: deux runs non déterministes s'écrasent mutuellement",
+          "description": "Avec seed=None, seed_str='random' et le nom de fichier est `simulated_<model>_N<N>_seedrandom.csv` — constant entre runs. Deux exécutions non déterministes successives écrasent silencieusement le même fichier (filepath.open('w') l.245), alors que ce sont précisément les runs non reproductibles qu'on ne peut pas régénérer.",
+          "evidence": "l.207-208: `seed_str = str(self._seed) if self._seed is not None else 'random'; filename = f'simulated_{model_name}_N{self._N}_seed{seed_str}.csv'`",
+          "suggestion": "Inclure un horodatage dans le nom quand seed est None (comme le fait déjà _setup_logging dans simulate.py:107-108), ou tirer et mémoriser un seed explicite.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes. GSSSimulator.py l.207-208 contient mot pour mot le code cité: seed_str='random' quand self._seed is None, et le nom de fichier f'simulated_{model_name}_N{self._N}_seed{seed_str}.csv' est constant entre runs (pas de timestamp/PID/compteur). L.245: filepath.open('w') tronque silencieusement sans vérification d'existence. Le chemin seed=None est réellement atteignable: prg/simulate.py l.194-198 définit --seed avec default=None, et l.323 appelle sim.run(); de plus le flag --output ne redirige que le répertoire (l.317-321), jamais le nom de fichier — aucune échappatoire. La référence au correctif est aussi exacte: _setup_logging (simulate.py ~l.106-108) ajoute bien un timestamp aux noms de logs avec la même logique seed_str, confirmant l'incohérence logs-horodatés/CSV-non-horodatés. Deux runs non déterministes successifs avec mêmes model_name et N s'écrasent donc bien mutuellement, et ce sont précisément les données non régénérables. Sévérité 'low' bien calibrée: outillage de recherche, nécessite deux runs sans seed avec mêmes paramètres, et les workflows documentés utilisent des seeds explicites.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSSimulator.py",
+          "line": "104-105",
+          "severity": "low",
+          "category": "api",
+          "title": "Itérateur épuisé: une seconde boucle for sur le même simulateur produit 0 élément sans avertissement",
+          "description": "`__iter__` retourne self sans reset; après une première itération complète, une seconde boucle `for ... in sim` se termine immédiatement (vérifié: 3 items puis 0). `run()` se protège via reset() (l.229) mais l'itération directe — l'usage mis en avant dans la docstring du module — non. Risque: une expérience qui compare deux passes obtient silencieusement des statistiques vides.",
+          "evidence": "Test: « second for-loop yields 0 items (first: 3 ) ».",
+          "suggestion": "Documenter explicitement, ou faire de __iter__ un reset implicite (attention à la reproductibilité), ou logger un warning si __iter__ est appelé sur un itérateur épuisé.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations vérifiées sur le code réel (prg/classes/GSSSimulator.py) : __iter__ retourne self sans reset (l.104-105 exactes) ; reproduction empirique avec ModelGssK2Q1S1 (N=3, seed=0) : 1ère boucle = 3 items, 2ème = 0, silencieusement (StopIteration immédiat car _n >= _N persiste, l.125-126) ; run() se protège bien via self.reset() à la ligne 229 exacte ; la docstring du module (l.23-30) met bien l'itération directe en avant. Nuances : sémantique standard des itérateurs Python (classe documentée \"Iterator\"), reset() est montré dans l'exemple de la docstring de classe (l.76), et aucun site d'appel du dépôt n'itère deux fois le même simulateur — risque latent uniquement. La trouvaille est factuellement exacte et honnêtement calibrée à [low].",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/simulate.py",
+          "line": "160-162",
+          "severity": "low",
+          "category": "robustness",
+          "title": "_load_model instancie la première sous-classe par ordre alphabétique, pas « le » modèle du module",
+          "description": "`inspect.getmembers(module, inspect.isclass)` trie alphabétiquement et retourne la première sous-classe de BaseGSSModel trouvée. Si un module de modèle importe une autre classe modèle (p.ex. depuis presets.py ou un modèle voisin pour en dériver), la classe instanciée peut être la mauvaise, silencieusement (le nom du module ne contraint pas la classe choisie).",
+          "evidence": "simulate.py:160-162: `for _, obj in inspect.getmembers(module, inspect.isclass): if issubclass(obj, BaseGSSModel) and obj is not BaseGSSModel: return obj()`",
+          "suggestion": "Ne retenir que les classes définies dans le module (`obj.__module__ == module.__name__`), et lever une erreur si plusieurs candidats subsistent.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes : simulate.py:160-162 contient bien la boucle citée ; inspect.getmembers trie alphabétiquement par nom (documenté) ; la boucle retourne la première sous-classe de BaseGSSModel trouvée, y compris une classe simplement importée (issubclass ne filtre pas sur __module__). Nuance importante : le bug est latent, pas actif — les 9 modules de prg/models/ n'importent que BaseGSSModel (explicitement exclue) et définissent chacun exactement une sous-classe ; presets.py utilise class_name explicite et est immunisé. Le scénario déclencheur est néanmoins plausible (le dépôt contient déjà des variantes _custom/_contrast ; si l'une dérivait d'un modèle voisin importé, l'ordre alphabétique retournerait silencieusement le parent). Le correctif proposé (filtrer sur obj.__module__ == module.__name__ et erreur si ambigu) est correct. Fait omis par la trouvaille : le même motif est dupliqué dans prg/gui/main.py:35 et prg/filter/main.py:112 — le correctif devrait couvrir les trois sites. Sévérité low bien calibrée pour une fragilité latente à défaillance silencieuse.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/GSSSimulator.py",
+          "line": "131-158",
+          "severity": "info",
+          "category": "math",
+          "title": "Validation positive: le simulateur échantillonne exactement le modèle génératif documenté, graine respectée",
+          "description": "L'ordre régime→état est correct et le conditionnement porte bien sur le NOUVEAU régime r_n pour F, b et Sigma_W, conformément à l'équation Z_{n+1} = F(r_{n+1}) Z_n + b(r_{n+1}) + W_{n+1}: r_n ~ P[r_{n-1}] (l.140) puis z_n = F(r_n) z_{n-1} + b(r_n) + chol_W(r_n) @ N(0,I) (l.144); pas initial r_0 ~ pi0, z_0 = mu_z0(r_0) + chol_z0(r_0) @ N(0,I) (l.133-137). Vérification statistique sur N=4·10^5: max|P_hat − P| = 5.1e-4; les innovations e_n = z_n − F(r_n) z_{n-1} − b(r_n) conditionnées à r_n=k ont moyenne ~0 et covariance empirique égale à Sigma_W(k) à 5e-4 près pour chaque k. Reproductibilité: deux runs même graine identiques, graines différentes divergent. Un seul Generator (default_rng) avec flux séquentiel choice→standard_normal: déterminisme garanti. run() fait reset() avant exécution (l.229), donc le CSV est reproductible même après itération partielle.",
+          "evidence": "Tests: « same-seed reproducible: True »; « max |Phat-P| = 0.00051 »; « k=0: max|Sig_hat-Sigma_W|=0.0005; k=1: 0.0004 ».",
+          "suggestion": "Aucun correctif nécessaire sur la logique d'échantillonnage.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes et ont été re-vérifiées indépendamment. Numéros de ligne corrects dans prg/classes/GSSSimulator.py: r_0 ~ pi0 (l.133), z_0 = mu_z0(r_0) + chol_z0(r_0)@N(0,I) (l.134-137), r_n ~ P[r_{n-1}] (l.140), z_n = F(r_n)z_{n-1} + b(r_n) + chol_W(r_n)@N(0,I) (l.141-144) avec conditionnement sur le NOUVEAU régime, reset() dans run() (l.229), Generator unique default_rng (l.95). Reproduction statistique indépendante (N=4e5, paramètres non triviaux): max|P_hat−P|=7.4e-4; innovations conditionnées à r_n=k de moyenne ~0 et covariance égale à Sigma_W(k) à <9e-4; contre-test discriminant (conditionnement sur l'ANCIEN régime r_{n-1}) donne des erreurs de 0.14-0.21, confirmant que le code utilise bien le nouveau régime. Même graine = sorties identiques, graines différentes divergent, CSV reproductible après itération partielle, pi0 respecté à n=0. Seule nuance mineure non bloquante: la docstring de classe (l.15) omet le terme b(R_n) présent dans le code et dans l'équation du papier citée par la trouvaille. Sévérité [info] appropriée pour une validation positive.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/classes/NoiseCovariance.py",
+          "line": "99-107",
+          "severity": "info",
+          "category": "style",
+          "title": "Sigma_W(k) construit par np.block est un stockage indépendant de ses blocs (cohérence garantie uniquement à la construction)",
+          "description": "Sigma_W(k) (np.block copie) et _Sigma_U/_Delta/_Sigma_V sont des tableaux distincts; la symétrie du bloc est garantie par construction (Delta et Delta.T proviennent du même tableau), et le check SPD + Cholesky est bien hors __debug__ (l.110-119) donc toujours actif — bon point. Mais comme les accesseurs exposent des références mutables (cf. trouvaille aliasing), la cohérence blocs/matrice complète/chol n'est garantie que tant que personne ne mute. Même schéma pour FMatrix._F vs _A/_B/_C/_D (FMatrix.py:89-91).",
+          "evidence": "NoiseCovariance.py:99-107 `np.block([[self._Sigma_U[k], self._Delta[k]], [self._Delta[k].T, self._Sigma_V[k]]])` puis caches _chol l.119.",
+          "suggestion": "Couvert par la suggestion writeable=False de la trouvaille aliasing; sinon documenter que les objets sont immuables par convention.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes. (1) NoiseCovariance.py:99-107 construit bien _Sigma_W[k] via np.block, qui copie les blocs dans un nouveau tableau — stockage indépendant de _Sigma_U/_Delta/_Sigma_V (eux-mêmes des copies via np.array(M, dtype=float), l.94-96). (2) La symétrie hors-diagonale est garantie à la construction car les blocs haut-droit et bas-gauche proviennent du même tableau self._Delta[k] (direct et .T). (3) Le check SPD (CovarianceMatrix(...).check()) et le cache Cholesky sont aux lignes 110-119, HORS du bloc `if __debug__:` (l.85-87 ne couvre que la validation de dimensions), donc actifs même sous python -O — exact. (4) Les accesseurs Sigma_W/Sigma_U/Delta/Sigma_V/chol_W (l.189, 193, 197, 201, 212) renvoient les références internes sans copie ni setflags(write=False) (grep confirme: aucun setflags/writeable dans prg/), donc une mutation externe désynchroniserait blocs, matrice complète et Cholesky caché. (5) FMatrix.py:89-91 présente le même schéma (_F pré-construit par np.block depuis _A/_B/_C/_D, accesseurs F/A/B/C/D l.150-174 renvoyant les références). Aucun code de prg/ ne mute effectivement ces tableaux, ce qui en fait une fragilité latente et non un bug actif — la sévérité [info] est donc bien calibrée. La trouvaille reconnaît elle-même correctement le bon point (check SPD toujours actif) et renvoie au correctif de la trouvaille aliasing.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/utils/matrix_checks.py",
+          "line": "36-37",
+          "severity": "info",
+          "category": "numerical-stability",
+          "title": "Tolérances strictes (1e-10) pour row-stochasticité et symétrie: rejets bruyants possibles sur paramètres issus de fichiers arrondis",
+          "description": "_EPS_STOCH=1e-10 et _EPS_SYM=1e-10 sont plus stricts que la tolérance de numpy rng.choice (~1.5e-8). Une P saisie avec 6 décimales (p.ex. lignes [0.333333]*3, erreur 1e-6) est rejetée à la construction — c'est un rejet BRUYANT (ParamError), donc sain, pas silencieux; mais cela peut surprendre pour des paramètres ronds-tripés via CSV/JSON. À l'inverse, la cohérence est bonne: tout P qui passe la validation passe aussi le check interne de rng.choice, et pi0 validé à 1e-10 (GSSParams.py:232) de même. Aucun paramètre invalide ne passe silencieusement par ce chemin (avec __debug__ actif).",
+          "evidence": "matrix_checks.py:36-37 `_EPS_SYM = 1e-10; _EPS_STOCH = 1e-10`; GSSParams.py:232 `if abs(total - 1.0) > 1e-10`.",
+          "suggestion": "Optionnel: accepter une tolérance ~1e-8 et renormaliser explicitement les lignes (avec log) plutôt que rejeter, ou documenter la précision requise.",
+          "dimension": "model-classes",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles vérifiées sur le code réel et empiriquement: (1) matrix_checks.py:36-37 contient bien _EPS_SYM=1e-10 et _EPS_STOCH=1e-10, avec comparaison stricte dans RowSumsToOne; (2) la tolérance interne de numpy rng.choice est sqrt(eps)≈1.49e-8 (testé sur numpy 2.4.4: erreur 5e-9 acceptée, 1e-6 rejetée), donc la validation exactIMM est ~150x plus stricte; (3) P=[[0.333333]*3]*3 (erreur 1e-6) lève bien ParamError à la construction (GSSParams.__init__ lignes 88-93, sous `if __debug__:` comme indiqué) — rejet bruyant, pas silencieux; (4) prg/classes/GSSParams.py:232 contient exactement `if abs(total - 1.0) > 1e-10` pour pi0, et _validate_pi0([0.333333]*3) lève ParamError (testé); (5) la cohérence affirmée est mathématiquement vraie (1e-10 < 1.49e-8): tout P validé passe rng.choice, utilisé dans GSSSimulator.py:133,140. Deux imprécisions mineures non invalidantes: le chemin omet `classes/` (le fichier est prg/classes/GSSParams.py, pas prg/utils/), et l'exemple à erreur 1e-6 serait aussi rejeté par numpy lui-même — l'écart de tolérance ne joue que pour des erreurs entre 1e-10 et 1.5e-8 (p.ex. arrondi à 8 décimales). La sévérité [info] est bien calibrée: comportement sain (rejet bruyant, aucune acceptation silencieuse), correctif optionnel de documentation/assouplissement."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dimension": "learning",
+      "scope_summary": "Audit complet de prg/learning/supervised.py (737 lignes) et prg/learning/semi_supervised.py (971 lignes), avec vérification croisée de prg/utils/h5_constraint.py (compute_AB, résiduel H5), prg/classes/GSSSimulator.py (convention de régime) et prg/filter/gss_filter.py (H5_TOL=1e-6). Le cœur mathématique est sain : les estimateurs supervisés sont les bons MLE conditionnels (comptages de transitions ligne 326-337 avec indexation destination r_{n+1} confirmée cohérente avec le simulateur GSSSimulator.py:144 ; OLS par régime avec intercept ; Σ_W MLE /N_k documentée), et le Baum-Welch est correctement implémenté en log-domaine (forward/backward/ξ vérifiés indice par indice, logsumexp partout, aucun risque d'underflow), avec M-step pondéré exact pour P, F, b, Σ_W et placement correct de la projection AB (post-hoc par défaut pour préserver la monotonie, GEM optionnel documenté). Les faiblesses réelles sont de second ordre : la mise à jour heuristique de μ_z0/Σ_z0 invalide la garantie de monotonie stricte annoncée ; les planchers de covariance (eps=1e-8 absolu, blockwise seulement, garde Wsum<1e-12) sont insuffisants contre l'effondrement gaussien, que la sélection du meilleur redémarrage par vraisemblance d'entraînement peut alors récompenser ; les petits régimes en supervisé produisent Σ_W≈0 silencieusement sauvegardée ; le π₀ appris par EM est jeté par le générateur de code ; plus quelques docstrings périmés et incohérences mineures. Aucune fuite train/éval : les scripts estiment sur tout le CSV (pas de split prévu), la colonne r est correctement ignorée en semi-supervisé, et la sélection multi-redémarrage in-sample est la pratique standard pour EM.",
+      "findings": [
+        {
+          "file": "prg/learning/semi_supervised.py",
+          "line": "575-584",
+          "severity": "medium",
+          "category": "math",
+          "title": "Mise à jour de μ_z0/Σ_z0 non conforme au M-step — la monotonie stricte d'EM annoncée n'est pas garantie",
+          "description": "Le terme de vraisemblance impliquant μ_z0(k), Σ_z0(k) est uniquement le terme initial log N(Z_0; μ_z0(k), Σ_z0(k)) pondéré par γ_0(k) (cf. log_init, ligne 517-519, injecté dans _forward ligne 523). Or le M-step met à jour ces paramètres par les moments pondérés par γ_n(k) sur TOUTE la séquence (lignes 576-584), ce qui n'est pas l'argmax de la fonction Q (l'argmax exact serait μ_z0(k)=Z_0 et Σ_z0→0, dégénéré — la régularisation est donc compréhensible). Conséquence : même avec constraint_each_iter=False, la log-vraisemblance n'est PAS garantie monotone non-décroissante, contrairement aux affirmations du docstring (lignes 25-27 « log-likelihood remains monotonically non-decreasing during EM iterations » et 736-739 « the EM iterations are standard (monotone log-likelihood) »). L'effet est faible en pratique (un seul point Z_0 sur N), et une baisse éventuelle est masquée par le critère |ΔlogL| (ligne 535), mais l'affirmation théorique est fausse en l'état.",
+          "evidence": "Lignes 576-584: « for k in range(K): w = gamma[:, k]; denom_k = w.sum(); ... mu = (w[:, None] * Z).sum(axis=0) / denom_k; cov = (centered.T @ (w[:, None] * centered)) / denom_k » — moments pondérés sur tout n, alors que la Q-fonction ne contient ces paramètres que via le terme n=0 (ligne 517: log_init = log N(Z_0; μ_z0(k), Σ_z0(k))). Accessoirement, le clipping de P_new (lignes 548-549) dévie aussi (de façon négligeable, 1e-300) du M-step exact.",
+          "suggestion": "Soit (a) figer μ_z0/Σ_z0 après l'initialisation (elles ne sont identifiables qu'à partir d'un seul point), soit (b) les traiter explicitement comme heuristique régularisée et corriger le docstring (« quasi-monotone : le terme initial est mis à jour par une heuristique de moments »), soit (c) ajouter un avertissement runtime si log_lik_history décroît de plus que la tolérance numérique.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes. (1) μ_z0/Σ_z0 n'entrent dans la vraisemblance que via log_init (lignes 517-519), utilisé uniquement dans log_alpha[0] (_forward, ligne 172) ; les émissions n≥1 ne dépendent que de F, b, Σ_W. (2) Le M-step (lignes 576-584) met à jour μ_z0/Σ_z0 par moments pondérés par γ_n(k) sur TOUTE la séquence (w = gamma[:, k] couvre les N points), plus une projection _nearest_spd — ce n'est pas l'argmax de Q, dont le vrai argmax est dégénéré (μ=Z_0, Σ→0, non borné), comme l'indique la trouvaille. (3) Les docstrings citées existent mot pour mot (lignes 25-27 et 737-739) et la monotonie n'est effectivement pas garantie : la mise à jour de μ_z0/Σ_z0 n'est pas un mouvement d'ascension de Q, donc la preuve EM/GEM standard ne s'applique pas, même avec constraint_each_iter=False. (4) Le critère |ΔlogL| (ligne 535, abs(delta) < tol) masquerait bien une baisse. (5) Le clipping de P (lignes 548-549, _LOG_FLOOR=1e-300) est confirmé et négligeable. Fait aggravant non mentionné : le papier répète la même affirmation (06_experiments.tex:322 « strictly monotone, as guaranteed by theory », plus abstract, intro l.98, 05_estimation.tex l.135, conclusion l.25). Aucune réfutation possible : la vraisemblance implémentée n'utilise μ_z0/Σ_z0 qu'à n=0, donc la mise à jour par moments globaux est bien heuristique vis-à-vis de l'objectif optimisé. Sévérité medium bien calibrée : impact pratique négligeable sur les estimations, mais affirmation théorique fausse propagée jusque dans le papier."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits sont vérifiés dans prg/learning/semi_supervised.py : (1) μ_z0/Σ_z0 n'entrent dans la vraisemblance que via log_init au pas n=0 (lignes 517-519, _forward ligne 172 : log_alpha[0] = log_pi0 + log_init ; les émissions n≥1 et le backward n'en dépendent pas) ; (2) le M-step (lignes 576-584) les met à jour par moments pondérés γ_n(k) sur TOUTE la séquence, ce qui n'est pas l'argmax de Q (argmax exact dégénéré : μ=Z_0, Σ→0) ni même un pas GEM garanti pour ce terme — la preuve standard de monotonie EM ne s'applique donc plus ; (3) les docstrings lignes 26-27 et 737-739 affirment bien la monotonie pour constraint_each_iter=False, or la mise à jour heuristique s'exécute inconditionnellement à chaque itération ; (4) le critère de convergence ligne 535 utilise abs(delta), masquant toute baisse ; (5) le chemin est atteignable sans condition via fit_semi_supervised → _em_run. La trouvaille est donc réelle. Mais l'impact effectif est celui d'une garantie documentaire fausse : un seul point Z_0 sur N, mise à jour quasi stationnaire après la 1re itération, sélection multi-restarts (ligne 779) basée sur la vraie logL donc non affectée, aucun résultat de filtrage incorrect produit. C'est une inexactitude théorique/documentaire à effet pratique négligeable → sévérité low plutôt que medium.",
+              "severityAdjustment": "low"
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/semi_supervised.py",
+          "line": "299-315, 326-339, 779",
+          "severity": "medium",
+          "category": "numerical-stability",
+          "title": "Effondrement de covariance insuffisamment gardé + sélection du meilleur redémarrage par logL : les runs dégénérés peuvent gagner",
+          "description": "Trois mécanismes se combinent : (1) le seul plancher sur Σ_W est _nearest_spd (supervised.py:167-178) avec eps=1e-8 ABSOLU appliqué blockwise à Σ_U et Σ_V seulement — Δ n'est jamais ajusté, donc la matrice jointe Σ_W=[[Σ_U,Δ],[Δᵀ,Σ_V]] peut rester singulière (ex. q=s=1, Σ_W=[[1,1],[1,1]] : blocs ≥ eps mais jointe singulière) ; la Cholesky de _log_mvn_batch retombe alors sur un ridge 1e-8 (lignes 115-118) et la log-densité explose (+~9.2 par dim et par point pour var 1e-8). (2) Le garde-fou de _weighted_fit ne se déclenche que pour Wsum < 1e-12 (ligne 297-298) : un régime avec une masse effective de quelques échantillons (Wsum ~ 1e-3…3) passe en moindres carrés pondérés et produit une Σ_W quasi-singulière sans aucun avertissement. (3) La sélection multi-redémarrage (ligne 779 : « info['log_lik'] > best_info['log_lik'] ») choisit le run de plus grande vraisemblance d'entraînement : c'est précisément le run dégénéré (vraisemblance gaussienne non bornée) qui gagne. C'est le mode d'échec classique d'EM gaussien, ici seulement partiellement mitigé.",
+          "evidence": "semi_supervised.py:315 « SigW = (residuals.T @ (w[:, None] * residuals)) / Wsum » sans plancher relatif ; _apply_constraints (lignes 244-247) ne clampe que SU et SV via _nearest_spd(eps=1e-8 absolu), Dt inchangé ; _log_mvn_batch lignes 115-118 « except LinAlgError: L = cholesky(Sigma + 1e-8*eye(d)) » ; fit_semi_supervised ligne 779 sélectionne par logL maximum sans détection de dégénérescence.",
+          "suggestion": "(a) Plancher RELATIF à l'échelle des données : eps_k = max(1e-8, c · trace(Σ_W_global)/dim_z) avec c ≈ 1e-6, appliqué à la matrice jointe Σ_W (pas seulement aux blocs) ; (b) avertir / réinitialiser quand la masse effective Wsum < dim_z+1 (pas 1e-12) ; (c) lors de la sélection du meilleur run, rejeter les runs dont min eig(Σ_W(k)) est sous le plancher (signature de dégénérescence) ou pénaliser via une borne type MAP/prior inverse-Wishart faible.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes. (1) _nearest_spd (supervised.py:167-178) clampe à eps=1e-8 ABSOLU et n'est appliqué qu'aux blocs SU/SV dans _apply_constraints (semi_supervised.py:246-247) ; Δ n'est jamais ajusté et la jointe reassemblée (ligne 572) n'est jamais plancher-isée pendant les itérations EM (seulement à l'init, ligne 451). Le contre-exemple [[1,1],[1,1]] est valide : blocs inchangés, jointe singulière. Comme les poids γ≥0 rendent la jointe PSD et que le clamp des blocs préserve la PSD-ité, la jointe dégénérée est singulière-PSD : le ridge 1e-8 de _log_mvn_batch (lignes 114-118, citation exacte) réussit toujours et produit la log-densité explosée (~+8.3/dim/point avec le terme 2π, vs ~9.2 affirmé — légère surestimation de la constante, bon ordre de grandeur). (2) Le garde-fou de _weighted_fit est bien floor_w=1e-12 (lignes 276, 297) ; une masse effective faible mais non nulle passe en lstsq pondéré (ligne 309) et l'équation de covariance ligne 315 est citée verbatim, sans plancher relatif ni avertissement. (3) La ligne 779 sélectionne par max logL sans détection de dégénérescence ; seuls les runs levant LinAlgError/ValueError sont écartés (ligne 771). C'est le mode d'échec classique d'EM gaussien à vraisemblance non bornée, ici seulement borné par un plancher 1e-8 absolu très en dessous de l'échelle des données, donc les runs effondrés gagnent la sélection quand ils surviennent. Sévérité medium bien calibrée : chemin d'apprentissage (pas le filtre exact, contribution principale), dégradation silencieuse, fréquence pratique dépendante des données/init."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tous les faits cités sont exacts et vérifiés ligne par ligne, et le scénario d'impact a été reproduit empiriquement de bout en bout. (1) _apply_constraints (semi_supervised.py:244-247) ne plancher que SU et SV via _nearest_spd (supervised.py:167-178, eps=1e-8 ABSOLU) ; Δ n'est jamais ajusté et _em_run:572 réassemble la jointe — test direct : [[1,1],[1,1]] traverse la projection avec min eig = 0.0 exactement. (2) _log_mvn_batch:114-118 retombe sur le ridge 1e-8 et la log-densité passe de -1.84 à +7.03 par point (et +16.6 pour Σ_W≈1e-8·I), confirmant l'inflation ~+9.2/dim du terme logdet. (3) Le garde Wsum<1e-12 (ligne 297) laisse passer une masse effective de 3 points : ajustement exact, Σ_W aux deux valeurs propres = 1e-8, aucun avertissement. (4) Ligne 779 : sélection par max logL pur, flag 'converged' enregistré mais inutilisé, aucune détection de dégénérescence. Démonstration end-to-end via l'API publique fit_semi_supervised (K=3, n_inits=8, série de 100 points avec segment quasi-déterministe, scénario plausible type capteur saturé) : le run gagnant retourne un régime avec min eig(Σ_W jointe) = 6.4e-13 — cinq ordres de grandeur SOUS le plancher 1e-8, preuve que le plancher blockwise ne protège pas la matrice jointe — et cette Σ_W quasi-singulière alimente ensuite le filtrage aval. Nuances adversariales : sur données bénignes (AR simple, K surdimensionné, 8 restarts) aucun effondrement spurieux ne s'est produit, et la vraisemblance n'est pas littéralement non bornée (plafonnée à ~9.2·d nats/point par les planchers) — mais la trouvaille le reconnaît elle-même ('partiellement mitigé'). La sévérité medium est bien calibrée : sélection silencieuse de modèles dégénérés dans du code de recherche accompagnant un papier (impact scientifique + numérique aval), mais conditionnée aux données, sans crash, et mode d'échec EM classique."
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/supervised.py",
+          "line": "228-237, 369-376",
+          "severity": "medium",
+          "category": "robustness",
+          "title": "Régimes rares : résidus OLS identiquement nuls → Σ_W = 0 clampée à 1e-8·I, modèle sauvegardé pathologique avec simple warning",
+          "description": "Pour N_k ≤ dim_z+1, np.linalg.lstsq (solution de norme minimale, ligne 228) interpole exactement les données : residuals ≡ 0 (ligne 235) donc Σ_W = 0 (ligne 236). _nearest_spd la remonte à ~1e-8·I (lignes 254-255), produisant un régime quasi-déterministe absurde qui est néanmoins écrit tel quel dans le fichier modèle. Le code ne fait qu'un _log.warning (lignes 369-376, « OLS solution may be underdetermined »), sans bloquer ni dégrader proprement. Même pour N_k légèrement > dim_z+1, l'estimateur MLE divisé par N_k (ligne 236, choix documenté) est fortement biaisé vers le bas : le biais multiplicatif est (N_k − dim_z − 1)/N_k puisque dim_z+1 paramètres de régression sont ajustés par ligne — pour N_k = 2(dim_z+1) la covariance est sous-estimée d'un facteur ~2.",
+          "evidence": "Ligne 236 : « SigW = (residuals.T @ residuals) / N_k » — pas de correction de degrés de liberté (dim_z+1 colonnes de Z_aug, ligne 225) ; lignes 254-255 : « SU = _nearest_spd(SU); SV = _nearest_spd(SV) » avec eps=1e-8 (ligne 167) qui masque le cas Σ_W=0 au lieu de le signaler.",
+          "suggestion": "Diviser par max(N_k − (dim_z+1), 1) (REML-like) ou au minimum lever une erreur (cohérente avec les ValueError des lignes 333 et 357) quand N_k < dim_z + 1 + marge, plutôt que de sauvegarder silencieusement un régime à bruit ~1e-8. À défaut, élever le warning au niveau ERROR et documenter le biais du diviseur N_k dans le docstring.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes et vérifiées sur le code réel : lstsq norme-minimale ligne 228, Z_aug à dim_z+1 colonnes ligne 225, SigW = residuals.T@residuals/N_k ligne 236 sans correction ddl (choix documenté lignes 213-214), _nearest_spd eps=1e-8 ligne 167 appelé lignes 254-255, warning non-bloquant lignes 369-376, ValueError lignes 333/357 pour d'autres cas. Vérification numérique : pour N_k ≤ dim_z+1 les résidus sont à la précision machine (~1e-16) donc Σ_W≈0, clampée à exactement 1e-8·I par _nearest_spd ; le modèle est écrit tel quel (ligne 715). Le biais multiplicatif (N_k−dim_z−1)/N_k est confirmé par Monte-Carlo : 0.5017 mesuré vs 0.5 théorique pour N_k=2(dim_z+1). Détail aggravant : le warning (condition N_k < dim_z+1 stricte, ligne 369) ne se déclenche même pas pour N_k = dim_z+1 exactement, cas où l'interpolation est pourtant exacte. La sévérité medium est bien calibrée : défaut réel (régime quasi-déterministe Σ_V≈1e-8·I sauvegardé silencieusement, dangereux pour le filtre en aval), mais ne survient que pour des régimes très rares dans un outil supervisé de code de recherche déjà partiellement couvert par un warning."
+            },
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Reproduit empiriquement : pour N_k ≤ dim_z+1, lstsq (ligne 228) interpole exactement, residuals ≡ 0, Σ_W = 0, et _nearest_spd (eps=1e-8) produit Σ_U = Σ_V = 1e-8·I exactement comme décrit ; le modèle est écrit sans aucun contrôle (main lignes 706-715, aucune validation dans base_gss_model). La trouvaille est même légèrement sous-évaluée : le warning ligne 369 utilise N_k < dim_z+1 strict, donc le cas exactement déterminé N_k == dim_z+1 (résidus nuls aussi, vérifié) ne produit AUCUN warning. Le biais (N_k−dim_z−1)/N_k est confirmé par Monte Carlo (0.497 mesuré vs 0.5 théorique pour N_k=2(dim_z+1)). Chemin d'appel atteignable : CLI documentée, run_real_data.py (données réelles, régimes rares plausibles), run_supervised.py, et semi_supervised.py qui réutilise _fit_regime. Sévérité medium correcte : artefact pathologique persisté silencieusement qui empoisonne le filtrage aval (Σ_V quasi singulière), mais code de recherche, invocation délibérée, données rares requises, warning partiel existant."
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/supervised.py",
+          "line": "534",
+          "severity": "low",
+          "category": "bug",
+          "title": "Le générateur de code force pi0=None : le π₀ appris par EM est silencieusement jeté dans le modèle sauvegardé",
+          "description": "_generate_model_code écrit en dur « pi0: np.ndarray | None = None   # None → stationary distribution » (ligne 534). Pour le supervisé c'est cohérent (fit_supervised retourne pi0=None, documenté ligne 309/424). Mais semi_supervised.main() (lignes 943-950) passe à ce même générateur les params EM dont params['pi0'] est le π₀ estimé (mis à jour ligne 557, permuté dans _reorder_regimes ligne 682) : il est ignoré sans avertissement. Le fichier modèle sauvegardé utilise donc la distribution stationnaire de P au lieu du π₀ ayant servi à calculer la vraisemblance rapportée (best_log_lik), et μ_z0/Σ_z0 appris SONT sauvegardés (lignes 536-537), créant une incohérence partielle entre le modèle ajusté et l'artefact.",
+          "evidence": "supervised.py:534 « \"    pi0: np.ndarray | None = None   # None → stationary distribution\", » — aucune référence à params['pi0'] dans _generate_model_code, alors que semi_supervised.py:625-641 inclut « \"pi0\": pi0 » (ndarray) dans le dict params, et que _reorder_regimes (ligne 682) prend la peine de le permuter.",
+          "suggestion": "Dans _generate_model_code, sérialiser params['pi0'] quand il est un ndarray (avec le commentaire approprié), et garder None seulement quand params['pi0'] is None. Au minimum, documenter dans semi_supervised que le π₀ appris est volontairement remplacé par la distribution stationnaire dans le fichier généré (défendable : π₀ estimé sur une seule séquence est quasi dégénéré, cf. ligne 557 pi0 = gamma[0]/gamma[0].sum()).",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles vérifiées dans le code : (1) supervised.py:534 écrit en dur « pi0: np.ndarray | None = None » et _generate_model_code ne lit jamais params['pi0'] (grep confirme : seules occurrences = littéraux/doc lignes 309, 424, 534, 549) ; (2) pour le supervisé c'est cohérent car fit_supervised retourne pi0=None (ligne 424, doc ligne 309) ; (3) semi_supervised.main() (lignes 943-950) passe au générateur (importé lignes 77-80) les params EM dont pi0 est estimé (ligne 557 : pi0 = gamma[0]/gamma[0].sum(), inclus dans le dict ligne 637, permuté par _reorder_regimes ligne 682, appliqué au best_params avant retour) — il est jeté sans avertissement ; (4) best_log_lik est calculé par _forward avec log_pi0 issu du π₀ EM (lignes 514, 523), alors que le modèle sauvegardé résoudra pi0=None en distribution stationnaire de P (GSSParams.py:104-106) ; (5) mu_z0/Sigma_z0 appris sont bien sérialisés (lignes 536-537), créant l'incohérence partielle décrite. La sévérité low est bien calibrée : impact pratique faible (π₀ d'une séquence unique quasi dégénéré, n'affecte que t=0) mais remplacement silencieux et non documenté, l'artefact ne reproduit pas exactement le modèle dont la vraisemblance est rapportée."
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/semi_supervised.py",
+          "line": "512-537, 642-649",
+          "severity": "low",
+          "category": "bug",
+          "title": "Quand max_iter est atteint, log_lik rapporté est en retard d'un M-step sur les paramètres retournés ; max_iter=0 → IndexError",
+          "description": "La boucle EM fait E-step → test de convergence → M-step. Si la sortie se fait par break (convergence, ligne 537), les paramètres retournés sont ceux du dernier M-step et log_lik_history[-1] est bien leur vraisemblance — cohérent. Mais si la boucle s'épuise par max_iter, le dernier M-step est exécuté APRÈS le dernier E-step : les paramètres retournés sont post-M-step alors que info['log_lik'] (ligne 643) est la vraisemblance pré-M-step. La sélection du meilleur run (ligne 779) compare alors des vraisemblances légèrement périmées (sous-estimées d'un step EM, donc biais conservateur mais incohérent entre runs convergés et non convergés). Cas limite : max_iter=0 fait planter log_lik_history[-1] (IndexError, ligne 643). Par ailleurs le critère |Δ logL| < tol ABSOLU (ligne 535) masque les éventuelles décroissances (GEM ou heuristique μ_z0) et est très strict pour de longues séquences (logL ~ O(N)) ; un critère relatif |ΔlogL|/|logL| serait plus robuste.",
+          "evidence": "Lignes 533-537 : « if it > 0: delta = log_lik - log_lik_history[-2]; if abs(delta) < tol: converged = True; break » placé AVANT le M-step ; ligne 643 « \"log_lik\": log_lik_history[-1] » alors que F_list/SigW_list/P/pi0 ont été réécrits par le M-step de la dernière itération quand la boucle sort par épuisement de max_iter.",
+          "suggestion": "Après la boucle, si non convergé, recalculer une dernière fois la log-vraisemblance avec les paramètres finaux (un E-step léger : _compute_log_emissions + _forward) avant de remplir info ; valider max_iter >= 1 ; envisager un critère relatif sur ΔlogL.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes et vérifiées sur le code réel (prg/learning/semi_supervised.py). (1) Structure de boucle confirmée : E-step (l.522-526), append (l.528), test de convergence avec break (l.533-537) AVANT le M-step (l.539-584). Sortie par break → params et log_lik_history[-1] cohérents ; sortie par épuisement de max_iter → un dernier M-step réécrit F_list/SigW_list/P/pi0 après la dernière évaluation de vraisemblance. (2) Reproduit empiriquement dans le venv du projet : avec max_iter=3 et tol=1e-12 (épuisement forcé), info['log_lik']=-22.359 alors que la vraisemblance recalculée des paramètres retournés est -22.104 — retard de 0.255 nats, sous-estimation confirmée (biais conservateur, EM monotone). (3) max_iter=0 → IndexError 'list index out of range' à la l.643, reproduit ; aggravant non noté par la trouvaille : le try/except de fit_semi_supervised (l.771) ne catch que LinAlgError/ValueError, donc l'IndexError fait planter tout le multi-start au lieu de sauter le run. Aucune validation de max_iter (défaut 100). (4) l.779 confirme la comparaison inter-runs de log_lik mélangeant valeurs exactes (runs convergés) et périmées (runs épuisés). (5) l.535 : critère abs(delta) < tol absolu confirmé ; abs() déclare 'converged' même sur une décroissance (possible en GEM constraint_each_iter=True ou via l'update heuristique non-exact de μ_z0/Σ_z0, l.576-584). Sévérité low bien calibrée : effet numérique faible près de la convergence, max_iter=0 est un cas limite non-défaut, et en mode contraint par défaut la projection post-hoc (l.589-616) découple de toute façon la vraisemblance rapportée des paramètres retournés."
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/semi_supervised.py",
+          "line": "586-616, 779-787, 952-960",
+          "severity": "low",
+          "category": "api",
+          "title": "Projection AB post-hoc appliquée par run AVANT la sélection, mais best_log_lik et le docstring du modèle généré reflètent les paramètres NON contraints",
+          "description": "L'architecture est correcte sur le fond (projection une fois en fin d'EM pour préserver la monotonie, GEM optionnel documenté — points 3 du cahier d'audit satisfaits). Mais : la projection post-hoc est appliquée dans _em_run (lignes 589-616) sur chaque run, PUIS la sélection multi-redémarrage (ligne 779) compare les info['log_lik'] qui sont les vraisemblances des paramètres AVANT projection. Le « meilleur » run au sens non contraint n'est pas nécessairement le meilleur après projection (la projection modifie A, B donc la vraisemblance). De plus, main() écrit dans le docstring du fichier modèle « log L={best_log_lik} » (lignes 952-960) comme si c'était la vraisemblance du modèle sauvegardé (projeté) — c'est en réalité celle du modèle pré-projection. Comportement défendable mais non documenté.",
+          "evidence": "Ligne 589 : « apply_post_hoc = (not constraint_each_iter) and (constraint is not None or delta_zero) » exécuté dans _em_run avant le return ; ligne 779 : « if best_info is None or info[\"log_lik\"] > best_info[\"log_lik\"] » utilise log_lik_history[-1] (pré-projection) ; lignes 953-956 : « em_note = f\"... log L={info['best_log_lik']:.4f} ...\" » inséré dans le fichier généré.",
+          "suggestion": "Soit recalculer la log-vraisemblance des paramètres projetés (un E-step) et la rapporter séparément (log_lik_unconstrained / log_lik_projected) en sélectionnant sur la version projetée, soit documenter explicitement que best_log_lik est pré-projection. Noter aussi que _apply_constraints (lignes 249-259) avale les échecs de compute_AB par un simple warning en mode post-hoc : le modèle sauvegardé peut alors NE PAS satisfaire (H5) alors que son docstring affiche « Constraint : AB » — le filtre h5_exact n'émettra qu'un RuntimeWarning (H5_TOL=1e-6).",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont vérifiées dans prg/learning/semi_supervised.py : ligne 589 citée verbatim (apply_post_hoc dans _em_run, projection appliquée par run aux lignes 602-616 avant le return) ; ligne 779 citée verbatim, et info[\"log_lik\"] provient de log_lik_history[-1] (ligne 643), calculée au dernier E-step sur les paramètres NON projetés — aucune ré-évaluation de la vraisemblance après projection, donc la sélection multi-redémarrage compare bien des vraisemblances pré-projection alors que les paramètres retournés sont post-projection. Lignes 952-960 : em_note insère log L={info['best_log_lik']} (pré-projection) dans le docstring du modèle sauvegardé (projeté). L'argument mathématique est correct : compute_AB modifie A et B, donc la vraisemblance change et l'ordre des runs peut changer. Les affirmations secondaires tiennent aussi : _apply_constraints (lignes 249-260) avale les ValueError de compute_AB avec un simple warning y compris en mode post-hoc ; supervised.py:481 écrit « Constraint : AB » inconditionnellement quand constraint='ab' ; gss_filter.py n'émet qu'un RuntimeWarning avec H5_TOL=1e-6 (lignes 106, 276, 286). Rien ne documente que best_log_lik est pré-projection (le docstring de fit_semi_supervised dit même « best-likelihood parameter set »). Sévérité « low » bien calibrée : problème de reporting/sélection sans impact sur la correction du filtre ni la monotonie de l'EM.",
+              "severityAdjustment": ""
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/semi_supervised.py",
+          "line": "712-713",
+          "severity": "low",
+          "category": "style",
+          "title": "Docstring périmé : « constraint : None | 'a' | 'b' | 'su' » alors que la seule valeur acceptée est 'ab'",
+          "description": "Le docstring de fit_semi_supervised liste des cibles de contrainte d'une ancienne API ('a', 'b', 'su') qui n'existent plus : le CLI n'accepte que choices=['ab'] (ligne 822) et tout le code ne teste que constraint == 'ab' (_apply_constraints ligne 249, supervised._fit_regime ligne 258). Un appelant programmatique passant 'a' ou 'su' verrait la contrainte silencieusement ignorée (aucune validation de la valeur dans fit_semi_supervised ni fit_supervised).",
+          "evidence": "Lignes 712-713 : « constraint : None | 'a' | 'b' | 'su' / H5 projection target. » vs ligne 822 « choices=[\"ab\"] » et ligne 249 « if constraint == \"ab\": ».",
+          "suggestion": "Corriger le docstring en « None | 'ab' » et ajouter une validation explicite en tête de fit_semi_supervised / fit_supervised : « if constraint not in (None, 'ab'): raise ValueError(...) » pour éviter l'ignorance silencieuse.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes et vérifiées dans le code réel. (1) prg/learning/semi_supervised.py:712-713 contient mot pour mot « constraint : None | 'a' | 'b' | 'su' / H5 projection target. ». (2) Le CLI ligne 822 n'accepte que choices=[\"ab\"]. (3) _apply_constraints (ligne 249) ne teste que constraint == \"ab\", de même que supervised._fit_regime (ligne 258, fonction confirmée à la ligne 185). (4) Aucune validation de la valeur de constraint nulle part dans prg/ (grep négatif sur toute forme de raise/validation) : un appelant programmatique passant 'a', 'b' ou 'su' verrait la projection silencieusement sautée et obtiendrait des paramètres non contraints. Corroboration supplémentaire : le docstring de fit_supervised (supervised.py:295) dit correctement « None | 'ab' », et les anciennes valeurs 'b'/'a'/'su' subsistent aussi dans deux docstrings de prg/experiments/run_supervised.py (lignes 198 et 382), confirmant qu'il s'agit d'un reliquat d'une ancienne API. Sévérité « low » bien calibrée : bug documentaire + absence de validation, sans impact sur le CLI ni la suite de tests."
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/semi_supervised.py",
+          "line": "410-419, 544-545",
+          "severity": "info",
+          "category": "style",
+          "title": "Commentaires trompeurs : « Laplace smoothing » jamais appliqué ; _LOG_FLOOR (1e-300) utilisé comme seuil de comptage",
+          "description": "Dans _initialize_params_from_R, le commentaire ligne 410 annonce « with Laplace smoothing for missing rows » mais le code ne fait que remplacer le diviseur nul par 1 puis substituer les lignes nulles par l'uniforme (lignes 413-419) — pas de lissage additif. Dans le M-step, _LOG_FLOOR=1e-300 (défini ligne 89 comme plancher de LOG-probabilité) est réutilisé comme seuil sur des sommes de responsabilités en unités de comptage (lignes 545, 552, 579) — sémantiquement c'est un test « exactement zéro », ça fonctionne mais le nom induit en erreur sur l'intention.",
+          "evidence": "Ligne 410 : « # P from transition counts (with Laplace smoothing for missing rows) » suivi de « row_sums[row_sums == 0] = 1.0 » ; ligne 545 : « denom_safe = np.where(denom > _LOG_FLOOR, denom, 1.0) » où denom = gamma[:-1].sum(axis=0) est de l'ordre de N.",
+          "suggestion": "Corriger le commentaire (ou appliquer un vrai lissage +α qui serait d'ailleurs bénéfique à l'initialisation), et introduire une constante dédiée _COUNT_FLOOR (par ex. 1e-12, cohérente avec floor_w de _weighted_fit) pour les seuils de masse.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Vérifié dans prg/learning/semi_supervised.py. (1) Le commentaire « with Laplace smoothing for missing rows » est ligne 409 (la trouvaille dit 410, décalage d'une ligne sans importance) ; le code (l.410-419) ne fait aucun lissage additif : comptage brut, row_sums nuls remplacés par 1.0 (l.414), puis lignes toutes nulles remplacées par l'uniforme (l.416-419). Nuance non signalée : pour les lignes manquantes, l'uniforme coïncide numériquement avec la limite du lissage de Laplace (1/K), donc le résultat n'est pas faux pour ces lignes — mais le mécanisme décrit n'est pas implémenté, et le contraste avec π0 (l.421-423) qui reçoit un vrai lissage +1 correctement étiqueté « mild smoothing » confirme l'incohérence. (2) _LOG_FLOOR=1e-300 est bien défini l.89 avec le commentaire « avoids log(0) in transition / initial probabilities » (c'est un plancher de probabilité avant log, pas de log-probabilité — imprécision mineure de la trouvaille) ; il est utilisé conformément à son intention aux l.513-514 et 548, mais réutilisé aux l.545, 552, 579 comme seuil sur des masses de responsabilités (denom = gamma[:-1].sum(axis=0), denom_k = w.sum(), ordre N/K) — sémantiquement un test « exactement zéro ». Aucun bug comportemental, comme l'admet la trouvaille. (3) floor_w=1e-12 dans _weighted_fit (l.276, 297) confirme la pertinence du correctif _COUNT_FLOOR proposé. Trouvaille factuelle, exacte, sévérité [info] bien calibrée pour un problème pur de commentaire/nommage."
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/semi_supervised.py",
+          "line": "657-683",
+          "severity": "info",
+          "category": "robustness",
+          "title": "Réordonnancement canonique par A[0,0] inopérant sous --delta-zero --constraint ab (A(k) ≡ 0 pour tout k)",
+          "description": "_reorder_regimes trie les régimes par A[0,0] décroissant pour atténuer le label-switching entre redémarrages. Or avec delta_zero=True et constraint='ab', la projection donne A = Δ Σ_V⁻¹ C = 0 pour tous les régimes (Δ=0) : le critère de tri est constant et l'ordre devient arbitraire (ordre du tri stable de Python), donc la « labellisation canonique » annoncée (docstring lignes 40-42) n'a aucun effet dans ce mode pourtant prévu par le CLI.",
+          "evidence": "Ligne 672 : « order = sorted(range(K), key=lambda k: -params[\"A_list\"][k][0, 0]) » ; avec delta_zero, _apply_constraints ligne 244-245 fait Dt = 0 puis compute_AB retourne A = Dt @ SV_inv_C = 0 (h5_constraint.py:148).",
+          "suggestion": "Utiliser un critère insensible à la projection, par ex. trier par D[0,0] ou par trace(Σ_V(k)) ou par la norme de C — ces blocs ne sont pas modifiés par la contrainte AB.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations factuelles sont exactes. (1) La citation de la ligne 672 est mot pour mot correcte (_reorder_regimes, lignes 657-683 de prg/learning/semi_supervised.py). (2) L'ordre des opérations confirme le bug : la projection est appliquée AVANT le réordonnancement — soit à chaque M-step (ligne 326), soit post-hoc sur les paramètres convergés (lignes 589, 602-616) — puis _reorder_regimes(best_params) est appelé ligne 787 sur les paramètres projetés. (3) Avec delta_zero=True, _apply_constraints (lignes 244-245) force Dt = zeros((q,s)), puis compute_AB (h5_constraint.py ligne 148 : A = Dt @ SV_inv_C) retourne A = 0 pour tous les régimes ; ce A nul est bien stocké dans A_list (ligne 617). Le critère de tri -A[0,0] est donc constant (-0.0), le tri stable de Python rend la permutation identité et l'ordre final est celui, arbitraire, produit par k-means/EM. (4) Le mode est bien exposé par le CLI (--constraint ab lignes 820-829, --delta-zero lignes 830-833) et la docstring (lignes 40-41) promet explicitement la labellisation canonique. (5) Le correctif proposé est valide : la projection AB préserve C, D, Σ_V (contrat de apply_AB_constraint dans h5_constraint.py), donc trier sur D[0,0], trace(Σ_V) ou ‖C‖ resterait discriminant. Seule nuance mineure : si compute_AB échoue (Σ_V mal conditionnée), A reste non contraint avec un warning — chemin dégénéré qui ne change pas le comportement nominal. Sévérité [info] bien calibrée : problème de reproductibilité des labels dans un mode CLI, sans impact sur la justesse numérique des estimations."
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/supervised.py",
+          "line": "397-401, 436-451",
+          "severity": "info",
+          "category": "style",
+          "title": "Incohérences mineures : np.cov ddof=1 vs convention MLE /N ailleurs ; docstring « :.8g » vs code « :.10g »",
+          "description": "(1) Σ_z0 est estimée via np.cov par défaut (ddof=1, diviseur n−1, ligne 400) alors que Σ_W est explicitement MLE (diviseur N_k, ligne 236) et que le M-step EM divise par Σw — incohérence de convention sans conséquence pratique. (2) Le docstring de _fmt_arr (ligne 442) annonce « :.8g » mais le code utilise « :.10g » (ligne 448). À 10 chiffres significatifs, l'erreur d'arrondi au round-trip est ~1e-10 relative : la contrainte AB du modèle sauvegardé n'est plus exacte à la précision machine mais reste très en dessous du H5_TOL=1e-6 du filtre (gss_filter.py:106) — vérifié, donc pas de risque de RuntimeWarning du filtre, mais utiliser repr() complet (17 chiffres) éliminerait toute perte.",
+          "evidence": "Ligne 400 : « cov_k = np.cov(Z_k, rowvar=False) » (ddof=1 implicite) vs ligne 236 « SigW = (residuals.T @ residuals) / N_k » ; ligne 442 « formatted with ``:.8g`` » vs ligne 448 « f\"{v:.10g}\" ».",
+          "suggestion": "Passer np.cov(..., ddof=0) pour homogénéiser la convention MLE ; corriger le docstring de _fmt_arr ou passer à :.17g pour un round-trip exact des float64.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Tout vérifié dans le code réel. (1) supervised.py:400 utilise np.cov(Z_k, rowvar=False) avec ddof=1 implicite, alors que la ligne 236 calcule SigW = (residuals.T @ residuals) / N_k (commentée « MLE ») et que le M-step EM (semi_supervised.py:578-582) divise par w.sum() — l'incohérence de convention est exacte et sans conséquence pratique. (2) Le docstring de _fmt_arr (lignes 441-442) annonce bien « :.8g » alors que la ligne 448 utilise f\"{v:.10g}\" — mismatch confirmé. (3) H5_TOL = 1e-6 confirmé à gss_filter.py:106 (warning à la ligne 276 si max_rel > H5_TOL) ; l'arrondi à 10 chiffres significatifs donne une erreur relative ≤ 5e-10, donc le résidu AB ~1e-10 reste 4 ordres de grandeur sous la tolérance — l'affirmation « pas de risque de RuntimeWarning » est mathématiquement correcte, et :.17g/repr round-trip exactement les float64. Tous les numéros de ligne cités sont exacts. Seule omission mineure : le même pattern np.cov ddof=1 existe aussi dans semi_supervised.py:430,458. La sévérité [info] est bien calibrée (incohérences cosmétiques/documentaires sans impact comportemental)."
+            }
+          ]
+        },
+        {
+          "file": "prg/learning/supervised.py",
+          "line": "124-131",
+          "severity": "info",
+          "category": "robustness",
+          "title": "_read_csv : la clé de tri int(h[2:]) plante sans message clair sur des colonnes x_*/y_* à suffixe non numérique",
+          "description": "Les colonnes sont détectées par préfixe x_/y_ puis triées par int(suffixe). Une colonne nommée par ex. « x_true » ou « y_pred » (plausible dans un CSV enrichi de résultats de filtrage) lève une ValueError brute dans la lambda de tri, hors du bloc try/except des lignes 148-156, donc sans le message d'erreur contextualisé prévu par le module. Utilisé aussi par semi_supervised via l'import ligne 77-83.",
+          "evidence": "Lignes 124-131 : « x_cols = sorted([h for h in header if h.startswith(\"x_\")], key=lambda h: int(h[2:])) » — int('true') → ValueError non interceptée.",
+          "suggestion": "Filtrer sur un motif strict (re.fullmatch(r\"x_\\d+\", h)) avant le tri, et lever un ValueError explicite listant les colonnes ignorées/ambiguës.",
+          "dimension": "learning",
+          "status": "confirmed",
+          "votes": [
+            {
+              "isReal": true,
+              "confidence": "high",
+              "reasoning": "Toutes les affirmations sont vérifiées sur le code réel. prg/learning/supervised.py lignes 124-131 contiennent exactement le tri incriminé (key=lambda h: int(h[2:])) pour x_* et y_*. Reproduit en live : un header avec 'x_true' lève ValueError: invalid literal for int() with base 10: 'true', sans contexte (ni fichier ni colonne). Le try/except contextualisé (lignes 148-156) ne couvre que la boucle de parsing des lignes, pas le tri du header qui s'exécute avant — l'exception s'échappe donc brute, contrairement à la promesse de la docstring (lignes 100-104). L'import par semi_supervised est confirmé (lignes 77-83, _read_csv ligne 82, appel ligne 890). Le scénario déclencheur (CSV enrichi de colonnes x_true/y_pred) est hors pipeline nominal mais plausible. Sévérité [info] bien calibrée : problème de robustesse/qualité de message d'erreur, pas un bug de correction sur les entrées nominales."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

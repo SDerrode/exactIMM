@@ -39,9 +39,9 @@ def main() -> None:
     study._setup_mpl()  # initialise the module-level pyplot (Agg) used by exp_*
 
     print("== synthetic figures ==")
-    study.exp_speed(OUT)        # -> figures/e2_speed.pdf
+    study.exp_speed(OUT)  # -> figures/e2_speed.pdf
     study.exp_c_influence(OUT)  # -> figures/e8_c_influence.pdf
-    study.exp_c_mismatch(OUT)   # -> figures/e9_c_mismatch.pdf
+    study.exp_c_mismatch(OUT)  # -> figures/e9_c_mismatch.pdf
 
     print("== real-data figure ==")
     make_vehicle_consigne_fig.OUT = FIG / "vehicle_consigne.pdf"

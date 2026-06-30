@@ -134,17 +134,17 @@ def main() -> dict:
     a1.plot(nn, yhD[seg], color="#ff7f0e", lw=0.9, ls="--", label="without steering")
     a1.set_xlabel("time [s]")
     a1.set_ylabel("yaw rate [deg/s]")
-    a1.set_title("(a) held-out real driving: the consigne tracks the yaw", fontsize=9)
-    a1.legend(fontsize=7, loc="upper right")
+    a1.set_title("(a) held-out real driving: the consigne tracks the yaw", fontsize=11)
+    a1.legend(fontsize=10, loc="upper right")
     a1.grid(alpha=0.3)
     order = ["D_blind_inputblind", "C_blind_consigne", "E_steerregime_consigne"]
     labels = ["no steering\n(1 regime)", "+ consigne\n(steering)", "+ switching\n(steer-magnitude)"]
     cols = ["#999999", "#17becf", "#1f77b4"]
     a2.bar(range(3), [rmse[k] for k in order], color=cols)
     a2.set_xticks(range(3))
-    a2.set_xticklabels(labels, fontsize=7)
+    a2.set_xticklabels(labels, fontsize=10)
     a2.set_ylabel("held-out yaw RMSE [deg/s]")
-    a2.set_title("(b) consigne, then regime switching, each pay", fontsize=9)
+    a2.set_title("(b) consigne, then regime switching, each pay", fontsize=11)
     a2.grid(alpha=0.3, axis="y")
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)

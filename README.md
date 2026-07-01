@@ -1,15 +1,13 @@
-# exactIMM — On Fast Optimal Filtering in Gaussian Switching Systems
+# exactIMM — Marginal Markovianity and Exact Filtering in Gaussian Switching Systems
 
 Simulation and **fast exact jump-filtering** algorithms for the paper:
 
-> *On Fast Optimal Filtering in Gaussian Switching Systems*  
+> *Marginal Markovianity and Exact Filtering in Gaussian Switching Systems*  
 > Stéphane Derrode, Clément Fernandes, Frédéric Lehmann & Wojciech Pieczynski (preprint, 2026)
 
 The paper introduces an exact, **linear-time** optimal filter for Gaussian
 switching state-space models satisfying a closed-form structural constraint
-(the **AB / (H5) constraint**). The LaTeX sources of the current version live in
-`docs/NGH-MSM/`;
-the commands that regenerate its figures are in
+(the **AB / (H5) constraint**). The commands that regenerate its figures from this code are in
 [Reproducing the paper figures](#reproducing-the-paper-figures) below.
 
 This README documents the **jump-filtering** pipeline: define a model →

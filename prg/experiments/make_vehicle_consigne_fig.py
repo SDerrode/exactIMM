@@ -117,17 +117,24 @@ def main() -> dict:
         mtr, mte = sbtr == r, sbte == r
         bE = _fit(ytr[mtr], [atr[mtr], str_tr[mtr]])
         yhE[mte] = bE[0] + bE[1] * ate[mte] + bE[2] * str_te[mte]
+    # (F) consigne + the vehicle SPEED, via a steering*speed term: the yaw produced
+    # by a given steering angle grows with speed, so this also cures the
+    # near-standstill bias of the plain read-out (where v~0 but N*steering still
+    # predicts a yaw). Preliminary "extra variable" result.
+    bF = _fit(ytr, [atr, str_tr * vtr])
+    yhF = bF[0] + bF[1] * ate + bF[2] * (str_te * vte)
     rmse = {
         "D_blind_inputblind": _rmse(yte, yhD),
         "C_blind_consigne": _rmse(yte, yhC),
         "B_regime_inputblind": _rmse(yte, yhB),
         "A_regime_speed_consigne": _rmse(yte, yhA),
         "E_steerregime_consigne": _rmse(yte, yhE),
+        "F_speed_consigne": _rmse(yte, yhF),
     }
 
     # figure: (a) yaw on a test segment, (b) RMSE bars
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 3.8))
-    seg = slice(2000, 3200)
+    seg = slice(98400, 99600)  # representative driving episode (~39 km/h, active turning)
     nn = np.arange(seg.stop - seg.start) / 100.0  # seconds
     a1.plot(nn, yte[seg], color="black", lw=1.2, label="true yaw rate")
     a1.plot(nn, yhC[seg], color="#1f77b4", lw=1.0, label="with steering (consigne)")
@@ -144,7 +151,7 @@ def main() -> dict:
     a2.set_xticks(range(3))
     a2.set_xticklabels(labels, fontsize=10)
     a2.set_ylabel("held-out yaw RMSE [deg/s]")
-    a2.set_title("(b) consigne, then regime switching, each pay", fontsize=11)
+    a2.set_title("(b) command, then regime: each lowers the error", fontsize=11)
     a2.grid(alpha=0.3, axis="y")
     fig.tight_layout()
     OUT.parent.mkdir(parents=True, exist_ok=True)

@@ -17,12 +17,12 @@ authors:
     affiliation: Télécom SudParis
 repository-code: "https://github.com/SDerrode/exactIMM"
 abstract: >-
-  Reference implementation of the H5-constrained Gaussian Switching
-  System (GSS) framework: a fast constant-gain optimal filter under
-  the (H5) structural assumption, supervised and semi-supervised
-  parameter estimation (Baum-Welch EM with three projection variants),
-  and a Monte-Carlo benchmark including a real-data study on NOAA
-  ENSO indices.
+  Reference implementation of the H5/AB-constrained Gaussian Switching
+  System (GSS) framework: a fast constant-gain exact optimal filter under
+  the (H5)/AB structural assumption, with support for a known exogenous
+  input (deterministic command), supervised and semi-supervised parameter
+  estimation (Baum-Welch EM), and Monte-Carlo benchmarks including
+  real-data studies (vehicle dynamics and NOAA ENSO indices).
 keywords:
   - state-space model
   - Markov-switching
@@ -34,11 +34,11 @@ keywords:
   - ENSO
   - signal processing
 license: AGPL-3.0
-version: "1.0.0"
-date-released: "2026-06-23"
+version: "1.1.0"
+date-released: "2026-07-01"
 preferred-citation:
   type: generic
-  title: "On Fast Optimal Filtering in Gaussian Switching Systems"
+  title: "Marginal Markovianity and Exact Filtering in Gaussian Switching Systems"
   authors:
     - given-names: Stéphane
       family-names: Derrode
@@ -48,5 +48,6 @@ preferred-citation:
       family-names: Lehmann
     - given-names: Wojciech
       family-names: Pieczynski
+  # NOTE: 5th author (given-names: Ugo) to be added once the surname is confirmed.
   year: 2026
   notes: "Preprint, accompanying this software."

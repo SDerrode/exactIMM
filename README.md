@@ -459,9 +459,10 @@ logs            = "logs"
 If you use this code or the (H5) framework in your work, please cite:
 
 ```bibtex
+% Note: 5th author (Ugo, surname to be confirmed) to be added to the author list.
 @misc{derrode_exactIMM_2026,
   author       = {Derrode, St{\'e}phane and Fernandes, Cl{\'e}ment and Lehmann, Fr{\'e}d{\'e}ric and Pieczynski, Wojciech},
-  title        = {{On Fast Optimal Filtering in Gaussian Switching Systems}},
+  title        = {{Marginal Markovianity and Exact Filtering in Gaussian Switching Systems}},
   year         = {2026},
   howpublished = {\url{https://github.com/SDerrode/exactIMM}},
   note         = {Software accompanying paper preprint},

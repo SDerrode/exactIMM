@@ -138,6 +138,7 @@ def main() -> dict:
     nn = np.arange(seg.stop - seg.start) / 100.0  # seconds
     a1.plot(nn, yte[seg], color="black", lw=1.2, label="true yaw rate")
     a1.plot(nn, yhC[seg], color="#1f77b4", lw=1.0, label="with steering (consigne)")
+    a1.plot(nn, yhE[seg], color="#2ca02c", lw=1.0, ls="-.", label="+ switching (steer-mag.)")
     a1.plot(nn, yhD[seg], color="#ff7f0e", lw=0.9, ls="--", label="without steering")
     a1.set_xlabel("time [s]")
     a1.set_ylabel("yaw rate [deg/s]")

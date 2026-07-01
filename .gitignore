@@ -10,6 +10,9 @@ docs/
 # Research paper sources (LaTeX) — kept out of the repo
 paper/
 
+# One-off audit scripts/artifacts (not maintained code) — kept out of the repo
+audit/
+
 
 # Original and generated data
 /data/simulated/*

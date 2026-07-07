@@ -5,7 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.1] — 2026-07-07
+
+### Changed
+
+- **CGOMSM naming**: the classical ``C = 0`` family is labelled *CGOMSM*
+  (conditionally Gaussian) consistently — figure labels (E8/E9 = paper Fig. 4, the
+  fair comparison) and the ``validate_ngh_msm`` warning — matching the paper.
+- **Transition covariance from the read-out law**: the general (``imm_general``)
+  route now forms the ``(R, Y)`` innovation covariance as the Gaussian convolution
+  of the read-out law, ``Var(Y_{n+1} | r_n, r_{n+1}, y_n) = C_k Var(X_n | r_n, y_n)
+  C_k^T + Σ_V``, reusing the previous step's per-regime posterior state covariance —
+  a PSD sum, numerically safer than the former Schur-complement difference. The
+  ``h5_exact`` transition mean matrix likewise uses the compact identity
+  ``M_{Y|j,k} = D_k + C_k M_j``, and the dead Joseph/short covariance work is
+  skipped for a validated NGH-MSM. **Behaviour-neutral** (all 330 tests pass;
+  ``h5_exact`` ≡ ``imm_general`` to 1e-8, ``imm_general`` ≡ the exact Kᴺ mixture).
+
+### Fixed
+
+- ``tests/test_no_stale_refs.py`` used the Python-2 ``except A, B:`` syntax, so the
+  module failed to import and the stale-reference lint never ran; fixed to a tuple.
+
+## [1.1.0] — 2026-07-01
 
 ### Added
 

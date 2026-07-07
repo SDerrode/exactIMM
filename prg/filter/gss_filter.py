@@ -409,48 +409,50 @@ class GSSFilter:
         self._precompute_stationary()
 
         # --- Per-regime Kalman gain and posterior covariance (constant) ----
-        # K_k    = Σ_XY(k) Σ_YY(k)^{-1}
-        self._K_gain = [
-            _safe_solve(self._S_YY[k].T, self._S_XY[k].T).T  # (q, s)
-            for k in range(K)
-        ]
-        # P_post(k): short form OR Joseph form (selected at construction).
-        # Note: under stationarity this is *constant in n*.
-        self._P_post: list[np.ndarray] = []
-        for k in range(K):
-            Kg = self._K_gain[k]
-            if self._joseph:
-                # H_k = Σ_YX(k) Σ_XX(k)^{-1}              (s, q)
-                # R_k = Σ_YY(k) - H_k Σ_XX(k) H_k^T       (s, s)
-                # P_post(k) = (I - K H) Σ_XX (I - K H)^T + K R K^T
-                H = _safe_solve(self._S_XX[k].T, self._S_XY[k]).T
-                R = _psd_floor(_sym(self._S_YY[k] - H @ self._S_XX[k] @ H.T))
-                IKH = np.eye(q) - Kg @ H
-                P_post_k = _psd_floor(_sym(IKH @ self._S_XX[k] @ IKH.T + Kg @ R @ Kg.T))
-            else:
-                # Short form: P_post(k) = Σ_XX(k) - K_k Σ_YY(k) K_k^T
-                P_post_k = _psd_floor(_sym(self._S_XX[k] - Kg @ self._S_YY[k] @ Kg.T))
-            self._P_post.append(P_post_k)
-
-        # Closed-form gain for a validated NGH-MSM. Under the AB constraint the
-        # regime-conditional posterior is *exactly* N(M_k y, Γ_k), constant in n
-        # and independent of the stationary Σ(k): K_k ≡ M_k = Δ_k Σ_V_k⁻¹ and
-        # P_post(k) ≡ Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T (Schur complement). The
-        # Riccati machinery of Proposition 4 is therefore redundant; using the
-        # closed forms makes the gain exact regardless of the fixed-point's
-        # convergence and needs no Joseph / PSD-floor stabilisation.
         from prg.classes.GSSParams import NGHMSMParams
 
         if isinstance(p, NGHMSMParams):
+            # Closed form for a validated NGH-MSM. Under the AB constraint the
+            # regime-conditional posterior is *exactly* N(M_k y, Γ_k), constant in n
+            # and independent of the stationary Σ(k): K_k ≡ M_k = Δ_k Σ_V_k⁻¹ and
+            # P_post(k) ≡ Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T (Schur complement). The
+            # Riccati machinery of Proposition 4 (the Kalman/Joseph route below) is
+            # redundant here and skipped; the closed forms are exact regardless of the
+            # fixed-point's convergence and need no Joseph / PSD-floor stabilisation.
             self._K_gain = [p.noise_cov.M(k) for k in range(K)]
             self._P_post = [p.noise_cov.Gamma(k) for k in range(K)]
+        else:
+            # General route (no AB constraint): per-regime Kalman gain
+            # K_k = Σ_XY(k) Σ_YY(k)^{-1} and posterior covariance, constant in n
+            # under stationarity, via the short form or the Joseph form.
+            self._K_gain = [
+                _safe_solve(self._S_YY[k].T, self._S_XY[k].T).T  # (q, s)
+                for k in range(K)
+            ]
+            self._P_post: list[np.ndarray] = []
+            for k in range(K):
+                Kg = self._K_gain[k]
+                if self._joseph:
+                    # H_k = Σ_YX(k) Σ_XX(k)^{-1}              (s, q)
+                    # R_k = Σ_YY(k) - H_k Σ_XX(k) H_k^T       (s, s)
+                    # P_post(k) = (I - K H) Σ_XX (I - K H)^T + K R K^T
+                    H = _safe_solve(self._S_XX[k].T, self._S_XY[k]).T
+                    R = _psd_floor(_sym(self._S_YY[k] - H @ self._S_XX[k] @ H.T))
+                    IKH = np.eye(q) - Kg @ H
+                    P_post_k = _psd_floor(_sym(IKH @ self._S_XX[k] @ IKH.T + Kg @ R @ Kg.T))
+                else:
+                    # Short form: P_post(k) = Σ_XX(k) - K_k Σ_YY(k) K_k^T
+                    P_post_k = _psd_floor(_sym(self._S_XX[k] - Kg @ self._S_YY[k] @ Kg.T))
+                self._P_post.append(P_post_k)
 
         # --- Pair-conditional regime-update constants ----------------------
-        # For each (j, k):
+        # For each (j, k), the transition moments are the Gaussian convolution of
+        # the read-out law N(M_j y + N_j u, Γ_j) through the observation row
+        # Y_{n+1} = C_k X_n + D_k Y_n + G^Y_k u_n + V_{n+1}:
         #   µ_Y(j, k) = [C_k, D_k] µ(j) + b_Y(k)               (s, 1)
-        #   Cov(Y_{n+1}, Y_n | j, k) = (F_k Σ(j))[q:, q:]      (s, s)
-        #   M̃_{j,k} = Cov × Σ_YY(j)^{-1}                       (s, s)  [used for the mean]
+        #   M̃_{j,k} = D_k + C_k M_j                            (s, s)  [mean matrix]
         #   Γ(j, k) = C_k P_post(j) C_k^T + Σ_V(k)             (s, s)
+        # where M_j = _K_gain[j] and Γ_j = P_post(j) are the stored read-out gains.
         #
         # The pair-conditional predictive covariance Γ(j,k) is derived by
         # integrating out the filtered state X_n | (r_n=j, y_{1:n}) which,
@@ -475,11 +477,13 @@ class GSSFilter:
             F = p.f_matrix.F(k)
             b_Y = p.b(k)[q:]
             C_k = F[q:, :q]  # C block of F_k  (s, q)
+            D_k = F[q:, q:]  # D block of F_k  (s, s)
             SV_k = p.noise_cov.Sigma_V(k)  # Σ_V(k)          (s, s)
             for j in range(K):
                 mu_Y_jk = F[q:, :] @ self._mu_z[j] + b_Y
-                Cov = (F @ self._Sigma[j])[q:, q:]  # (s, s) — used for mean
-                M_t = _safe_solve(self._S_YY[j].T, Cov.T).T  # (s, s) — used for mean
+                # M̃_{j,k} = D_k + C_k M_j : convolution of the read-out law
+                # (reuses the stored read-out gain M_j = _K_gain[j]).
+                M_t = D_k + C_k @ self._K_gain[j]  # (s, s)
                 Gamma = _psd_floor(_sym(C_k @ self._P_post[j] @ C_k.T + SV_k))  # (s, s)
                 self._mu_Y_jk[j][k] = mu_Y_jk
                 self._M_t[j][k] = M_t
@@ -512,6 +516,10 @@ class GSSFilter:
         if self._mode == "imm_general":
             self._mu: list[np.ndarray] = [self._mu_z[k].copy() for k in range(p.K)]
             self._P_z: list[np.ndarray] = [self._P_z_stat[k].copy() for k in range(p.K)]
+            # Per-regime posterior state covariance Var(X_n | r_n, y_{1:n}), persisted
+            # across steps: the transition innovation covariance reuses it (convolution
+            # of the read-out law). Seeded by _init_step_general.
+            self._var_x: list[np.ndarray] | None = None
 
     def reset(self) -> None:
         """Reset the filter to n = 0 (call before re-processing a sequence)."""
@@ -819,6 +827,7 @@ class GSSFilter:
         innov = y1 - y_pred
 
         self._pi = pi1
+        self._var_x = Var_x_r  # posterior state cov, reused by the next transition
         return FilterResult(
             n=self._n, E_x=E_x, E_xx=E_xx, pi=pi1, innovation=innov, log_lik=log_lik
         )
@@ -879,12 +888,15 @@ class GSSFilter:
 
                 Cov_Ynp1_Yn = (F @ Sig_n)[q:, q:]  # (16)
                 M_t = _safe_solve(S_YY_n.T, Cov_Ynp1_Yn.T).T  # (14)
-                # Pair-conditional predictive variance Var(Y_{n+1} | r_n=rn, r_{n+1}=rnp1):
-                # the block of F Sigma_n(rn) F^T + Sigma_W(rnp1) — NOT the r_n-marginal
-                # Sigma_{YY,n+1}(rnp1). With it, Gamma is the Schur complement of S_YY_n and
-                # is PSD by construction (no spurious mixing of conditionings). (eq. 22)
-                S_YY_pair = (F @ Sig_n @ F.T + p.noise_cov.Sigma_W(rnp1))[q:, q:]
-                Gamma = _psd_floor(_sym(S_YY_pair - M_t @ Cov_Ynp1_Yn.T))
+                # Innovation covariance = Gaussian convolution of the read-out law:
+                # Var(Y_{n+1} | rn, rnp1, y_n) = C_k Var(X_n | rn, y_n) C_k^T + Σ_V(rnp1),
+                # reusing the previous step's posterior state covariance self._var_x[rn].
+                # A sum of PSD terms — PSD by construction, no Schur difference. Equal to
+                # the Schur complement S_YY_pair − M_t Cov^T but numerically safer. (eq. 22)
+                C_k = F[q:, :q]
+                Gamma = _psd_floor(
+                    _sym(C_k @ self._var_x[rn] @ C_k.T + p.noise_cov.Sigma_V(rnp1))
+                )
 
                 mu_Ynp1 = F[q:, :] @ self._mu[rn] + p.b(rnp1)[q:]
                 if has_u:
@@ -952,6 +964,7 @@ class GSSFilter:
         self._pi = pi_np1
         self._P_z = P_np1
         self._mu = mu_np1
+        self._var_x = Var_x_r  # reused by the next step's transition covariance
 
         return FilterResult(
             n=self._n, E_x=E_x, E_xx=E_xx, pi=pi_np1, innovation=innov, log_lik=log_lik

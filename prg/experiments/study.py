@@ -804,23 +804,31 @@ def exp_c_influence(outdir: Path) -> dict:
     C acts purely through regime identifiability."""
     Cs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
     N, seeds = 500, list(range(40))
-    rmse = {"h5_exact": [], "single_kalman": [], "oracle": [], "zero": []}
-    rstd = {"h5_exact": [], "single_kalman": [], "oracle": [], "zero": []}
+    rmse = {"h5_exact": [], "single_kalman": [], "imm": [], "oracle": [], "zero": []}
+    rstd = {"h5_exact": [], "single_kalman": [], "imm": [], "oracle": [], "zero": []}
     acc = []
     for C in Cs:
-        eh, ek, eo, ez, ac = [], [], [], [], []
+        eh, ek, ei, eo, ez, ac = [], [], [], [], [], []
         params = c_influence_model(C)
         for sd in seeds:
             rs, xs, ys = _simulate(params, N, seed=500 + sd)
             ExH, PiH, _ = _run(params, ys, "h5_exact")
             ExK, _ = single_kalman_filter(params, ys)
+            ExI = imm_filter(params, ys)[0]
             ExO, _ = oracle_filter(params, rs, ys)
             eh.append(_rmse(ExH, xs))
             ek.append(_rmse(ExK, xs))
+            ei.append(_rmse(ExI, xs))
             eo.append(_rmse(ExO, xs))
             ez.append(_rmse(np.zeros_like(xs), xs))
             ac.append(float(np.mean(PiH.argmax(axis=1) == rs)))
-        for key, vals in (("h5_exact", eh), ("single_kalman", ek), ("oracle", eo), ("zero", ez)):
+        for key, vals in (
+            ("h5_exact", eh),
+            ("single_kalman", ek),
+            ("imm", ei),
+            ("oracle", eo),
+            ("zero", ez),
+        ):
             rmse[key].append(float(np.mean(vals)))
             rstd[key].append(float(np.std(vals)))
         acc.append(float(np.mean(ac)))
@@ -828,7 +836,7 @@ def exp_c_influence(outdir: Path) -> dict:
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
     ax1.plot(Cs, acc, "o-", color=_C["h5"], ms=4)  # NGH-MSM-KF regime accuracy (its usual colour)
     ax1.axhline(0.5, color="black", ls=":", lw=1)
-    ax1.text(Cs[-1], 0.508, "chance", fontsize=7, color="black", ha="right", va="bottom")
+    ax1.text(Cs[-1], 0.508, "chance (0.5)", fontsize=7, color="black", ha="right", va="bottom")
     ax1.set_xlabel("observation coupling $C$")
     ax1.set_ylabel("regime accuracy")
     ax1.set_title("$C$ opens the regime channel")
@@ -842,7 +850,6 @@ def exp_c_influence(outdir: Path) -> dict:
         color="black",
         arrowprops=dict(arrowstyle="-|>", lw=1.2, color="black", mutation_scale=18, shrinkB=4),
     )
-    ax2.plot(Cs, rmse["zero"], "--", color="#bbbbbb", label="zero")
     ax2.errorbar(
         Cs,
         rmse["single_kalman"],
@@ -860,6 +867,17 @@ def exp_c_influence(outdir: Path) -> dict:
         color=_C["h5"],
         capsize=2,
         label="NGH-MSM-KF (proposed)",
+    )
+    ax2.errorbar(
+        Cs,
+        rmse["imm"],
+        yerr=rstd["imm"],
+        fmt="D--",
+        color=_C["imm"],
+        mfc="none",
+        ms=5,
+        capsize=2,
+        label="IMM (general)",
     )
     ax2.errorbar(
         Cs,
@@ -908,21 +926,23 @@ def exp_c_mismatch(outdir: Path) -> dict:
     """
     Cs = [0.0, 0.15, 0.3, 0.45, 0.6, 0.7]
     N, seeds = 500, list(range(40))
-    rmse = {"correct": [], "c0_old": [], "oracle": []}
-    rstd = {"correct": [], "c0_old": [], "oracle": []}
+    rmse = {"correct": [], "c0_old": [], "imm": [], "oracle": []}
+    rstd = {"correct": [], "c0_old": [], "imm": [], "oracle": []}
     old = c_mismatch_model(0.0)  # the old CGOMSM model (C = 0)
     for C in Cs:
         true = c_mismatch_model(C)
-        ec, eold, eor = [], [], []
+        ec, eold, ei, eor = [], [], [], []
         for sd in seeds:
             rs, xs, ys = _simulate(true, N, seed=600 + sd)
             ExC, _, _ = _run(true, ys, "h5_exact")  # correct filter (knows C)
             ExOld, _, _ = _run(old, ys, "h5_exact")  # old C = 0 filter on the same data
+            ExI = imm_filter(true, ys)[0]  # general IMM on the true model
             ExOr, _ = oracle_filter(true, rs, ys)
             ec.append(_rmse(ExC, xs))
             eold.append(_rmse(ExOld, xs))
+            ei.append(_rmse(ExI, xs))
             eor.append(_rmse(ExOr, xs))
-        for key, vals in (("correct", ec), ("c0_old", eold), ("oracle", eor)):
+        for key, vals in (("correct", ec), ("c0_old", eold), ("imm", ei), ("oracle", eor)):
             rmse[key].append(float(np.mean(vals)))
             rstd[key].append(float(np.std(vals)))
     penalty = [rmse["c0_old"][i] - rmse["correct"][i] for i in range(len(Cs))]
@@ -933,7 +953,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
         rmse["c0_old"],
         yerr=rstd["c0_old"],
         fmt="s-",
-        color=_C["imm"],
+        color="#d62728",
         capsize=2,
         label="old $C{=}0$ filter (CGOMSM)",
     )
@@ -948,6 +968,17 @@ def exp_c_mismatch(outdir: Path) -> dict:
     )
     ax1.errorbar(
         Cs,
+        rmse["imm"],
+        yerr=rstd["imm"],
+        fmt="D--",
+        color=_C["imm"],
+        mfc="none",
+        ms=5,
+        capsize=2,
+        label="IMM (general)",
+    )
+    ax1.errorbar(
+        Cs,
         rmse["oracle"],
         yerr=rstd["oracle"],
         fmt="^-",
@@ -959,7 +990,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
     ax1.set_ylabel("state RMSE")
     ax1.set_title("old $C{=}0$ model on $C{\\neq}0$ data")
     ax1.legend(fontsize=7)
-    ax2.plot(Cs, penalty, "o-", color=_C["imm"])
+    ax2.plot(Cs, penalty, "o-", color="#d62728")
     ax2.set_xlabel("true observation coupling $C$")
     ax2.set_ylabel("RMSE penalty of assuming $C{=}0$")
     ax2.set_title("cost of the old assumption")

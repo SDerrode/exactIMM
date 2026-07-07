@@ -130,7 +130,7 @@ def test_no_stale_api_references():
             continue
         try:
             text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
+        except UnicodeDecodeError, OSError:
             continue  # not a text file we can lint
         for line_no, line in enumerate(text.splitlines(), start=1):
             for pattern, name, hint in _FORBIDDEN_PATTERNS:

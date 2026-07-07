@@ -894,9 +894,7 @@ class GSSFilter:
                 # A sum of PSD terms — PSD by construction, no Schur difference. Equal to
                 # the Schur complement S_YY_pair − M_t Cov^T but numerically safer. (eq. 22)
                 C_k = F[q:, :q]
-                Gamma = _psd_floor(
-                    _sym(C_k @ self._var_x[rn] @ C_k.T + p.noise_cov.Sigma_V(rnp1))
-                )
+                Gamma = _psd_floor(_sym(C_k @ self._var_x[rn] @ C_k.T + p.noise_cov.Sigma_V(rnp1)))
 
                 mu_Ynp1 = F[q:, :] @ self._mu[rn] + p.b(rnp1)[q:]
                 if has_u:

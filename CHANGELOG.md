@@ -22,11 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skipped for a validated NGH-MSM. **Behaviour-neutral** (all 330 tests pass;
   ``h5_exact`` ≡ ``imm_general`` to 1e-8, ``imm_general`` ≡ the exact Kᴺ mixture).
 
-### Fixed
-
-- ``tests/test_no_stale_refs.py`` used the Python-2 ``except A, B:`` syntax, so the
-  module failed to import and the stale-reference lint never ran; fixed to a tuple.
-
 ## [1.1.0] — 2026-07-01
 
 ### Added

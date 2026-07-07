@@ -18,7 +18,7 @@ E5  Closed form      Γ_k constant in n (no Riccati); X slaved to Y
 E6  Robustness       bias of h5_exact off the AB manifold vs the general IMM
 E7  Rank-deficient C C with s<q (rank-deficient observation coupling)
 E8  C influence      role of C as the regime-identification channel
-E9  C mismatch       filtering C≠0 data with a C=0 (CMS-HLM) filter
+E9  C mismatch       filtering C≠0 data with a C=0 (CGOMSM) filter
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ def c_influence_model(C: float, p_switch: float = 0.02) -> GSSParams:
     flips sign with the regime (the regime matters for the state) while D, Sigma_V,
     Sigma_U are matched. At C=0 the observation is conditionally autonomous
     (Y_{n+1}=D Y_n+V, identical across regimes): the regime is hidden and the model
-    is exactly a CMS-HLM (the old condition (H4), C=0). For C!=0 the observation
+    is exactly a CGOMSM (the old condition (H4), C=0). For C!=0 the observation
     depends on the state, which reveals the regime. AB keeps it fast-exact for every
     C; stationary init.
     """
@@ -175,7 +175,7 @@ def c_mismatch_model(C: float, p_switch: float = 0.02) -> GSSParams:
     """E9 model: K=2, q=s=1 NGH-MSM whose regimes differ in observation volatility
     (Sigma_V quiet vs volatile) -- so the regime is identifiable even at C=0 -- and
     in the sign of the slaved gain M_r=Delta_r Sigma_V^-1. The observation coupling
-    C is the swept parameter. Used to filter C!=0 data with an 'old' C=0 (CMS-HLM)
+    C is the swept parameter. Used to filter C!=0 data with an 'old' C=0 (CGOMSM)
     model and quantify the cost of ignoring the X->Y coupling. AB-constrained;
     stationary init."""
     from prg.classes.FMatrix import FMatrix
@@ -791,10 +791,10 @@ def exp_rank_deficient(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# E8 — Influence of C : from CMS-HLM (C=0) to NGH-MSM (C != 0)
+# E8 — Influence of C : from CGOMSM (C=0) to NGH-MSM (C != 0)
 # ---------------------------------------------------------------------------
 def exp_c_influence(outdir: Path) -> dict:
-    """E8 — sweep the observation coupling C. At C=0 the model is a CMS-HLM (the old
+    """E8 — sweep the observation coupling C. At C=0 the model is a CGOMSM (the old
     condition (H4)): the observation is conditionally autonomous and the regime --
     here carrying the sign of the slaved state -- is hidden, so the exact filter can
     only average the two opposite couplings (state estimate ~ 0). As C grows the
@@ -833,7 +833,7 @@ def exp_c_influence(outdir: Path) -> dict:
     ax1.set_ylabel("regime accuracy")
     ax1.set_title("$C$ opens the regime channel")
     ax1.annotate(
-        "CMS-HLM ($C{=}0$)",
+        "CGOMSM ($C{=}0$)",
         xy=(0.0, acc[0]),
         xytext=(0.16, 0.585),
         fontsize=7,
@@ -894,13 +894,13 @@ def exp_c_influence(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# E9 — Filtering C != 0 data with the old C = 0 (CMS-HLM) filter
+# E9 — Filtering C != 0 data with the old C = 0 (CGOMSM) filter
 # ---------------------------------------------------------------------------
 def exp_c_mismatch(outdir: Path) -> dict:
     """E9 — what the old family costs. We generate data from a true NGH-MSM with
     C != 0 (the observation measures the state) and filter it two ways: with the
     correct filter (true C), and with the 'old' filter that assumes C = 0, i.e. the
-    exact filter of the CMS-HLM obtained by zeroing C (same regimes, volatilities
+    exact filter of the CGOMSM obtained by zeroing C (same regimes, volatilities
     and slaved gains, but an autonomous observation). The regimes also differ in
     observation volatility, so the C = 0 filter is not blind -- it still tracks the
     regime from the volatility -- which makes the comparison non-trivial: the gap is
@@ -910,7 +910,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
     N, seeds = 500, list(range(40))
     rmse = {"correct": [], "c0_old": [], "oracle": []}
     rstd = {"correct": [], "c0_old": [], "oracle": []}
-    old = c_mismatch_model(0.0)  # the old CMS-HLM model (C = 0)
+    old = c_mismatch_model(0.0)  # the old CGOMSM model (C = 0)
     for C in Cs:
         true = c_mismatch_model(C)
         ec, eold, eor = [], [], []
@@ -935,7 +935,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
         fmt="s-",
         color=_C["imm"],
         capsize=2,
-        label="old $C{=}0$ filter (CMS-HLM)",
+        label="old $C{=}0$ filter (CGOMSM)",
     )
     ax1.errorbar(
         Cs,
@@ -1116,10 +1116,10 @@ def exp_approx_exactness(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# E7-fair — Fair comparison of the old (CMS-HLM) and new (NGH-MSM) families
+# E7-fair — Fair comparison of the old (CGOMSM) and new (NGH-MSM) families
 # ---------------------------------------------------------------------------
 def exp_fair_comparison(outdir: Path) -> dict:
-    """Fair head-to-head of the old (CMS-HLM) and new (NGH-MSM) approximations on
+    """Fair head-to-head of the old (CGOMSM) and new (NGH-MSM) approximations on
     a model that lies in *neither* family (scalar, symmetric in x and y).
 
     (a) Statistical parity: the families are exact time-reversal mirrors, so a
@@ -1230,13 +1230,13 @@ def exp_fair_comparison(outdir: Path) -> dict:
 
     # ---- figure ----
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 3.4))
-    ax1.plot(deltas, fwd_old, color=_C["kal"], lw=2, label="CMS-HLM")
+    ax1.plot(deltas, fwd_old, color=_C["kal"], lw=2, label="CGOMSM")
     ax1.plot(deltas, fwd_new, color=_C["h5"], lw=2, label="NGH-MSM")
     ax1.set_title("(a1) naive metric: causal forward filtering")
     ax1.set_xlabel(r"departure $\delta$")
     ax1.set_ylabel("state MSE")
     ax1.legend(fontsize=8)
-    ax2.plot(deltas, sm_old, color=_C["kal"], lw=3, label="CMS-HLM")
+    ax2.plot(deltas, sm_old, color=_C["kal"], lw=3, label="CGOMSM")
     ax2.plot(deltas, sm_new, "--", color=_C["h5"], lw=2, label="NGH-MSM")
     ax2.set_title("(a2) fair metric: time-symmetric (smoothing)")
     ax2.set_xlabel(r"departure $\delta$")
@@ -1249,7 +1249,7 @@ def exp_fair_comparison(outdir: Path) -> dict:
     ax3.bar(xb + bw / 2, [gpb2_new, gpb2_old], bw, color=_C["oracle"], label="GPB2")
     ax3.set_yscale("log")
     ax3.set_xticks(xb)
-    ax3.set_xticklabels(["NGH-MSM", "CMS-HLM"])
+    ax3.set_xticklabels(["NGH-MSM", "CGOMSM"])
     ax3.axhline(1e-12, color="black", ls=":", lw=1)
     ax3.text(1.45, 2e-12, "round-off", fontsize=7, ha="right")
     ax3.set_title("(b) history-collapse lossless only on NGH-MSM")

@@ -273,11 +273,11 @@ def validate_ngh_msm(
     Conditions checked (per the corrected Proposition 2)
     ----------------------------------------------------
     1. ``C_k ≠ 0``            ∀ k        — this is a genuine NGH-MSM (the new
-       family), not the degenerate ``C_k = 0`` case, which is a classical CMS-HLM
+       family), not the degenerate ``C_k = 0`` case, which is a classical CGOMSM
        (the (H4) family). NB: ``C_k ≠ 0`` is a *family-membership* requirement, not
        a mathematical prerequisite of the AB / NSC. AB is the necessary-and-
        sufficient (H5) parametrisation for *any* ``C_k`` given only ``Σ_V_k ≻ 0``,
-       ``C_k = 0`` included — where it gives the CMS-HLM's ``A_k = 0``,
+       ``C_k = 0`` included — where it gives the CGOMSM's ``A_k = 0``,
        ``B_k = Δ_k Σ_V_k⁻¹ D_k``. Full column rank of ``C_k`` (hence ``s ≥ q``) and
        invertibility of ``D_k`` are likewise *not* required: the corrected
        Proposition 2 needs only ``Σ_V_k ≻ 0`` (see the module docstring).
@@ -306,14 +306,14 @@ def validate_ngh_msm(
         # — ``C_k = 0`` included (the Lehmann matrix-inversion argument needs no
         # condition on C, and none on D; verified numerically). At ``C_k = 0`` AB
         # gives ``A_k = 0``, ``B_k = Δ_k Σ_V_k⁻¹ D_k``: a perfectly filterable model,
-        # but a classical CMS-HLM (the (H4) family), not the new NGH-MSM family. We
+        # but a classical CGOMSM (the (H4) family), not the new NGH-MSM family. We
         # flag it so callers do not mistake the old family for the new. (Full column
         # rank of ``C_k``, hence ``s >= q``, is likewise not required. Whether AB is
         # moreover the *unique* (H5) parametrisation is a separate identifiability
         # question, governed by ``K·s >= q + s`` — see the module docstring.)
         if float(np.linalg.norm(C, "fro")) <= 1e-12:
             issues.append(
-                f"regime {k}: C = 0 — this is a classical CMS-HLM (the (H4) family), "
+                f"regime {k}: C = 0 — this is a classical CGOMSM (the (H4) family), "
                 "not a NGH-MSM (the new family)."
             )
 
@@ -431,7 +431,7 @@ def apply_AB_constraint(
         the AB constraint by construction, it is returned as the stronger type
         :class:`~prg.classes.GSSParams.NGHMSMParams` **when** the structural
         conditions also hold (C_k ≠ 0, Σ_V_k ≻ 0, Γ_k ⪰ 0). If one fails (e.g.
-        C_k = 0 — the degenerate CMS-HLM family — or a non-PSD Schur complement,
+        C_k = 0 — the degenerate CGOMSM family — or a non-PSD Schur complement,
         for which the projected model has no valid exact filter), a base
         :class:`GSSParams` is returned and a warning is logged, preserving the
         "project what you can" contract for CLI/script paths.

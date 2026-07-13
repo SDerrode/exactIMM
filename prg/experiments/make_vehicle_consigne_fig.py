@@ -143,7 +143,7 @@ def main() -> dict:
     a1.set_xlabel("time [s]")
     a1.set_ylabel("yaw rate [deg/s]")
     a1.set_title("(a) held-out real driving: the consigne tracks the yaw", fontsize=11)
-    a1.legend(fontsize=10, loc="upper right")
+    a1.legend(fontsize=10, loc="upper left")
     a1.grid(alpha=0.3)
     order = ["D_blind_inputblind", "C_blind_consigne", "E_steerregime_consigne"]
     labels = ["no steering\n(1 regime)", "+ consigne\n(steering)", "+ switching\n(steer-magnitude)"]

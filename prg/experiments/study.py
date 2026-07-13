@@ -859,15 +859,9 @@ def exp_c_influence(outdir: Path) -> dict:
         capsize=2,
         label="pairwise Kalman",
     )
-    ax2.errorbar(
-        Cs,
-        rmse["h5_exact"],
-        yerr=rstd["h5_exact"],
-        fmt="o-",
-        color=_C["h5"],
-        capsize=2,
-        label="NGH-MSM-KF (proposed)",
-    )
+    # IMM drawn first (underneath) with a larger hollow marker and wider caps, so the
+    # proposed filter -- plotted on top -- stays visible while the IMM ring and its
+    # error-bar caps still peek out, showing the two coincide (both keep error bars).
     ax2.errorbar(
         Cs,
         rmse["imm"],
@@ -875,9 +869,19 @@ def exp_c_influence(outdir: Path) -> dict:
         fmt="D--",
         color=_C["imm"],
         mfc="none",
+        ms=8,
+        capsize=3,
+        label="IMM (general)",
+    )
+    ax2.errorbar(
+        Cs,
+        rmse["h5_exact"],
+        yerr=rstd["h5_exact"],
+        fmt="o-",
+        color=_C["h5"],
         ms=5,
         capsize=2,
-        label="IMM (general)",
+        label="NGH-MSM-KF (proposed)",
     )
     ax2.errorbar(
         Cs,
@@ -957,15 +961,9 @@ def exp_c_mismatch(outdir: Path) -> dict:
         capsize=2,
         label="old $C{=}0$ filter (CGOMSM)",
     )
-    ax1.errorbar(
-        Cs,
-        rmse["correct"],
-        yerr=rstd["correct"],
-        fmt="o-",
-        color=_C["h5"],
-        capsize=2,
-        label="correct filter (NGH-MSM)",
-    )
+    # IMM drawn first (underneath) with a larger hollow marker and wider caps, so the
+    # correct filter -- plotted on top -- stays visible while the IMM ring and its
+    # error-bar caps still peek out, showing the two coincide (both keep error bars).
     ax1.errorbar(
         Cs,
         rmse["imm"],
@@ -973,9 +971,19 @@ def exp_c_mismatch(outdir: Path) -> dict:
         fmt="D--",
         color=_C["imm"],
         mfc="none",
+        ms=8,
+        capsize=3,
+        label="IMM (general)",
+    )
+    ax1.errorbar(
+        Cs,
+        rmse["correct"],
+        yerr=rstd["correct"],
+        fmt="o-",
+        color=_C["h5"],
         ms=5,
         capsize=2,
-        label="IMM (general)",
+        label="correct filter (NGH-MSM)",
     )
     ax1.errorbar(
         Cs,
@@ -1007,13 +1015,182 @@ def exp_c_mismatch(outdir: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# E11 — Which approximate switching filter is EXACT on the NGH-MSM:
+#       GPB2 (order-2 collapse) vs the order-1 Blom-Bar-Shalom IMM, both on the couple Z
+# ---------------------------------------------------------------------------
+def exp_imm_exactness(outdir: Path) -> dict:
+    """Exactness vs coupling C. Both approximate switching filters run on the couple
+    Z=[X;Y] (pairwise Kalman sub-filters); they differ ONLY in the mode-collapse ORDER.
+    The order-1 IMM (Blom-Bar-Shalom) collapses the K mode priors into one Gaussian per
+    mode BEFORE the likelihood (O(K)/step), whereas GPB2 (order 2) keeps the K^2 pairwise
+    (r_{n-1},r_n) likelihoods and collapses only afterwards (O(K^2)/step). NB: GPB2 is
+    NOT a "pairwise/coupled IMM" -- that name conflates the pairwise sub-filter (shared
+    by both) with the collapse order (what actually differs).
+
+    Against the exact K^N filter (short sequences), GPB2 and the proposed constant-gain
+    filter are exact to machine precision for every C, while the order-1 IMM is exact
+    only at C=0 and departs monotonically as C grows: the error is BORN in the regime
+    posterior p(r_n|y_{1:n}) (the AB slaving keeps the per-regime read-out X=M_r y exact
+    regardless of the mixed prior) and then propagates into the state estimate. Reports
+    the seed-averaged max per-step deviation of the state read-out and of the regime
+    posterior."""
+    Cs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    N, seeds = 12, list(range(20))
+    dev = {k: {"ex": [], "pi": []} for k in ("imm", "gpb2", "h5")}
+    for C in Cs:
+        params = with_stationary_init(c_influence_model(C))
+        di = {"imm": [], "gpb2": [], "h5": []}
+        dp = {"imm": [], "gpb2": [], "h5": []}
+        for sd in seeds:
+            _, _, ys = _simulate(params, N, seed=sd)
+            ExE, _, PiE = exact_mixture_filter(params, ys)
+            ExI, _, PiI, _ = imm_filter(params, ys)
+            ExG, _, PiG, _ = gpb2_filter(params, ys)
+            ExH, PiH, _ = _run(params, ys, "h5_exact")
+            for key, Ex, Pi in (("imm", ExI, PiI), ("gpb2", ExG, PiG), ("h5", ExH, PiH)):
+                di[key].append(float(np.max(np.abs(np.asarray(Ex).reshape(N, -1) - ExE.reshape(N, -1)))))
+                dp[key].append(float(np.max(np.abs(np.asarray(Pi) - PiE))))
+        for key in di:
+            dev[key]["ex"].append(float(np.mean(di[key])))
+            dev[key]["pi"].append(float(np.mean(dp[key])))
+
+    floor = 1e-16
+    clip = lambda v: np.maximum(v, floor)
+    gpb2col = "#2ca02c"
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
+    a1.semilogy(Cs, clip(dev["imm"]["ex"]), "D--", color=_C["imm"], mfc="none", ms=7, label="classical IMM")
+    a1.semilogy(Cs, clip(dev["gpb2"]["ex"]), "s-", color=gpb2col, ms=5, label="GPB2 (coupled IMM)")
+    a1.semilogy(Cs, clip(dev["h5"]["ex"]), "o-", color=_C["h5"], ms=4, label="NGH-MSM-KF (proposed)")
+    a1.set_xlabel("observation coupling $C$")
+    a1.set_ylabel(r"max$_n\,|\widehat X_n-\widehat X_n^{\mathrm{exact}}|$")
+    a1.set_title("state read-out: exactness vs $C$")
+    a1.legend(fontsize=7)
+    a1.grid(alpha=0.3, which="both")
+    a2.semilogy(Cs, clip(dev["imm"]["pi"]), "D--", color=_C["imm"], mfc="none", ms=7, label="classical IMM")
+    a2.semilogy(Cs, clip(dev["gpb2"]["pi"]), "s-", color=gpb2col, ms=5, label="GPB2 (coupled IMM)")
+    a2.set_xlabel("observation coupling $C$")
+    a2.set_ylabel(r"max$_n\,\|\pi_n-\pi_n^{\mathrm{exact}}\|_\infty$")
+    a2.set_title("regime posterior: where the error is born")
+    a2.legend(fontsize=7)
+    a2.grid(alpha=0.3, which="both")
+    fig.tight_layout()
+    fig.savefig(outdir / "figures" / "imm_exactness.pdf")
+    plt.close(fig)
+    return {"C": Cs, "dev": dev, "N": N, "n_seeds": len(seeds)}
+
+
+# ---------------------------------------------------------------------------
+# E12 — Robustness to AB violation: the constant-gain filter assumes AB (marginal
+#       (R,Y)-Markovianity); GPB2 uses the correct model. How do they degrade off-AB?
+# ---------------------------------------------------------------------------
+def _quasi_ab_model(C: float, eps: float, p_switch: float = 0.02) -> GSSParams:
+    """The AB model c_influence_model(C) pushed OFF the AB constraint by eps: the state
+    block A_r is set to (M_r C_r) + eps, so the AB residual max_r|A_r - M_r C_r| equals
+    eps exactly (eps=0 recovers the AB model). Everything else (noise blocks Delta_r,
+    Sigma_V/U, D, C, transition) is unchanged, so the perturbation is a controlled
+    departure from the AB manifold. Used by exp_ab_robustness (E12)."""
+    from prg.classes.FMatrix import FMatrix
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance
+    from prg.utils.h5_constraint import compute_AB
+
+    K, q, s = 2, 1, 1
+    P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
+    d = 0.30
+    SV = [np.array([[0.50]]), np.array([[0.50]])]
+    SU = [np.array([[0.50]]), np.array([[0.50]])]
+    D = [np.array([[0.50]]), np.array([[0.50]])]
+    Dt = [np.array([[+d]]), np.array([[-d]])]  # Delta flips sign -> M_r flips sign
+    Cm = [np.array([[C]]), np.array([[C]])]
+    A_list, B_list = [], []
+    for k in range(K):
+        a, b = compute_AB(Cm[k], D[k], Dt[k], SV[k])
+        A_list.append(a + eps)  # <-- break AB by eps in the A block
+        B_list.append(b)
+    fm = FMatrix(K, q, s, A_list, B_list, Cm, D)
+    nc = GSSNoiseCovariance(K, q, s, SU, Dt, SV)
+    p = GSSParams(
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
+        mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
+    )
+    return with_stationary_init(p)
+
+
+def exp_ab_robustness(outdir: Path) -> dict:
+    """E12 -- robustness to AB violation. The exact constant-gain filter (NGH-MSM-KF)
+    is exact only under the AB constraint, i.e. the marginal (R,Y)-Markovianity (H5).
+    We push the model off AB by eps (residual |A_r - M_r C_r| = eps) and score three
+    filters against the exact K^N filter of the PERTURBED model: NGH-MSM-KF (assumes
+    AB/H5), GPB2 (order 2, correct model, depth-2 mode collapse), and the order-1 IMM.
+
+    Finding (adversarially verified): NGH-MSM-KF is machine-exact on AB but degrades
+    ~linearly in eps (its (H5) collapse is misspecified off-AB); GPB2 is the most
+    robust by 1.5-2.5 decades (it uses the correct perturbed dynamics and only
+    approximates by depth-2 collapse); the order-1 IMM has a nonzero on-AB floor but
+    grows slowly. Off-AB the ranking flips to GPB2 < IMM < NGH-MSM-KF -- the AB-exact
+    filter becomes the least accurate. Seed-averaged max per-step state deviation."""
+    import warnings
+
+    C = 0.4
+    epss = [0.0, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
+    N, seeds = 12, list(range(20))
+    dev = {"h5": [], "gpb2": [], "imm": []}
+    for eps in epss:
+        params = _quasi_ab_model(C, eps)
+        dh, dg, di = [], [], []
+        for sd in seeds:
+            _, _, ys = _simulate(params, N, seed=sd)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                ExE, _, _ = exact_mixture_filter(params, ys)
+                ExH, _, _ = _run(params, ys, "h5_exact")
+                ExG, _, _, _ = gpb2_filter(params, ys)
+                ExI, _, _, _ = imm_filter(params, ys)
+            f = lambda E: float(np.max(np.abs(np.asarray(E).reshape(N, -1) - ExE.reshape(N, -1))))
+            dh.append(f(ExH))
+            dg.append(f(ExG))
+            di.append(f(ExI))
+        dev["h5"].append(float(np.mean(dh)))
+        dev["gpb2"].append(float(np.mean(dg)))
+        dev["imm"].append(float(np.mean(di)))
+
+    floor = 1e-16
+    clip = lambda v: np.maximum(v, floor)
+    gpb2col = "#2ca02c"
+    fig, ax = plt.subplots(figsize=(5.6, 3.7))
+    ax.semilogy(epss, clip(dev["h5"]), "o-", color=_C["h5"], ms=5, label="NGH-MSM-KF (assumes AB)")
+    ax.semilogy(epss, clip(dev["gpb2"]), "s-", color=gpb2col, ms=5, label="GPB2 (order 2)")
+    ax.semilogy(epss, clip(dev["imm"]), "D--", color=_C["imm"], mfc="none", ms=6, label="IMM (order 1)")
+    ax.set_xlabel(r"AB-constraint violation $\epsilon=\max_r|A_r-M_rC_r|$")
+    ax.set_ylabel(r"max$_n\,|\widehat X_n-\widehat X_n^{\mathrm{exact}}|$")
+    ax.set_title("robustness to AB violation")
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3, which="both")
+    fig.tight_layout()
+    fig.savefig(outdir / "figures" / "ab_robustness.pdf")
+    plt.close(fig)
+    return {"C": C, "eps": epss, "dev": dev, "N": N, "n_seeds": len(seeds)}
+
+
+# ---------------------------------------------------------------------------
 # E10 — Standard approximate switching filters become exact under the AB constraint
 # ---------------------------------------------------------------------------
 def exp_approx_exactness(outdir: Path) -> dict:
-    """The standard approximate switching filters (IMM, GPB2, RBPF) coincide with
-    — or converge to — the exact K^N filter on the AB-constrained NGH-MSM, because
-    (Prop. 4) the regime-conditional law p(x_n|r_n,y_{1:n}) depends only on the
-    current regime: collapsing the regime history (what GPB2/IMM do) is lossless."""
+    """Under the AB constraint the regime-conditional law p(x_n|r_n,y_{1:n}) is a
+    single Gaussian depending only on the current regime (Prop. 4), so collapsing the
+    regime HISTORY over the previous regime is lossless -- PROVIDED the pairwise
+    (r_{n-1},r_n) likelihood is retained. GPB2 and the RBPF retain it and are therefore
+    EXACT (to machine precision). The classical Blom-Bar-Shalom IMM instead moment-
+    matches the K mode priors into one Gaussian per mode BEFORE scoring the likelihood,
+    so its regime posterior is only APPROXIMATE: near-exact for slow switching / weak
+    coupling, and departing as the coupling C grows (quantified in exp_imm_exactness).
+    The proposed constant-gain filter equals GPB2's exact recursion in closed form."""
     models = [("M1", 9), ("M2", 9), ("M3", 7)]
     rbpf_M = 4000
     res: dict = {}

@@ -6,10 +6,12 @@ Regenerate, into ``docs/NGH-MSM_V2/figures/``, exactly the figures used in the
 IEEE TAC paper *Marginal Markovianity and Exact Filtering in Gaussian Switching
 Systems*:
 
-    e2_speed.pdf          Fig. 3   computational cost         study.exp_speed
-    e8_c_influence.pdf    Fig. 4 (top)  sweeping C            study.exp_c_influence
-    e9_c_mismatch.pdf     Fig. 4 (bot)  mismatched filter     study.exp_c_mismatch
-    vehicle_consigne.pdf  Fig. 5   real driving data          make_vehicle_consigne_fig
+    e2_speed.pdf          Fig. 4   computational cost         study.exp_speed
+    e8_c_influence.pdf    Fig. 5 (top)  sweeping C            study.exp_c_influence
+    e9_c_mismatch.pdf     Fig. 5 (bot)  mismatched filter     study.exp_c_mismatch
+    vehicle_consigne.pdf  Fig. 6   real driving data          make_vehicle_consigne_fig
+    imm_exactness.pdf     Supp.    GPB2 (order 2) vs order-1 IMM exactness    study.exp_imm_exactness
+    ab_robustness.pdf     Supp.    robustness to AB violation (KF vs GPB2 vs IMM)  study.exp_ab_robustness
 
 The synthetic experiments are deterministic (fixed seeds), so the figures are
 bit-for-bit reproducible. The vehicle figure downloads a ~20 MB open dataset once
@@ -42,6 +44,8 @@ def main() -> None:
     study.exp_speed(OUT)  # -> figures/e2_speed.pdf
     study.exp_c_influence(OUT)  # -> figures/e8_c_influence.pdf
     study.exp_c_mismatch(OUT)  # -> figures/e9_c_mismatch.pdf
+    study.exp_imm_exactness(OUT)  # -> figures/imm_exactness.pdf (supplementary)
+    study.exp_ab_robustness(OUT)  # -> figures/ab_robustness.pdf (supplementary)
 
     print("== real-data figure ==")
     make_vehicle_consigne_fig.OUT = FIG / "vehicle_consigne.pdf"

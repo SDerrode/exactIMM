@@ -358,7 +358,7 @@ def exp_speed(outdir: Path) -> dict:
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
     ax1.loglog(Ns, series["h5_exact"], "o-", color=_C["h5"], label="NGH-MSM-KF (proposed)", ms=4)
     ax1.loglog(
-        Ns, series["imm_general"], "s-", color=_C["imm"], label="imm_general (Riccati/step)", ms=4
+        Ns, series["imm_general"], "s-", color=_C["imm"], label="pairwise IMM (order 1)", ms=4
     )
     ax1.loglog(
         Ns,
@@ -702,7 +702,7 @@ def exp_robustness(outdir: Path) -> dict:
 
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
     ax.plot(used, rmse_h5, "o-", color=_C["h5"], label="NGH-MSM-KF (assumes AB)")
-    ax.plot(used, rmse_imm, "s-", color=_C["imm"], label="imm_general (general)")
+    ax.plot(used, rmse_imm, "s-", color=_C["imm"], label="pairwise IMM (order 1)")
     ax.set_xlabel("AB perturbation $\\varepsilon$ (added to $A$)")
     ax.set_ylabel("RMSE vs exact filter")
     ax.set_title("E6 — NGH-MSM-KF degrades gracefully off the AB family")
@@ -871,7 +871,7 @@ def exp_c_influence(outdir: Path) -> dict:
         mfc="none",
         ms=8,
         capsize=3,
-        label="IMM (general)",
+        label="pairwise IMM (order 1)",
     )
     ax2.errorbar(
         Cs,
@@ -973,7 +973,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
         mfc="none",
         ms=8,
         capsize=3,
-        label="IMM (general)",
+        label="pairwise IMM (order 1)",
     )
     ax1.errorbar(
         Cs,
@@ -1058,16 +1058,16 @@ def exp_imm_exactness(outdir: Path) -> dict:
     clip = lambda v: np.maximum(v, floor)
     gpb2col = "#2ca02c"
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    a1.semilogy(Cs, clip(dev["imm"]["ex"]), "D--", color=_C["imm"], mfc="none", ms=7, label="classical IMM")
-    a1.semilogy(Cs, clip(dev["gpb2"]["ex"]), "s-", color=gpb2col, ms=5, label="GPB2 (coupled IMM)")
+    a1.semilogy(Cs, clip(dev["imm"]["ex"]), "D--", color=_C["imm"], mfc="none", ms=7, label="pairwise IMM (order 1)")
+    a1.semilogy(Cs, clip(dev["gpb2"]["ex"]), "s-", color=gpb2col, ms=5, label="GPB2 (order 2)")
     a1.semilogy(Cs, clip(dev["h5"]["ex"]), "o-", color=_C["h5"], ms=4, label="NGH-MSM-KF (proposed)")
     a1.set_xlabel("observation coupling $C$")
     a1.set_ylabel(r"max$_n\,|\widehat X_n-\widehat X_n^{\mathrm{exact}}|$")
     a1.set_title("state read-out: exactness vs $C$")
     a1.legend(fontsize=7)
     a1.grid(alpha=0.3, which="both")
-    a2.semilogy(Cs, clip(dev["imm"]["pi"]), "D--", color=_C["imm"], mfc="none", ms=7, label="classical IMM")
-    a2.semilogy(Cs, clip(dev["gpb2"]["pi"]), "s-", color=gpb2col, ms=5, label="GPB2 (coupled IMM)")
+    a2.semilogy(Cs, clip(dev["imm"]["pi"]), "D--", color=_C["imm"], mfc="none", ms=7, label="pairwise IMM (order 1)")
+    a2.semilogy(Cs, clip(dev["gpb2"]["pi"]), "s-", color=gpb2col, ms=5, label="GPB2 (order 2)")
     a2.set_xlabel("observation coupling $C$")
     a2.set_ylabel(r"max$_n\,\|\pi_n-\pi_n^{\mathrm{exact}}\|_\infty$")
     a2.set_title("regime posterior: where the error is born")
@@ -1166,7 +1166,7 @@ def exp_ab_robustness(outdir: Path) -> dict:
     fig, ax = plt.subplots(figsize=(5.6, 3.7))
     ax.semilogy(epss, clip(dev["h5"]), "o-", color=_C["h5"], ms=5, label="NGH-MSM-KF (assumes AB)")
     ax.semilogy(epss, clip(dev["gpb2"]), "s-", color=gpb2col, ms=5, label="GPB2 (order 2)")
-    ax.semilogy(epss, clip(dev["imm"]), "D--", color=_C["imm"], mfc="none", ms=6, label="IMM (order 1)")
+    ax.semilogy(epss, clip(dev["imm"]), "D--", color=_C["imm"], mfc="none", ms=6, label="pairwise IMM (order 1)")
     ax.set_xlabel(r"AB-constraint violation $\epsilon=\max_r|A_r-M_rC_r|$")
     ax.set_ylabel(r"max$_n\,|\widehat X_n-\widehat X_n^{\mathrm{exact}}|$")
     ax.set_title("robustness to AB violation")

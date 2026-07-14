@@ -959,7 +959,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
         fmt="s-",
         color="#d62728",
         capsize=2,
-        label="old $C{=}0$ filter (CGOMSM)",
+        label="CGOMSM filter",
     )
     # IMM drawn first (underneath) with a larger hollow marker and wider caps, so the
     # correct filter -- plotted on top -- stays visible while the IMM ring and its
@@ -983,7 +983,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
         color=_C["h5"],
         ms=5,
         capsize=2,
-        label="correct filter (NGH-MSM)",
+        label="NGH-MSM-KF",
     )
     ax1.errorbar(
         Cs,
@@ -996,12 +996,12 @@ def exp_c_mismatch(outdir: Path) -> dict:
     )
     ax1.set_xlabel("true observation coupling $C$")
     ax1.set_ylabel("state RMSE")
-    ax1.set_title("old $C{=}0$ model on $C{\\neq}0$ data")
+    ax1.set_title("CGOMSM filter on $C{\\neq}0$ data")
     ax1.legend(fontsize=7)
     ax2.plot(Cs, penalty, "o-", color="#d62728")
     ax2.set_xlabel("true observation coupling $C$")
     ax2.set_ylabel("RMSE penalty of assuming $C{=}0$")
-    ax2.set_title("cost of the old assumption")
+    ax2.set_title("cost of assuming $C{=}0$")
     fig.savefig(outdir / "figures" / "e9_c_mismatch.pdf")
     plt.close(fig)
     return {

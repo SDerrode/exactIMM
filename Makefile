@@ -53,7 +53,7 @@ lint: ## Lint with ruff (check only)
 fmt: ## Auto-fix lint issues with ruff
 	$(PY) -m ruff check --fix .
 
-typecheck: ## Run mypy (strict on prg/utils/h5_constraint.py)
+typecheck: ## Run mypy (strict on prg/utils/ab_constraint.py)
 	$(PY) -m mypy
 
 check: lint typecheck test ## Run lint + typecheck + tests (CI parity)

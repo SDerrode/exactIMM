@@ -209,7 +209,7 @@ class TestFitRegime:
 
     def test_constraint_ab(self, noise_free_data):
         """After constraint='ab', A, B should match the closed form."""
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         Z_curr, Z_next, q, s, _, _ = noise_free_data
         A, B, C, D, SU, Dt, SV, _ = _fit_regime(
@@ -319,7 +319,7 @@ class TestFitSupervised:
 
     def test_constraint_ab(self, simulated_csv):
         """Estimated A(k), B(k) should match the AB-constraint closed form."""
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         rs, xs, ys, K, q, s = _read_csv(simulated_csv)
         params = fit_supervised(rs, xs, ys, K, q, s, constraint="ab")

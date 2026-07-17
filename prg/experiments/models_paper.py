@@ -10,10 +10,10 @@ M1  K=2, q=1, s=1  — canonical scalar case (Table §6.1)
 M2  K=2, q=2, s=2  — multivariate cross-coupled case (Table 1 in §6.1)
 M3  K=3, q=1, s=1  — three-regime scalar case (§6.1)
 
-All models satisfy (H5) exactly: A(k) and B(k) are computed from
-C, D, Δ, Σ_V via the closed-form (H5)-compatible AB constraint
+All models satisfy AB exactly: A(k) and B(k) are computed from
+C, D, Δ, Σ_V via the closed-form AB constraint
 A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.  An assertion at module construction
-time verifies the H5 residual < 1e-8 for every regime.
+time verifies the AB residual < 1e-8 for every regime.
 
 Usage
 -----
@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from prg.utils.h5_constraint import compute_AB, compute_h5_residual
+from prg.utils.ab_constraint import compute_AB, compute_ab_residual
 
 __all__ = [
     "get_params_M1",
@@ -38,17 +38,17 @@ __all__ = [
 
 MODEL_NAMES = ("M1", "M2", "M3")
 
-_H5_ASSERT_TOL = 1e-8  # tighter than filter's H5_TOL=1e-6 for ground-truth models
+_AB_ASSERT_TOL = 1e-8  # tighter than filter's AB_TOL=1e-6 for ground-truth models
 
 
-def _check_h5(name: str, k: int, A, B, C, D, SU, Dt, SV) -> None:
-    """Raise AssertionError if H5 residual is too large."""
-    res = compute_h5_residual(A, B, C, D, SU, Dt, SV)
-    Z = Dt.T @ A.T + SV @ B.T  # LHS of (H5): Δᵀ Aᵀ + Σ_V Bᵀ
+def _check_ab(name: str, k: int, A, B, C, D, SU, Dt, SV) -> None:
+    """Raise AssertionError if AB residual is too large."""
+    res = compute_ab_residual(A, B, C, D, SU, Dt, SV)
+    Z = Dt.T @ A.T + SV @ B.T  # LHS of AB: Δᵀ Aᵀ + Σ_V Bᵀ
     scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
     rel = float(np.linalg.norm(res, "fro")) / scale
-    assert rel < _H5_ASSERT_TOL, (
-        f"Model {name} regime k={k}: H5 residual {rel:.2e} >= {_H5_ASSERT_TOL:.0e}"
+    assert rel < _AB_ASSERT_TOL, (
+        f"Model {name} regime k={k}: AB residual {rel:.2e} >= {_AB_ASSERT_TOL:.0e}"
     )
 
 
@@ -70,7 +70,7 @@ def get_params_M1() -> dict:
         Σ_U: [0.10]  / [0.20]
         Δ:   [0.05]  / [0.02]
         Σ_V: [0.10]  / [0.15]
-        A, B: computed from the (H5)-compatible AB constraint
+        A, B: computed from the AB constraint
               A = Δ Σ_V⁻¹ C,   B = Δ Σ_V⁻¹ D.
         b:   [0.10, 0.05]^T  /  [-0.05, 0.02]^T
     """
@@ -87,7 +87,7 @@ def get_params_M1() -> dict:
     A_list, B_list = [], []
     for k in range(K):
         A_k, B_k = compute_AB(C_raw[k], D_raw[k], Dt[k], SV[k])
-        _check_h5("M1", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
+        _check_ab("M1", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
         A_list.append(A_k)
         B_list.append(B_k)
 
@@ -127,7 +127,7 @@ def get_params_M2() -> dict:
     """
     Return a parameter dict for model M2 (K=2, q=s=2).
 
-    Full 2×2 matrices per regime; A, B computed from the (H5)-compatible
+    Full 2×2 matrices per regime; A, B computed from the AB-constrained
     AB constraint A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
     No bias (b_r = 0) to isolate the cross-coupling effect.
     See Table 1 in §6.1 of the paper.
@@ -160,7 +160,7 @@ def get_params_M2() -> dict:
     A_list, B_list = [], []
     for k in range(K):
         A_k, B_k = compute_AB(C_raw[k], D_raw[k], Dt[k], SV[k])
-        _check_h5("M2", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
+        _check_ab("M2", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
         A_list.append(A_k)
         B_list.append(B_k)
 
@@ -220,7 +220,7 @@ def get_params_M3() -> dict:
     A_list, B_list = [], []
     for k in range(K):
         A_k, B_k = compute_AB(C_raw[k], D_raw[k], Dt[k], SV[k])
-        _check_h5("M3", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
+        _check_ab("M3", k, A_k, B_k, C_raw[k], D_raw[k], SU[k], Dt[k], SV[k])
         A_list.append(A_k)
         B_list.append(B_k)
 

@@ -5,16 +5,16 @@ Monte-Carlo simulation study (§6 of the paper).
 
 Sub-modules
 -----------
-models_paper     — reference models M1, M2, M3 with H5-constrained B
+models_paper     — reference models M1, M2, M3 with AB-constrained B
                    (get_params_M1 / get_params_M2 / get_params_M3 / get_params)
 metrics          — scalar performance metrics:
-                     dof_h5            free-parameter count d_{H5}(K,q,s)
+                     dof_ab            free-parameter count d_{AB}(K,q,s)
                      compute_rmse      root mean squared filtering error
                      compute_nees      ANEES (expected 1 for consistent filter)
                      compute_ljung_box Ljung-Box p-value (innovation whiteness)
                      compute_jarque_bera Jarque-Bera p-value (normality)
-                     compute_bic       BIC for H5-constrained GSS models
-run_simulations  — §6.2: Monte-Carlo filter benchmark (H5-exact vs IMM-approx):
+                     compute_bic       BIC for AB-constrained GSS models
+run_simulations  — §6.2: Monte-Carlo filter benchmark (NGH-MSM-KF vs GPB2):
                      run_one_trial     single (model, N, seed, mode) trial
                      run_all           full study → data/experiments/mc_results.csv
                    CLI: python -m prg.experiments.run_simulations [--help]

@@ -7,7 +7,7 @@ Monte-Carlo simulation study for the paper §6.
 Protocol
 --------
 For each model (M1, M2, M3) × sequence length N ∈ {500, 2000, 5000}
-× filter mode ("h5_exact", "imm_general") × seed in range(N_RUNS):
+× filter mode ("ngh_kf", "gpb2") × seed in range(N_RUNS):
 
     1. Simulate N steps from the true model using GSSSimulator.
     2. Run GSSFilter on the simulated observations (step-by-step).
@@ -61,7 +61,7 @@ logger = logging.getLogger("exactIMM.experiments")
 
 DEFAULT_N_RUNS = 100
 DEFAULT_N_LIST = (500, 2_000, 5_000)
-DEFAULT_MODES = ("h5_exact", "imm_general")
+DEFAULT_MODES = ("ngh_kf", "gpb2")
 DEFAULT_OUT_DIR = pathlib.Path("data") / "experiments"
 
 # ---------------------------------------------------------------------------
@@ -131,7 +131,7 @@ def run_one_trial(
     seed : int
         Random seed for :class:`GSSSimulator`.
     filter_mode : str
-        ``"h5_exact"`` or ``"imm_general"``.
+        ``"ngh_kf"`` or ``"gpb2"``.
     lb_lags : int, default 20
         Number of lags for the Ljung–Box test.
 
@@ -147,7 +147,7 @@ def run_one_trial(
     params = _params_from_dict(param_dict)
     K, q, s = params.K, params.q, params.s
 
-    # Suppress H5 warnings: models_paper.py already asserts H5 residual < 1e-8
+    # Suppress AB warnings: models_paper.py already asserts AB residual < 1e-8
     filt = GSSFilter(params, mode=filter_mode)
 
     # --- Simulate ---------------------------------------------------------
@@ -224,7 +224,7 @@ def run_all(
         Models to evaluate.
     N_list : sequence of int, default (500, 2000, 5000)
         Sequence lengths.
-    modes : sequence of str, default ("h5_exact", "imm_general")
+    modes : sequence of str, default ("ngh_kf", "gpb2")
         Filter modes.
     n_runs : int, default 100
         Number of Monte-Carlo runs per configuration (seeds 0..n_runs-1).
@@ -371,7 +371,7 @@ def _parse_args(argv: list[str] | None = None):
         "--modes",
         nargs="+",
         default=list(DEFAULT_MODES),
-        choices=["h5_exact", "imm_general"],
+        choices=["ngh_kf", "gpb2"],
         help="Filter modes.",
     )
     parser.add_argument(

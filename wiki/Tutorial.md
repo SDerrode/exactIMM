@@ -58,7 +58,7 @@ from prg.filter import GSSFilter
 import numpy as np
 
 params = GSSParams.from_model(ModelGss_K2_q1_s1())
-filt   = GSSFilter(params, mode="h5_exact")     # or "imm_general"
+filt   = GSSFilter(params, mode="ngh_kf")     # or "gpb2"
 
 # Process a stream of observations (one at a time)
 for y in observations:                            # y shape (s,) or (s,1)

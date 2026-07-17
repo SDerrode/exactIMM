@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] — 2026-07-17
+
+Breaking. The two filter modes are renamed, and the legacy general-purpose
+recursion is gone — replaced by a genuine GPB2. No deprecation aliases: the old
+mode names now raise `ValueError`.
+
+### Removed
+
+- **`mode="imm_general"` and its ~290-line per-step recursion.** It implemented an
+  internal note that no longer applies, and it was dominated everywhere it was
+  measured:
+  - on an AB model it reproduced `h5_exact` to ~4e-16 — the same answer, at about
+    3× the cost;
+  - off AB, where it was advertised as *"the correct choice for any GSS model,
+    in particular those that do not satisfy (H5)"*, its max per-step state
+    deviation from the exact `K^N` posterior was ~2.6e-2 on a `K=2`, `C=0.4`
+    model perturbed by `eps=0.05` — against ~1.3e-7 for GPB2 and ~3.1e-3 for the
+    order-1 IMM. It was worse than both literature filters precisely where it was
+    meant to be the safe fallback.
+
+  Despite its name it was neither the Blom–Bar-Shalom order-1 IMM nor GPB2.
+
+### Changed
+
+- **Filter modes renamed**: `h5_exact` → `ngh_kf`, `imm_general` → `gpb2`.
+- **`mode="gpb2"` is now a real GPB2 (order 2)**: K² regime-pair Kalman updates per
+  step, then a collapse back to K. Exact whenever `C(k) = 0` or
+  `A(k) = Δ(k) Σ_V(k)⁻¹ C(k)` — a strictly larger region than AB — and an
+  approximation elsewhere. Validated to machine precision (~1e-15) against the
+  batch reference `prg.experiments.reference_filters.gpb2_filter`.
+- **`gpb2` starts from the model's stated `p(Z_0 | r_0)`**, not from the stationary
+  moments the superseded recursion used. On a stationary-initialised model both
+  modes still agree (~1e-12); away from stationarity they legitimately differ (by
+  ~1e-1 on M1–M3) and `gpb2` is the one honouring the stated prior. Stationary
+  initialisation is `ngh_kf`'s documented precondition, and
+  `tests/test_filter_modes.py` now states it instead of relying on it.
+- **GUI**: the filter-mode combo reads *"GPB2 (order 2) — any model"* and
+  *"NGH-MSM-KF (constant gain) — AB required"*, replacing the misleading
+  *"Approximate IMM — H5 not required"*.
+
+### Fixed
+
+- Docstrings equating the AB constraint with the marginal Markovianity of `(R, Y)`.
+  AB **implies** it, without converse: at `C = 0` the pair is Markov for any
+  `A(k)`, off-AB included.
+- `exp_speed` timed its curves inconsistently — best-of-two for two of them, a
+  single untimed shot for the third — which flattered the proposed filter against
+  the Kalman floor. All curves are now timed identically.
+
 ## [1.1.1] — 2026-07-07
 
 ### Changed

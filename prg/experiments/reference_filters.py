@@ -3,7 +3,7 @@
 prg/experiments/reference_filters.py
 ====================================
 Reference / baseline filters used by the simulation study, for comparison
-against the proposed fast exact filter (``GSSFilter`` mode ``h5_exact``).
+against the proposed fast exact filter (``GSSFilter`` mode ``ngh_kf``).
 
 The observation model is exact: ``Y_n`` is the lower ``s`` block of the state
 ``Z_n = [X_n; Y_n]``, observed without noise. Each filter below conditions on
@@ -37,10 +37,10 @@ Helpers
 -------
 stationary_moments(params) -> (mu_list, Sigma_list)
     Per-regime stationary mean/covariance E[Z|r=k], Var[Z|r=k] (the prior the
-    exact-under-(H5) filter starts from).
+    exact-under-AB filter starts from).
 with_stationary_init(params) -> GSSParams
     Copy of ``params`` whose μ_z0/Σ_z0 are the stationary moments, so the exact
-    filter and ``h5_exact`` share the same prior.
+    filter and ``ngh_kf`` share the same prior.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def stationary_moments(params) -> tuple[list[np.ndarray], list[np.ndarray]]:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        filt = GSSFilter(params, mode="h5_exact")
+        filt = GSSFilter(params, mode="ngh_kf")
     mu = [m.copy() for m in filt._mu_z]
     Sigma = [S.copy() for S in filt._Sigma]
     return mu, Sigma

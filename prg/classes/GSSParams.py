@@ -483,14 +483,14 @@ class GSSParams:
         """
         Validate that this model is a valid NGH-MSM (corrected CNS, Prop. 2).
 
-        Checks the AB / (H5) constraint together with the structural
+        Checks the AB constraint together with the structural
         hypotheses (C_k ≠ 0, Σ_V_k ≻ 0,
-        Γ_k ⪰ 0). See :func:`prg.utils.h5_constraint.validate_ngh_msm`.
+        Γ_k ⪰ 0). See :func:`prg.utils.ab_constraint.validate_ngh_msm`.
 
         Parameters
         ----------
         tol : float
-            Tolerance on the relative pairwise (H5) residual.
+            Tolerance on the relative pairwise AB residual.
         raise_on_fail : bool
             If True (default) and the model violates at least one condition,
             raise :class:`~prg.utils.exceptions.ParamError`. If False, the
@@ -510,9 +510,9 @@ class GSSParams:
         Notes
         -----
         This validity is intentionally *not* enforced at construction: the same
-        class also represents non-(H5) models used by ``mode="imm_general"``.
+        class also represents models that violate the AB constraint.
         """
-        from prg.utils.h5_constraint import validate_ngh_msm
+        from prg.utils.ab_constraint import validate_ngh_msm
 
         issues = validate_ngh_msm(self, tol=tol)
         if issues and raise_on_fail:
@@ -570,7 +570,7 @@ class NGHMSMParams(GSSParams):
     satisfies the corrected CNS of Proposition 2: the AB constraint
     ``A_k = Δ_k Σ_V_k⁻¹ C_k``, ``B_k = Δ_k Σ_V_k⁻¹ D_k`` together with the
     structural hypotheses (C_k ≠ 0, Σ_V_k ≻ 0,
-    Γ_k ⪰ 0).  Such a model admits the exact fast filter (``mode="h5_exact"``).
+    Γ_k ⪰ 0).  Such a model admits the exact fast filter (``mode="ngh_kf"``).
 
     Two ways to construct it:
 
@@ -585,11 +585,11 @@ class NGHMSMParams(GSSParams):
 
     Notes
     -----
-    * The CNS / (H5) validity is independent of the drift bias ``b(k)``, which
+    * The CNS / AB validity is independent of the drift bias ``b(k)``, which
       is passed through unconstrained (beyond the base shape checks).
     * Validity is intentionally *not* imposed on the base :class:`GSSParams`,
-      which also represents general (non-(H5)) models handled by
-      ``mode="imm_general"``.  ``NGHMSMParams`` is a *restriction* of the base
+      which also represents models violating the AB constraint.
+      ``NGHMSMParams`` is a *restriction* of the base
       type (it adds guarantees, never changes behaviour), so it substitutes
       for a ``GSSParams`` everywhere.
     """
@@ -614,7 +614,7 @@ class NGHMSMParams(GSSParams):
             K, q, s, P, f_matrix, noise_cov, pi0, mu_z0_list, Sigma_z0_list, b_list, G_list
         )
         # Validate the corrected CNS; reuses all of validate_ngh_msm's logic.
-        from prg.utils.h5_constraint import validate_ngh_msm
+        from prg.utils.ab_constraint import validate_ngh_msm
 
         issues = validate_ngh_msm(self, tol=tol)
         if issues:
@@ -658,7 +658,7 @@ class NGHMSMParams(GSSParams):
         """
         from prg.classes.FMatrix import FMatrix as _FMatrix
         from prg.classes.NoiseCovariance import GSSNoiseCovariance as _NoiseCov
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         A_list, B_list = [], []
         for C, D, Dt, SV in zip(C_list, D_list, Delta_list, Sigma_V_list, strict=True):

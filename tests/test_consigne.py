@@ -136,33 +136,33 @@ def test_simulator_csv_columns():
 # Filter: gold-standard exactness vs the brute-force Kᴺ
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("with_input", [False, True])
-def test_h5_exact_equals_brute_force_kn(with_input):
+def test_ngh_kf_equals_brute_force_kn(with_input):
     pc, _ = _consigne_params(seed=5, scale=1.2)
-    pc = with_stationary_init(pc)  # align init law to stationary (h5 assumes it)
+    pc = with_stationary_init(pc)  # align init law to stationary (ngh_kf assumes it)
     N = 11
     rng = np.random.default_rng(9)
     u = rng.standard_normal((N, pc.p)) if with_input else None
     Y = np.array([y.ravel() for _n, _r, _x, y in GSSSimulator(pc, N=N, seed=9, u=u)])
-    filt = GSSFilter(pc, mode="h5_exact")
-    Ex_h5 = np.array(
+    filt = GSSFilter(pc, mode="ngh_kf")
+    Ex_ab = np.array(
         [filt.step(Y[n], u=(u[n] if with_input else None)).E_x.ravel() for n in range(N)]
     )
     Ex_kn, _, _ = exact_mixture_filter(pc, Y, us=u)
-    assert np.max(np.abs(Ex_h5 - Ex_kn)) < 1e-9
+    assert np.max(np.abs(Ex_ab - Ex_kn)) < 1e-9
 
 
 def test_filter_u_none_is_autonomous():
     pc, _ = _consigne_params(seed=5)
     N = 50
     Y = np.array([y.ravel() for _n, _r, _x, y in GSSSimulator(pc, N=N, seed=3)])
-    f1 = GSSFilter(pc, mode="h5_exact")
-    f2 = GSSFilter(pc, mode="h5_exact")
+    f1 = GSSFilter(pc, mode="ngh_kf")
+    f2 = GSSFilter(pc, mode="ngh_kf")
     a = np.array([f1.step(Y[n]).E_x.ravel() for n in range(N)])
     b = np.array([f2.step(Y[n], u=np.zeros(pc.p)).E_x.ravel() for n in range(N)])
     assert np.allclose(a, b)
 
 
-@pytest.mark.parametrize("mode", ["h5_exact", "imm_general"])
+@pytest.mark.parametrize("mode", ["ngh_kf", "gpb2"])
 def test_consigne_improves_estimate(mode):
     pc, _ = _consigne_params(seed=3, scale=1.5)
     N = 600

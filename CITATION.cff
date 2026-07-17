@@ -17,9 +17,9 @@ authors:
     affiliation: Télécom SudParis
 repository-code: "https://github.com/SDerrode/exactIMM"
 abstract: >-
-  Reference implementation of the H5/AB-constrained Gaussian Switching
+  Reference implementation of the AB-constrained Gaussian Switching
   System (GSS) framework: a fast constant-gain exact optimal filter under
-  the (H5)/AB structural assumption, with support for a known exogenous
+  the AB structural assumption, with support for a known exogenous
   input (deterministic command), supervised and semi-supervised parameter
   estimation (Baum-Welch EM), and Monte-Carlo benchmarks including
   real-data studies (vehicle dynamics and NOAA ENSO indices).
@@ -34,7 +34,7 @@ keywords:
   - ENSO
   - signal processing
 license: AGPL-3.0
-version: "1.1.1"
+version: "2.0.0"
 date-released: "2026-07-07"
 preferred-citation:
   type: generic

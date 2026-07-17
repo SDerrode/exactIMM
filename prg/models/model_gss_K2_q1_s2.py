@@ -17,7 +17,7 @@ Matrice de transition (diagonale dominante — peu de transitions)
 
 A_k, B_k sont dérivés de (C, D, Δ, Σ_V) via la contrainte AB
 (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) dans get_params(), de sorte que le modèle
-vérifie (H5) par construction. La stabilité (|λ(F(k))| < 1) est gouvernée par D
+vérifie AB par construction. La stabilité (|λ(F(k))| < 1) est gouvernée par D
 (contractif) ; Σ_W(k) est SPD :
   k=0 : max|λ(F)| = 0.618   min λ(Σ_W) ≈ 0.17
   k=1 : max|λ(F)| = 0.449   min λ(Σ_W) ≈ 0.31
@@ -48,7 +48,7 @@ class ModelGss_K2_q1_s2(BaseGSSModel):
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
     #   A_k : (1,1)   B_k : (1,2)   C_k : (2,1)   D_k : (2,2)
     # A_k, B_k are derived from (C, D, Δ, Σ_V) in get_params() via the AB
-    # constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) — (H5) holds by construction.
+    # constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) — AB holds by construction.
     C_list: list[np.ndarray] = [
         np.array([[0.20],                # k=0 : X observe les deux Y
                   [0.15]]),

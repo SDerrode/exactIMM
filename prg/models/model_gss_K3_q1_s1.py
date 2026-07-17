@@ -20,7 +20,7 @@ Matrice de transition (diagonale très dominante — rares transitions)
   Distribution stationnaire : π ≈ [1/3, 1/3, 1/3]
 
 A_k, B_k sont dérivés de (C, D, Δ, Σ_V) via la contrainte AB
-(A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) dans get_params() — (H5) par construction.
+(A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) dans get_params() — AB par construction.
 La stabilité (|λ(F(k))| < 1) est gouvernée par D (contractif) ; Σ_W(k) SPD :
   k=0 : max|λ(F)| = 0.895   min λ(Σ_W) ≈ 0.07
   k=1 : max|λ(F)| = 0.760   min λ(Σ_W) ≈ 0.22
@@ -52,7 +52,7 @@ class ModelGss_K3_q1_s1(BaseGSSModel):
 
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] (all 1×1 scalars) ---
     # A_k, B_k are derived from (C, D, Δ, Σ_V) in get_params() via the AB
-    # constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) — (H5) holds by construction.
+    # constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) — AB holds by construction.
     C_list: list[np.ndarray] = [
         np.array([[0.15]]),   # k=0
         np.array([[0.30]]),   # k=1

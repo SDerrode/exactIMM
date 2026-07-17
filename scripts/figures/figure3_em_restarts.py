@@ -7,7 +7,7 @@ independent k-means-initialised BW-EM restarts, one box per variant.
 
 Reads ``results/e3/table3.json`` (written by ``e3_bw_em.py``).
 
-Note: V3 (GEM with each-iter (H5) projection) is plotted on a separate
+Note: V3 (GEM with each-iter AB projection) is plotted on a separate
 panel because the constrained inner M-step makes the EM objective
 non-monotone, so its absolute log-likelihood values fall on a very
 different scale (~ -66k) than the post-hoc variants V0/V1/V2 (~ -2k).

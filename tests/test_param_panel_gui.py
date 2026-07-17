@@ -7,7 +7,7 @@ End-to-end GUI tests for prg/gui/param_panel.py using pytest-qt.
 Coverage
 --------
 - AB-constraint checkbox: default state, toggle on/off, value-change recompute
-- (H5) badge: green when AB is active, amber when not
+- AB badge: green when AB is active, amber when not
 - "Apply AB → all" propagation across regime tabs
 """
 
@@ -23,7 +23,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 
 from prg.gui.param_panel import ParamPanel
-from prg.utils.h5_constraint import compute_AB, compute_h5_residual
+from prg.utils.ab_constraint import compute_AB, compute_ab_residual
 
 
 # ---------------------------------------------------------------------------
@@ -148,30 +148,30 @@ def test_value_change_triggers_recompute(qtbot):
 
 
 # ---------------------------------------------------------------------------
-# (H5) residual badge
+# AB residual badge
 # ---------------------------------------------------------------------------
-def test_h5_badge_green_when_AB_active(qtbot):
-    """The (H5) badge displays the ✓ glyph when the AB constraint is active."""
+def test_ab_badge_green_when_AB_active(qtbot):
+    """The AB badge displays the ✓ glyph when the AB constraint is active."""
     q, s = 2, 2
     panel = _build_panel(qtbot, K=2, q=q, s=s)
     tab = panel._state_tabs[0]
     tab._constraint_AB_check.setChecked(False)  # AB is on by default; start from off
     _seed_model(tab, q, s)
     tab._constraint_AB_check.setChecked(True)
-    text = tab._h5_badge.text()
+    text = tab._ab_badge.text()
     assert "✓" in text, f"expected ✓ in badge, got {text!r}"
 
 
-def test_h5_badge_amber_for_generic_model(qtbot):
-    """The (H5) badge displays the ⚠ glyph for a model that does not satisfy (H5)."""
+def test_ab_badge_amber_for_generic_model(qtbot):
+    """The AB badge displays the ⚠ glyph for a model that does not satisfy AB."""
     q, s = 2, 2
     panel = _build_panel(qtbot, K=2, q=q, s=s)
     tab = panel._state_tabs[0]
     tab._constraint_AB_check.setChecked(False)  # AB is on by default; uncheck to keep A,B generic
     F, SW = _seed_model(tab, q, s)
 
-    # Sanity: the seeded model is generically non-(H5)-compatible.
-    res = compute_h5_residual(
+    # Sanity: the seeded model is generically non-AB-constrained.
+    res = compute_ab_residual(
         A=F[:q, :q],
         B=F[:q, q:],
         C=F[q:, :q],
@@ -180,9 +180,9 @@ def test_h5_badge_amber_for_generic_model(qtbot):
         Dt=SW[:q, q:],
         SV=SW[q:, q:],
     )
-    assert np.linalg.norm(res, "fro") > 1e-6, "test seed should yield a non-(H5)-compatible model"
+    assert np.linalg.norm(res, "fro") > 1e-6, "test seed should yield a non-AB-constrained model"
 
-    text = tab._h5_badge.text()
+    text = tab._ab_badge.text()
     assert "⚠" in text, f"expected ⚠ in badge, got {text!r}"
 
 

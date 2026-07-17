@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-prg/utils/h5_constraint.py
+prg/utils/ab_constraint.py
 ==========================
-Closed-form (H5)-compatible "AB constraint" parametrisation.
+Closed-form AB-constrained "AB constraint" parametrisation.
 
-The (H5) algebraic constraint, derived from the Markovianity of (R, Y)
+The AB algebraic constraint, derived from the Markovianity of (R, Y)
 (paper appendix B), reads
 
     Δᵀ Aᵀ + Σ_V Bᵀ  =  P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ),
@@ -14,20 +14,20 @@ M = Q Cᵀ + R Dᵀ + Σ_V. The closed form
 
     A = Δ Σ_V⁻¹ C,        B = Δ Σ_V⁻¹ D
 
-is **sufficient** for (H5): a model with these blocks satisfies the
-K² regime-pair equations of (H5) by construction, for any choice of
+is **sufficient** for AB: a model with these blocks satisfies the
+K² regime-pair equations of AB by construction, for any choice of
 (C, D, Σ_U, Σ_V, Δ).
 
 Necessity is more subtle. Under the physical hypothesis that the K
 regime-noise covariances Σ(r) = [[Σ_U,r, Δ_r]; [Δᵀ_r, Σ_V,r]] are
 all positive definite, an elimination argument shows that AB is also
-**necessary** — i.e., the unique (H5)-compatible parametrisation —
+**necessary** — i.e., the unique AB-constrained parametrisation —
 generically when K·s ≥ q + s. In the sub-determined regime
-K·s < q + s, (H5)-compatible models exist that are not of the AB
+K·s < q + s, AB-constrained models exist that are not of the AB
 form: AB is one specific point in a (q+s−Ks)·q-dimensional affine
 space of solutions per regime. Most practical configurations
 (K=2 or 3, q=s) fall in the over- or exactly-determined regime
-where AB ≡ (H5).
+where AB is the constraint.
 
 Public API
 ----------
@@ -36,14 +36,14 @@ compute_AB(C, D, Dt, SV) -> (A, B)
 apply_AB_constraint(params, *, logger=None) -> GSSParams
     Return a new GSSParams with each regime's (A_k, B_k) replaced by
     the closed form.
-compute_h5_residual(A, B, C, D, SU, Dt, SV) -> ndarray (s, q)
+compute_ab_residual(A, B, C, D, SU, Dt, SV) -> ndarray (s, q)
     Same-regime (k, k) residual. Frobenius-norm-zero is *necessary* for
-    (H5) but not sufficient (it ignores the cross pairs j != k).
-compute_h5_pair_residual(A_k, B_k, C_k, D_k, Dt_k, SV_k, SU_j, Dt_j, SV_j) -> (q, s)
+    AB but not sufficient (it ignores the cross pairs j != k).
+compute_ab_pair_residual(A_k, B_k, C_k, D_k, Dt_k, SV_k, SU_j, Dt_j, SV_j) -> (q, s)
     Pairwise residual beta_1(j, k) for the ordered pair (source j -> target k);
-    zero for all K^2 pairs <=> (H5) holds.
-h5_residual_max(params) -> (max_resid, (j, k))
-    Complete (H5) check: max pairwise residual over all ordered pairs.
+    zero for all K^2 pairs <=> AB holds.
+ab_residual_max(params) -> (max_resid, (j, k))
+    Complete AB check: max pairwise residual over all ordered pairs.
 """
 
 from __future__ import annotations
@@ -60,23 +60,23 @@ __all__ = [
     "NGH_MSM_RESID_TOL",
     "apply_AB_constraint",
     "compute_AB",
-    "compute_h5_pair_residual",
-    "compute_h5_residual",
-    "h5_residual_max",
+    "compute_ab_pair_residual",
+    "compute_ab_residual",
+    "ab_residual_max",
     "is_ngh_msm",
     "validate_ngh_msm",
 ]
 
-# Default tolerance on the *relative* pairwise (H5) residual used by
-# validate_ngh_msm / is_ngh_msm. Mirrors GSSFilter.H5_TOL so that a model
-# accepted here is also accepted (no warning) by mode="h5_exact".
+# Default tolerance on the *relative* pairwise AB residual used by
+# validate_ngh_msm / is_ngh_msm. Mirrors GSSFilter.AB_TOL so that a model
+# accepted here is also accepted (no warning) by mode="ngh_kf".
 NGH_MSM_RESID_TOL = 1e-6
 
 
 # ---------------------------------------------------------------------------
-# (H5) residual
+# AB residual
 # ---------------------------------------------------------------------------
-def compute_h5_residual(
+def compute_ab_residual(
     A: np.ndarray,  # (q, q)
     B: np.ndarray,  # (q, s)
     C: np.ndarray,  # (s, q)
@@ -86,7 +86,7 @@ def compute_h5_residual(
     SV: np.ndarray,  # (s, s)  Σ_V
 ) -> np.ndarray:
     """
-    Evaluate the (H5) algebraic constraint residual
+    Evaluate the AB algebraic constraint residual
 
         F = (Δᵀ Aᵀ + Σ_V Bᵀ) − P M⁻¹ (Q Aᵀ + R Bᵀ + Δᵀ),
 
@@ -98,15 +98,15 @@ def compute_h5_residual(
         M = Q Cᵀ + R Dᵀ + Σ_V       (s × s, symmetric, ≻ 0 if Σ_U, Σ_V ≻ 0).
 
     This is the **same-regime** constraint (the regime pair ``(k, k)``). It is
-    a *necessary* condition for (H5), but **not sufficient**: when the regimes
-    have different joint covariances, (H5) also constrains the cross pairs
-    ``(j, k)``, ``j ≠ k``. Use :func:`h5_residual_max` (or
-    :func:`compute_h5_pair_residual`) for the complete, all-pairs check.
+    a *necessary* condition for AB, but **not sufficient**: when the regimes
+    have different joint covariances, AB also constrains the cross pairs
+    ``(j, k)``, ``j ≠ k``. Use :func:`ab_residual_max` (or
+    :func:`compute_ab_pair_residual`) for the complete, all-pairs check.
 
     Returns
     -------
     F : ndarray of shape (s, q).  ``‖F‖ = 0`` ⇔ the same-regime ``(k, k)``
-        condition holds (necessary for (H5)).
+        condition holds (necessary for AB).
 
     Raises
     ------
@@ -124,9 +124,9 @@ def compute_h5_residual(
 
 
 # ---------------------------------------------------------------------------
-# Pairwise (H5) residual — the *complete* (H5)-compatibility check
+# Pairwise AB residual — the *complete* AB-compatibility check
 # ---------------------------------------------------------------------------
-def _h5_pair_beta(
+def _ab_pair_beta(
     A_k: np.ndarray,  # (q, q)  target-regime k dynamics
     B_k: np.ndarray,  # (q, s)
     C_k: np.ndarray,  # (s, q)
@@ -167,7 +167,7 @@ def _h5_pair_beta(
     return beta
 
 
-def compute_h5_pair_residual(
+def compute_ab_pair_residual(
     A_k: np.ndarray,
     B_k: np.ndarray,
     C_k: np.ndarray,
@@ -178,18 +178,18 @@ def compute_h5_pair_residual(
     Delta_j: np.ndarray,
     SV_j: np.ndarray,
 ) -> np.ndarray:
-    """Pairwise (H5) residual ``β₁(j, k)`` for the ordered pair (source j → target k).
+    """Pairwise AB residual ``β₁(j, k)`` for the ordered pair (source j → target k).
 
-    (H5) — the Markovianity of ``(R, Y)`` — holds for the pair (j, k) iff,
+    AB — the Markovianity of ``(R, Y)`` — holds for the pair (j, k) iff,
     conditionally on ``r_n = j`` and ``r_{n+1} = k``, the regression of
     ``X_{n+1}`` on ``(Y_n, Y_{n+1})`` does *not* load on ``Y_n``. This returns
-    that loading ``β₁`` (shape ``(q, s)``); ``‖β₁‖ = 0`` ⇔ (H5) holds for the
-    pair. The model is (H5)-compatible iff ``β₁(j, k) = 0`` for **all** K²
+    that loading ``β₁`` (shape ``(q, s)``); ``‖β₁‖ = 0`` ⇔ AB holds for the
+    pair. The model is AB-constrained iff ``β₁(j, k) = 0`` for **all** K²
     ordered pairs.
 
-    The single-regime :func:`compute_h5_residual` only covers the same-regime
-    pairs ``(k, k)``: that is **necessary but not sufficient** for (H5) whenever
-    the regimes have different joint covariances. Use :func:`h5_residual_max`
+    The single-regime :func:`compute_ab_residual` only covers the same-regime
+    pairs ``(k, k)``: that is **necessary but not sufficient** for AB whenever
+    the regimes have different joint covariances. Use :func:`ab_residual_max`
     for the complete check.
 
     Target-regime arguments ``A_k, B_k, C_k, D_k`` (dynamics), ``Delta_k``
@@ -200,23 +200,23 @@ def compute_h5_pair_residual(
     singular.
     """
     s = SV_j.shape[0]
-    return _h5_pair_beta(A_k, B_k, C_k, D_k, Delta_k, SV_k, SU_j, Delta_j, SV_j)[:, :s]
+    return _ab_pair_beta(A_k, B_k, C_k, D_k, Delta_k, SV_k, SU_j, Delta_j, SV_j)[:, :s]
 
 
-def h5_residual_max(
+def ab_residual_max(
     params: GSSParams,
     *,
     relative: bool = True,
 ) -> tuple[float, tuple[int, int]]:
-    """Largest pairwise (H5) residual over all K² ordered regime pairs.
+    """Largest pairwise AB residual over all K² ordered regime pairs.
 
     Returns ``(max_resid, (j, k))`` where ``max_resid`` is the maximum over all
     ordered pairs (j, k) of ``‖β₁(j, k)‖_F`` — relative to the regression scale
     ``‖[β₁ β₂](j, k)‖_F`` when ``relative=True``. ``max_resid = 0`` ⇔ the model
-    is fully (H5)-compatible; ``inf`` is returned if some pair's (Y_n, Y_{n+1})
+    is fully AB-constrained; ``inf`` is returned if some pair's (Y_n, Y_{n+1})
     covariance is singular.
 
-    This is the **complete** (H5) check. :func:`compute_h5_residual` only tests
+    This is the **complete** AB check. :func:`compute_ab_residual` only tests
     the same-regime pairs (necessary, not sufficient).
     """
     K = params.K
@@ -234,7 +234,7 @@ def h5_residual_max(
     for j in range(K):
         for k in range(K):
             try:
-                beta = _h5_pair_beta(A[k], B[k], C[k], D[k], Dt[k], SV[k], SU[j], Dt[j], SV[j])
+                beta = _ab_pair_beta(A[k], B[k], C[k], D[k], Dt[k], SV[k], SU[j], Dt[j], SV[j])
             except np.linalg.LinAlgError:
                 return float("inf"), (j, k)
             r = float(np.linalg.norm(beta[:, :s], "fro"))
@@ -276,7 +276,7 @@ def validate_ngh_msm(
        family), not the degenerate ``C_k = 0`` case, which is a classical CGOMSM
        (the (H4) family). NB: ``C_k ≠ 0`` is a *family-membership* requirement, not
        a mathematical prerequisite of the AB / NSC. AB is the necessary-and-
-       sufficient (H5) parametrisation for *any* ``C_k`` given only ``Σ_V_k ≻ 0``,
+       sufficient AB parametrisation for *any* ``C_k`` given only ``Σ_V_k ≻ 0``,
        ``C_k = 0`` included — where it gives the CGOMSM's ``A_k = 0``,
        ``B_k = Δ_k Σ_V_k⁻¹ D_k``. Full column rank of ``C_k`` (hence ``s ≥ q``) and
        invertibility of ``D_k`` are likewise *not* required: the corrected
@@ -284,13 +284,13 @@ def validate_ngh_msm(
     2. ``Σ_V_k ≻ 0``          ∀ k        — symmetric positive definite;
     3. ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T ⪰ 0`` ∀ k — the Schur complement is a
        genuine covariance (⇔ the joint noise covariance Σ_W(k) is PSD);
-    4. AB / (H5) constraint   — ``max`` relative pairwise residual ``≤ tol``,
+    4. AB constraint   — ``max`` relative pairwise residual ``≤ tol``,
        i.e. ``A_k = Δ_k Σ_V_k⁻¹ C_k`` and ``B_k = Δ_k Σ_V_k⁻¹ D_k`` (up to tol).
 
     Conditions (1)–(4) are exactly what makes the exact fast filter of
     Proposition 4 (closed form ``M_k = Δ_k Σ_V_k⁻¹``, ``Γ_k`` constant in n)
     applicable. They are *not* imposed at ``GSSParams`` construction, because the
-    same class also serves non-(H5) models handled by ``mode="imm_general"``.
+    same class also serves model violating ABs handled by ``mode="gpb2"``.
     """
     issues: list[str] = []
     K = params.K
@@ -309,7 +309,7 @@ def validate_ngh_msm(
         # but a classical CGOMSM (the (H4) family), not the new NGH-MSM family. We
         # flag it so callers do not mistake the old family for the new. (Full column
         # rank of ``C_k``, hence ``s >= q``, is likewise not required. Whether AB is
-        # moreover the *unique* (H5) parametrisation is a separate identifiability
+        # moreover the *unique* AB parametrisation is a separate identifiability
         # question, governed by ``K·s >= q + s`` — see the module docstring.)
         if float(np.linalg.norm(C, "fro")) <= 1e-12:
             issues.append(
@@ -331,18 +331,17 @@ def validate_ngh_msm(
                 )
 
     try:
-        max_rel, (j, k) = h5_residual_max(params, relative=True)
+        max_rel, (j, k) = ab_residual_max(params, relative=True)
     except (np.linalg.LinAlgError, ValueError) as exc:  # pragma: no cover - defensive
-        issues.append(f"could not evaluate the (H5) residual: {exc}")
+        issues.append(f"could not evaluate the AB residual: {exc}")
     else:
         if not np.isfinite(max_rel):
             issues.append(
-                "(H5) residual is infinite (a regime pair has a singular "
-                "(Y_n, Y_{n+1}) covariance)."
+                "AB residual is infinite (a regime pair has a singular (Y_n, Y_{n+1}) covariance)."
             )
         elif max_rel > tol:
             issues.append(
-                f"AB / (H5) constraint violated: max relative pairwise residual = "
+                f"AB constraint violated: max relative pairwise residual = "
                 f"{max_rel:.3e} > tol = {tol:.1e} (worst pair j={j}, k={k}). Enforce it "
                 f"with apply_AB_constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)."
             )
@@ -365,11 +364,11 @@ def compute_AB(
     SV: np.ndarray,  # (s, s)  Σ_V (symmetric ≻ 0)
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Closed-form (H5)-compatible AB parametrisation:
+    Closed-form AB parametrisation:
 
         A = Δ Σ_V⁻¹ C,        B = Δ Σ_V⁻¹ D.
 
-    A model with these blocks satisfies (H5) for every regime pair
+    A model with these blocks satisfies AB for every regime pair
     (r₁, r₂), independently of Σ_U.
 
     Parameters
@@ -447,7 +446,7 @@ def apply_AB_constraint(
     from prg.classes.GSSParams import NGHMSMParams as _NGHMSMParams
     from prg.utils.exceptions import ParamError as _ParamError
 
-    log = logger or logging.getLogger("exactIMM.h5_constraint")
+    log = logger or logging.getLogger("exactIMM.ab_constraint")
     K, q, s = params.K, params.q, params.s
 
     A_list: list[np.ndarray] = []

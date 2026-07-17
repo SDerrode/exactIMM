@@ -9,13 +9,13 @@ vector figure per experiment + a ``results.json`` to an output directory.
 
     python -m prg.experiments.study docs/rapport_experimental
 
-E1  Exactness        h5_exact == brute-force Bayesian filter (all Kᴺ histories)
+E1  Exactness        ngh_kf == brute-force Bayesian filter (all Kᴺ histories)
 E2  Speed            wall-time vs N: linear, as fast as a single pairwise Kalman filter
 E3  Value            RMSE / regime accuracy vs naive baselines and the oracle
 E3′ Value sweep      filtering gain across a value-/regime-contrast grid
 E4  Multivariate     q=s=2 tracking with regime posterior
 E5  Closed form      Γ_k constant in n (no Riccati); X slaved to Y
-E6  Robustness       bias of h5_exact off the AB manifold vs the general IMM
+E6  Robustness       bias of ngh_kf off the AB manifold vs the general IMM
 E7  Rank-deficient C C with s<q (rank-deficient observation coupling)
 E8  C influence      role of C as the regime-identification channel
 E9  C mismatch       filtering C≠0 data with a C=0 (CGOMSM) filter
@@ -74,14 +74,20 @@ def _setup_mpl():
     return plt
 
 
-_C = {"h5": "#1f77b4", "imm": "#ff7f0e", "kal": "#2ca02c", "exact": "#000000", "oracle": "#9467bd"}
+_C = {
+    "ngh_kf": "#1f77b4",
+    "imm": "#ff7f0e",
+    "kal": "#2ca02c",
+    "exact": "#000000",
+    "oracle": "#9467bd",
+}
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def _build(name: str) -> GSSParams:
-    """Stationary-init GSSParams for M1/M2/M3 (so h5_exact's prior is the true one)."""
+    """Stationary-init GSSParams for M1/M2/M3 (so ngh_kf's prior is the true one)."""
     return with_stationary_init(_params_from_dict(get_params(name)))
 
 
@@ -96,7 +102,7 @@ def contrasted_model(p_switch: float = 0.04, m: float = 0.8) -> GSSParams:
     """
     from prg.classes.FMatrix import FMatrix
     from prg.classes.NoiseCovariance import GSSNoiseCovariance
-    from prg.utils.h5_constraint import compute_AB
+    from prg.utils.ab_constraint import compute_AB
 
     K, q, s = 2, 1, 1
     P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
@@ -140,7 +146,7 @@ def c_influence_model(C: float, p_switch: float = 0.02) -> GSSParams:
     """
     from prg.classes.FMatrix import FMatrix
     from prg.classes.NoiseCovariance import GSSNoiseCovariance
-    from prg.utils.h5_constraint import compute_AB
+    from prg.utils.ab_constraint import compute_AB
 
     K, q, s = 2, 1, 1
     P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
@@ -180,7 +186,7 @@ def c_mismatch_model(C: float, p_switch: float = 0.02) -> GSSParams:
     stationary init."""
     from prg.classes.FMatrix import FMatrix
     from prg.classes.NoiseCovariance import GSSNoiseCovariance
-    from prg.utils.h5_constraint import compute_AB
+    from prg.utils.ab_constraint import compute_AB
 
     K, q, s = 2, 1, 1
     P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
@@ -222,7 +228,7 @@ def rank_deficient_model(p_switch: float = 0.05) -> GSSParams:
     """
     from prg.classes.FMatrix import FMatrix
     from prg.classes.NoiseCovariance import GSSNoiseCovariance
-    from prg.utils.h5_constraint import compute_AB
+    from prg.utils.ab_constraint import compute_AB
 
     K, q, s = 2, 2, 1
     P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
@@ -297,7 +303,7 @@ def exp_exactness(outdir: Path) -> dict:
         errsE, errsP = [], []
         for N in Ns_m:
             _, _, ys = _simulate(params, N, seed=11)
-            ExH, PiH, _ = _run(params, ys, "h5_exact")
+            ExH, PiH, _ = _run(params, ys, "ngh_kf")
             ExE, _, PiE = exact_mixture_filter(params, ys)
             errsE.append(float(np.abs(ExH - ExE).max()))
             errsP.append(float(np.abs(PiH - PiE).max()))
@@ -320,6 +326,57 @@ def exp_exactness(outdir: Path) -> dict:
 # ---------------------------------------------------------------------------
 # E2 — Speed
 # ---------------------------------------------------------------------------
+def ab_model_dim(d: int, K: int = 2, p_switch: float = 0.02) -> GSSParams:
+    """An AB-constrained model with q = s = d, used to measure how the per-step cost
+    scales with the state dimension.
+
+    Every block is a multiple of I_d, so the spectrum -- hence the stability -- is the
+    same at every d and the timings stay comparable across dimensions. The regimes
+    differ in the sign of Delta_r, so the slaved gain M_r = Delta_r Sigma_V,r^-1 flips
+    with the regime. Sigma_U is built as Gamma + M Sigma_V M^T with Gamma = 0.5 I, which
+    makes Sigma_W positive definite by Schur complement at every d.
+    """
+    from prg.classes.FMatrix import FMatrix
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance
+    from prg.utils.ab_constraint import compute_AB
+
+    eye = np.eye(d)
+    P = np.full((K, K), p_switch / (K - 1))
+    np.fill_diagonal(P, 1.0 - p_switch)
+    SV = [0.50 * eye for _ in range(K)]
+    D = [0.50 * eye for _ in range(K)]
+    Cm = [0.20 * eye for _ in range(K)]
+    Dt = [(+0.30 if k % 2 == 0 else -0.30) * eye for k in range(K)]
+    SU = [0.50 * eye + Dt[k] @ np.linalg.inv(SV[k]) @ Dt[k].T for k in range(K)]
+    A_list, B_list = [], []
+    for k in range(K):
+        a, b = compute_AB(Cm[k], D[k], Dt[k], SV[k])
+        A_list.append(a)
+        B_list.append(b)
+    p = GSSParams(
+        K=K,
+        q=d,
+        s=d,
+        P=P,
+        f_matrix=FMatrix(K, d, d, A_list, B_list, Cm, D),
+        noise_cov=GSSNoiseCovariance(K, d, d, SU, Dt, SV),
+        pi0=None,
+        mu_z0_list=[np.zeros((2 * d, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(2 * d) for _ in range(K)],
+    )
+    return with_stationary_init(p)
+
+
+def _time_call(fn, repeats=2):
+    """Best-of-``repeats`` wall time for a plain callable, matching _time_filter."""
+    best = np.inf
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        fn()
+        best = min(best, time.perf_counter() - t0)
+    return best
+
+
 def _time_filter(params, ys, mode, repeats=1):
     best = np.inf
     for _ in range(repeats):
@@ -333,55 +390,96 @@ def _time_filter(params, ys, mode, repeats=1):
     return best
 
 
+DIM_SPEED = 8  # state dimension of the sequence-length panel: past the GPB2 crossover
+DIMS_SPEED = [1, 2, 4, 8, 16, 24]
+N_DIM_SWEEP = 3000
+
+
 def exp_speed(outdir: Path) -> dict:
-    params = _build("M1")
-    Ns = [200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
+    """Computational cost, on AB-constrained models (q = s, K = 2).
+
+    Panel (a): wall time versus N -- every filter here is O(N); this panel establishes
+    linearity, not an advantage. Panel (b): wall time versus the state dimension, which
+    is where the constant-gain read-out actually pays: it propagates no covariance, so
+    its per-step cost is flat in q, whereas GPB2 carries K^2 Riccati updates of size
+    (q+s) and grows.
+
+    Baselines are the literature filters: GPB2 (order 2) returns the *same* exact
+    posterior as the proposed filter on an AB model, so it is the honest cost
+    comparison; the order-1 pairwise IMM is cheaper but only approximate (exact iff
+    C=0). The legacy ``gpb2`` mode is deliberately not timed here: it is this
+    project's own superseded recursion, not a literature baseline, and it coincides
+    with ``ngh_kf`` on AB anyway.
+    """
+    # ---- (a) wall time vs N, at a state dimension past the crossover -------------
+    params = ab_model_dim(DIM_SPEED)
+    Ns = [200, 500, 1000, 2000, 5000, 10000, 20000]
     _, _, ys_full = _simulate(params, max(Ns), seed=7)
-    series = {"h5_exact": [], "imm_general": [], "single_kalman": []}
+    series = {"ngh_kf": [], "gpb2": [], "imm_order1": [], "single_kalman": []}
     for N in Ns:
         ys = ys_full[:N]
-        series["h5_exact"].append(_time_filter(params, ys, "h5_exact", repeats=2))
-        series["imm_general"].append(_time_filter(params, ys, "imm_general", repeats=2))
-        t0 = time.perf_counter()
-        single_kalman_filter(params, ys)
-        series["single_kalman"].append(time.perf_counter() - t0)
+        series["ngh_kf"].append(_time_filter(params, ys, "ngh_kf", repeats=2))
+        series["gpb2"].append(_time_call(lambda: gpb2_filter(params, ys)))
+        series["imm_order1"].append(_time_call(lambda: imm_filter(params, ys)))
+        series["single_kalman"].append(_time_call(lambda: single_kalman_filter(params, ys)))
 
-    # Exact mixture: exponential in N (tiny N only)
+    # ---- (b) wall time vs state dimension, at fixed N ----------------------------
+    per_step = {"ngh_kf": [], "gpb2": [], "imm_order1": []}
+    for d in DIMS_SPEED:
+        pd_ = ab_model_dim(d)
+        _, _, ys_d = _simulate(pd_, N_DIM_SWEEP, seed=3)
+        n = len(ys_d)
+        per_step["ngh_kf"].append(1e6 * _time_filter(pd_, ys_d, "ngh_kf", repeats=2) / n)
+        per_step["gpb2"].append(1e6 * _time_call(lambda: gpb2_filter(pd_, ys_d)) / n)
+        per_step["imm_order1"].append(1e6 * _time_call(lambda: imm_filter(pd_, ys_d)) / n)
+
+    # Exact mixture: exponential in N (tiny N only). Timed but not plotted -- the
+    # exponential is a textbook fact, so the paper only quotes the N=14 wall time.
     Ns_ex = [4, 6, 8, 10, 12, 14]
     t_ex = []
+    p_ex = _build("M1")
     for N in Ns_ex:
-        _, _, ys = _simulate(params, N, seed=7)
+        _, _, ys = _simulate(p_ex, N, seed=7)
         t0 = time.perf_counter()
-        exact_mixture_filter(params, ys)
+        exact_mixture_filter(p_ex, ys)
         t_ex.append(time.perf_counter() - t0)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    ax1.loglog(Ns, series["h5_exact"], "o-", color=_C["h5"], label="NGH-MSM-KF (proposed)", ms=4)
-    ax1.loglog(
-        Ns, series["imm_general"], "s-", color=_C["imm"], label="pairwise IMM (order 1)", ms=4
-    )
-    ax1.loglog(
-        Ns,
-        series["single_kalman"],
-        "^-",
-        color=_C["kal"],
-        label="pairwise Kalman (no switching)",
-        ms=4,
-    )
+    style = {
+        "ngh_kf": ("o-", _C["ngh_kf"], "NGH-MSM-KF (proposed)"),
+        "gpb2": ("s-", _C["imm"], "GPB2 (order 2, exact here)"),
+        "imm_order1": ("D-", _C["exact"], "pairwise IMM (order 1, approx.)"),
+        "single_kalman": ("^-", _C["kal"], "pairwise Kalman (no switching)"),
+    }
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.0, 3.2))
+    for key in ("ngh_kf", "gpb2", "imm_order1", "single_kalman"):
+        fmt, col, lab = style[key]
+        ax1.loglog(Ns, series[key], fmt, color=col, label=lab, ms=4)
     ax1.set_xlabel("$N$")
     ax1.set_ylabel("wall time [s]")
-    ax1.set_title("linear in $N$, as fast as Kalman")
+    ax1.set_title(f"(a) linear in $N$ ($q=s={DIM_SPEED}$)")
     ax1.legend(fontsize=7)
-    ax2.semilogy(Ns_ex, t_ex, "D-", color=_C["exact"], label="exact mixture ($\\sim K^N$)", ms=4)
-    ax2.set_xlabel("$N$")
-    ax2.set_ylabel("wall time [s]")
-    ax2.set_title("exact enumeration is intractable")
+
+    for key in ("ngh_kf", "gpb2", "imm_order1"):
+        fmt, col, lab = style[key]
+        ax2.plot(DIMS_SPEED, per_step[key], fmt, color=col, label=lab, ms=4)
+    ax2.set_xlabel("state dimension $q=s$")
+    ax2.set_ylabel(r"wall time [$\mu$s/step]")
+    ax2.set_title("(b) no covariance propagated: flat in $q$")
     ax2.legend(fontsize=7)
     fig.savefig(outdir / "figures" / "e2_speed.pdf")
     plt.close(fig)
 
     us = {m: 1e6 * series[m][-1] / Ns[-1] for m in series}  # µs/step at largest N
-    return {"N": Ns, "times": series, "N_exact": Ns_ex, "time_exact": t_ex, "us_per_step": us}
+    return {
+        "N": Ns,
+        "dim": DIM_SPEED,
+        "times": series,
+        "dims": DIMS_SPEED,
+        "us_per_step_by_dim": per_step,
+        "N_exact": Ns_ex,
+        "time_exact": t_ex,
+        "us_per_step": us,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -391,15 +489,15 @@ def exp_value(outdir: Path) -> dict:
     params = contrasted_model()
     K = params.K
     N, seeds = 600, list(range(40))
-    rmse = {"h5_exact": [], "single_kalman": [], "zero": [], "oracle": []}
+    rmse = {"ngh_kf": [], "single_kalman": [], "zero": [], "oracle": []}
     acc = []
     conf = np.zeros((K, K))
     for sd in seeds:
         rs, xs, ys = _simulate(params, N, seed=100 + sd)
-        ExH, PiH, _ = _run(params, ys, "h5_exact")
+        ExH, PiH, _ = _run(params, ys, "ngh_kf")
         ExK, _ = single_kalman_filter(params, ys)
         ExO, _ = oracle_filter(params, rs, ys)
-        rmse["h5_exact"].append(_rmse(ExH, xs))
+        rmse["ngh_kf"].append(_rmse(ExH, xs))
         rmse["single_kalman"].append(_rmse(ExK, xs))
         rmse["zero"].append(_rmse(np.zeros_like(xs), xs))
         rmse["oracle"].append(_rmse(ExO, xs))
@@ -412,14 +510,14 @@ def exp_value(outdir: Path) -> dict:
     stds = {m: float(np.std(v)) for m, v in rmse.items()}
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    order = ["zero", "single_kalman", "h5_exact", "oracle"]
+    order = ["zero", "single_kalman", "ngh_kf", "oracle"]
     labels = [
         "zero\npredictor",
         "pairwise\nKalman",
         "NGH-MSM-KF\n(proposed)",
         "oracle\n(regimes known)",
     ]
-    cols = ["#bbbbbb", _C["kal"], _C["h5"], _C["oracle"]]
+    cols = ["#bbbbbb", _C["kal"], _C["ngh_kf"], _C["oracle"]]
     ax1.bar(
         range(4), [means[m] for m in order], yerr=[stds[m] for m in order], color=cols, capsize=3
     )
@@ -464,33 +562,33 @@ def exp_value_sweep(outdir: Path) -> dict:
     """E3' — when does modelling the switching pay off? Sweep the regime contrast,
     i.e. the coupling magnitude m of the quiet/volatile model (M_0=+m, M_1=-m, the
     observation volatilities held fixed). At m=0 the two regimes act identically on
-    X and the switching is irrelevant (Kalman = h5_exact = oracle); as m grows the
-    regime-blind Kalman filter must average +m and -m and degrades, while h5_exact
+    X and the switching is irrelevant (Kalman = ngh_kf = oracle); as m grows the
+    regime-blind Kalman filter must average +m and -m and degrades, while ngh_kf
     tracks the regime-aware oracle. The RMSE reduction over Kalman grows with m.
     """
     ms = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
     N, seeds = 500, list(range(25))
-    rmse = {"single_kalman": [], "h5_exact": [], "oracle": []}
-    rstd = {"single_kalman": [], "h5_exact": [], "oracle": []}
+    rmse = {"single_kalman": [], "ngh_kf": [], "oracle": []}
+    rstd = {"single_kalman": [], "ngh_kf": [], "oracle": []}
     for m in ms:
         params = contrasted_model(m=m)
         eh, ek, eo = [], [], []
         for sd in seeds:
             rs, xs, ys = _simulate(params, N, seed=300 + sd)
-            ExH, _, _ = _run(params, ys, "h5_exact")
+            ExH, _, _ = _run(params, ys, "ngh_kf")
             ExK, _ = single_kalman_filter(params, ys)
             ExO, _ = oracle_filter(params, rs, ys)
             eh.append(_rmse(ExH, xs))
             ek.append(_rmse(ExK, xs))
             eo.append(_rmse(ExO, xs))
-        rmse["h5_exact"].append(float(np.mean(eh)))
-        rstd["h5_exact"].append(float(np.std(eh)))
+        rmse["ngh_kf"].append(float(np.mean(eh)))
+        rstd["ngh_kf"].append(float(np.std(eh)))
         rmse["single_kalman"].append(float(np.mean(ek)))
         rstd["single_kalman"].append(float(np.std(ek)))
         rmse["oracle"].append(float(np.mean(eo)))
         rstd["oracle"].append(float(np.std(eo)))
     gain = [
-        (rmse["single_kalman"][i] - rmse["h5_exact"][i]) / rmse["single_kalman"][i]
+        (rmse["single_kalman"][i] - rmse["ngh_kf"][i]) / rmse["single_kalman"][i]
         for i in range(len(ms))
     ]
 
@@ -506,10 +604,10 @@ def exp_value_sweep(outdir: Path) -> dict:
     )
     ax1.errorbar(
         ms,
-        rmse["h5_exact"],
-        yerr=rstd["h5_exact"],
+        rmse["ngh_kf"],
+        yerr=rstd["ngh_kf"],
         fmt="o-",
-        color=_C["h5"],
+        color=_C["ngh_kf"],
         capsize=2,
         label="NGH-MSM-KF (proposed)",
     )
@@ -526,7 +624,7 @@ def exp_value_sweep(outdir: Path) -> dict:
     ax1.set_ylabel("state RMSE")
     ax1.set_title("E3$'$a — RMSE vs regime contrast")
     ax1.legend(fontsize=7)
-    ax2.plot(ms, [100 * g for g in gain], "o-", color=_C["h5"])
+    ax2.plot(ms, [100 * g for g in gain], "o-", color=_C["ngh_kf"])
     ax2.set_xlabel("coupling magnitude $m$")
     ax2.set_ylabel("RMSE reduction over Kalman [%]")
     ax2.set_title("E3$'$b — value grows with the contrast")
@@ -549,7 +647,7 @@ def exp_multivariate(outdir: Path) -> dict:
     params = _build("M2")
     N = 200
     rs, xs, ys = _simulate(params, N, seed=5)
-    ExH, PiH, VarH = _run(params, ys, "h5_exact")
+    ExH, PiH, VarH = _run(params, ys, "ngh_kf")
     t = np.arange(N)
     fig, axes = plt.subplots(
         3, 1, figsize=(8.0, 6.0), sharex=True, gridspec_kw={"height_ratios": [3, 3, 1]}
@@ -560,12 +658,12 @@ def exp_multivariate(outdir: Path) -> dict:
             t,
             ExH[:, i] - 2 * sd,
             ExH[:, i] + 2 * sd,
-            color=_C["h5"],
+            color=_C["ngh_kf"],
             alpha=0.2,
             label="NGH-MSM-KF $\\pm 2\\sigma$",
         )
         ax.plot(t, xs[:, i], color="k", lw=1, label="true $X$")
-        ax.plot(t, ExH[:, i], color=_C["h5"], lw=1.2, label="$E[X|y]$")
+        ax.plot(t, ExH[:, i], color=_C["ngh_kf"], lw=1.2, label="$E[X|y]$")
         ax.set_ylabel(f"$X_{{{i + 1}}}$")
         if i == 0:
             ax.legend(fontsize=7, ncol=3, loc="upper right")
@@ -586,9 +684,9 @@ def exp_multivariate(outdir: Path) -> dict:
     fig.suptitle("E4 — M2 ($q=s=2$): exact multivariate tracking", y=0.995)
     fig.savefig(outdir / "figures" / "e4_multivariate.pdf")
     plt.close(fig)
-    rmse_h5 = _rmse(ExH, xs)
+    rmse_ab = _rmse(ExH, xs)
     _, xs2, _ = rs, xs, ys
-    return {"N": N, "rmse_h5": rmse_h5, "rmse_zero": _rmse(np.zeros_like(xs), xs)}
+    return {"N": N, "rmse_ab": rmse_ab, "rmse_zero": _rmse(np.zeros_like(xs), xs)}
 
 
 # ---------------------------------------------------------------------------
@@ -600,14 +698,14 @@ def exp_closed_form(outdir: Path) -> dict:
     N = 4000
     rs, xs, ys = _simulate(params, N, seed=2)
 
-    # (a) imm_general per-regime predicted X-variance vs n. Although imm_general
+    # (a) gpb2 per-regime predicted X-variance vs n. Although gpb2
     #     PROPAGATES a Riccati recursion, under AB it sits at its fixed point from
-    #     n=1 — the propagation is redundant (this is what h5_exact exploits).
+    #     n=1 — the propagation is redundant (this is what ngh_kf exploits).
     M = [params.noise_cov.M(k) for k in range(K)]
     Gam = [params.noise_cov.Gamma(k) for k in range(K)]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        filt = GSSFilter(params, mode="imm_general")
+        filt = GSSFilter(params, mode="gpb2")
         traces = {k: [] for k in range(K)}
         for y in ys[:60]:
             filt.step(y.reshape(-1, 1))
@@ -621,7 +719,7 @@ def exp_closed_form(outdir: Path) -> dict:
     ax1.set_xlabel("time $n$")
     ax1.set_ylabel("per-regime $\\mathrm{tr}\\,\\mathrm{Var}[X_n|r_n]$")
     ax1.set_title("E5a — covariance at its fixed point from $n=1$")
-    ax1.legend(fontsize=8, title="imm_general")
+    ax1.legend(fontsize=8, title="gpb2")
 
     # (b) X_n vs M_{r_n} y_n  (slaving): points on the diagonal, spread = Γ_{r_n}.
     pred = np.array([float((M[rs[n]] @ ys[n]).ravel()[0]) for n in range(N)])
@@ -681,7 +779,7 @@ def exp_robustness(outdir: Path) -> dict:
     epss = [0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
     seeds = list(range(30))
     N = 9
-    rmse_h5, rmse_imm = [], []
+    rmse_ab, rmse_imm = [], []
     used = []
     for eps in epss:
         p = _perturb_A(base, eps)
@@ -693,15 +791,15 @@ def exp_robustness(outdir: Path) -> dict:
         for sd in seeds:
             _, _, ys = _simulate(p, N, seed=200 + sd)
             ExX, _, _ = exact_mixture_filter(p, ys)  # ground truth on perturbed model
-            ExH, _, _ = _run(p, ys, "h5_exact")
-            ExI, _, _ = _run(p, ys, "imm_general")
+            ExH, _, _ = _run(p, ys, "ngh_kf")
+            ExI, _, _ = _run(p, ys, "gpb2")
             eh.append(_rmse(ExH, ExX))
             ei.append(_rmse(ExI, ExX))
-        rmse_h5.append(float(np.mean(eh)))
+        rmse_ab.append(float(np.mean(eh)))
         rmse_imm.append(float(np.mean(ei)))
 
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
-    ax.plot(used, rmse_h5, "o-", color=_C["h5"], label="NGH-MSM-KF (assumes AB)")
+    ax.plot(used, rmse_ab, "o-", color=_C["ngh_kf"], label="NGH-MSM-KF (assumes AB)")
     ax.plot(used, rmse_imm, "s-", color=_C["imm"], label="pairwise IMM (order 1)")
     ax.set_xlabel("AB perturbation $\\varepsilon$ (added to $A$)")
     ax.set_ylabel("RMSE vs exact filter")
@@ -709,7 +807,7 @@ def exp_robustness(outdir: Path) -> dict:
     ax.legend(fontsize=8)
     fig.savefig(outdir / "figures" / "e6_robustness.pdf")
     plt.close(fig)
-    return {"eps": used, "rmse_h5": rmse_h5, "rmse_imm": rmse_imm, "N": N, "n_seeds": len(seeds)}
+    return {"eps": used, "rmse_ab": rmse_ab, "rmse_imm": rmse_imm, "N": N, "n_seeds": len(seeds)}
 
 
 # ---------------------------------------------------------------------------
@@ -717,11 +815,11 @@ def exp_robustness(outdir: Path) -> dict:
 # ---------------------------------------------------------------------------
 def exp_rank_deficient(outdir: Path) -> dict:
     """E7 — the fast exact filter does not need C to have full column rank. On a
-    K=2, q=2, s=1 NGH-MSM (each C_r is 1×2, rank 1 < q), h5_exact still equals the
+    K=2, q=2, s=1 NGH-MSM (each C_r is 1×2, rank 1 < q), ngh_kf still equals the
     brute-force K^N Bayesian filter, and recovers *both* hidden components from the
     single observation. This is the experimental face of dropping the rank
     hypothesis (reformulated Prop. 2)."""
-    from prg.utils.h5_constraint import validate_ngh_msm
+    from prg.utils.ab_constraint import validate_ngh_msm
 
     params = rank_deficient_model()
     issues = validate_ngh_msm(params)  # [] ⇒ accepted by the relaxed (C≠0) gate
@@ -732,7 +830,7 @@ def exp_rank_deficient(outdir: Path) -> dict:
     errsE, errsP = [], []
     for N in Ns:
         _, _, ys = _simulate(params, N, seed=11)
-        ExH, PiH, _ = _run(params, ys, "h5_exact")
+        ExH, PiH, _ = _run(params, ys, "ngh_kf")
         ExE, _, PiE = exact_mixture_filter(params, ys)
         errsE.append(float(np.abs(ExH - ExE).max()))
         errsP.append(float(np.abs(PiH - PiE).max()))
@@ -741,12 +839,12 @@ def exp_rank_deficient(outdir: Path) -> dict:
     # (b) one longer run: both hidden components recovered from the single scalar Y
     N = 200
     rs, xs, ys = _simulate(params, N, seed=4)
-    ExH, PiH, VarH = _run(params, ys, "h5_exact")
+    ExH, PiH, VarH = _run(params, ys, "ngh_kf")
 
     fig, (axA, ax0, ax1) = plt.subplots(
         3, 1, figsize=(8.0, 6.4), gridspec_kw={"height_ratios": [2.4, 2.4, 2.4]}
     )
-    axA.semilogy(Ns, errsE, "o-", color=_C["h5"], ms=4, label="$|\\Delta E[X|y]|$")
+    axA.semilogy(Ns, errsE, "o-", color=_C["ngh_kf"], ms=4, label="$|\\Delta E[X|y]|$")
     axA.semilogy(Ns, errsP, "s--", color=_C["imm"], ms=4, label="$|\\Delta p(r|y)|$")
     axA.axhline(1e-10, color="grey", ls=":", lw=1)
     axA.set_xlabel("sequence length $N$")
@@ -763,12 +861,12 @@ def exp_rank_deficient(outdir: Path) -> dict:
             t,
             ExH[:, i] - 2 * sd,
             ExH[:, i] + 2 * sd,
-            color=_C["h5"],
+            color=_C["ngh_kf"],
             alpha=0.2,
             label="NGH-MSM-KF $\\pm 2\\sigma$",
         )
         ax.plot(t, xs[:, i], "k", lw=1, label="true $X$")
-        ax.plot(t, ExH[:, i], color=_C["h5"], lw=1.2, label="$E[X|y]$")
+        ax.plot(t, ExH[:, i], color=_C["ngh_kf"], lw=1.2, label="$E[X|y]$")
         ax.set_ylabel(f"$X_{{{i + 1}}}$")
         if i == 0:
             ax.legend(fontsize=7, ncol=3, loc="upper right")
@@ -786,7 +884,7 @@ def exp_rank_deficient(outdir: Path) -> dict:
         "N_exact": Ns,
         "max_dEx": errsE,
         "max_dpi": errsP,
-        "rmse_h5": _rmse(ExH, xs),
+        "rmse_ab": _rmse(ExH, xs),
     }
 
 
@@ -804,15 +902,15 @@ def exp_c_influence(outdir: Path) -> dict:
     C acts purely through regime identifiability."""
     Cs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
     N, seeds = 500, list(range(40))
-    rmse = {"h5_exact": [], "single_kalman": [], "imm": [], "oracle": [], "zero": []}
-    rstd = {"h5_exact": [], "single_kalman": [], "imm": [], "oracle": [], "zero": []}
+    rmse = {"ngh_kf": [], "single_kalman": [], "imm": [], "oracle": [], "zero": []}
+    rstd = {"ngh_kf": [], "single_kalman": [], "imm": [], "oracle": [], "zero": []}
     acc = []
     for C in Cs:
         eh, ek, ei, eo, ez, ac = [], [], [], [], [], []
         params = c_influence_model(C)
         for sd in seeds:
             rs, xs, ys = _simulate(params, N, seed=500 + sd)
-            ExH, PiH, _ = _run(params, ys, "h5_exact")
+            ExH, PiH, _ = _run(params, ys, "ngh_kf")
             ExK, _ = single_kalman_filter(params, ys)
             ExI = imm_filter(params, ys)[0]
             ExO, _ = oracle_filter(params, rs, ys)
@@ -823,7 +921,7 @@ def exp_c_influence(outdir: Path) -> dict:
             ez.append(_rmse(np.zeros_like(xs), xs))
             ac.append(float(np.mean(PiH.argmax(axis=1) == rs)))
         for key, vals in (
-            ("h5_exact", eh),
+            ("ngh_kf", eh),
             ("single_kalman", ek),
             ("imm", ei),
             ("oracle", eo),
@@ -834,14 +932,16 @@ def exp_c_influence(outdir: Path) -> dict:
         acc.append(float(np.mean(ac)))
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    ax1.plot(Cs, acc, "o-", color=_C["h5"], ms=4)  # NGH-MSM-KF regime accuracy (its usual colour)
+    ax1.plot(
+        Cs, acc, "o-", color=_C["ngh_kf"], ms=4
+    )  # NGH-MSM-KF regime accuracy (its usual colour)
     ax1.axhline(0.5, color="black", ls=":", lw=1)
     ax1.text(Cs[-1], 0.508, "chance (0.5)", fontsize=7, color="black", ha="right", va="bottom")
     ax1.set_xlabel("observation coupling $C$")
     ax1.set_ylabel("regime accuracy")
     ax1.set_title("$C$ opens the regime channel")
     ax1.annotate(
-        "CGOMSM ($C{=}0$)",
+        "CGO-MSM ($C{=}0$)",
         xy=(0.0, acc[0]),
         xytext=(0.16, 0.585),
         fontsize=7,
@@ -875,10 +975,10 @@ def exp_c_influence(outdir: Path) -> dict:
     )
     ax2.errorbar(
         Cs,
-        rmse["h5_exact"],
-        yerr=rstd["h5_exact"],
+        rmse["ngh_kf"],
+        yerr=rstd["ngh_kf"],
         fmt="o-",
-        color=_C["h5"],
+        color=_C["ngh_kf"],
         ms=5,
         capsize=2,
         label="NGH-MSM-KF (proposed)",
@@ -899,7 +999,7 @@ def exp_c_influence(outdir: Path) -> dict:
     fig.savefig(outdir / "figures" / "e8_c_influence.pdf")
     plt.close(fig)
     recovered = [
-        (rmse["zero"][i] - rmse["h5_exact"][i]) / (rmse["zero"][i] - rmse["oracle"][i])
+        (rmse["zero"][i] - rmse["ngh_kf"][i]) / (rmse["zero"][i] - rmse["oracle"][i])
         if rmse["zero"][i] > rmse["oracle"][i]
         else 0.0
         for i in range(len(Cs))
@@ -938,8 +1038,8 @@ def exp_c_mismatch(outdir: Path) -> dict:
         ec, eold, ei, eor = [], [], [], []
         for sd in seeds:
             rs, xs, ys = _simulate(true, N, seed=600 + sd)
-            ExC, _, _ = _run(true, ys, "h5_exact")  # correct filter (knows C)
-            ExOld, _, _ = _run(old, ys, "h5_exact")  # old C = 0 filter on the same data
+            ExC, _, _ = _run(true, ys, "ngh_kf")  # correct filter (knows C)
+            ExOld, _, _ = _run(old, ys, "ngh_kf")  # old C = 0 filter on the same data
             ExI = imm_filter(true, ys)[0]  # general IMM on the true model
             ExOr, _ = oracle_filter(true, rs, ys)
             ec.append(_rmse(ExC, xs))
@@ -959,7 +1059,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
         fmt="s-",
         color="#d62728",
         capsize=2,
-        label="CGOMSM filter",
+        label="CGO-MSM filter",
     )
     # IMM drawn first (underneath) with a larger hollow marker and wider caps, so the
     # correct filter -- plotted on top -- stays visible while the IMM ring and its
@@ -980,7 +1080,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
         rmse["correct"],
         yerr=rstd["correct"],
         fmt="o-",
-        color=_C["h5"],
+        color=_C["ngh_kf"],
         ms=5,
         capsize=2,
         label="NGH-MSM-KF",
@@ -996,7 +1096,7 @@ def exp_c_mismatch(outdir: Path) -> dict:
     )
     ax1.set_xlabel("true observation coupling $C$")
     ax1.set_ylabel("state RMSE")
-    ax1.set_title("CGOMSM filter on $C{\\neq}0$ data")
+    ax1.set_title("CGO-MSM filter on $C{\\neq}0$ data")
     ax1.legend(fontsize=7)
     ax2.plot(Cs, penalty, "o-", color="#d62728")
     ax2.set_xlabel("true observation coupling $C$")
@@ -1036,19 +1136,21 @@ def exp_imm_exactness(outdir: Path) -> dict:
     posterior."""
     Cs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
     N, seeds = 12, list(range(20))
-    dev = {k: {"ex": [], "pi": []} for k in ("imm", "gpb2", "h5")}
+    dev = {k: {"ex": [], "pi": []} for k in ("imm", "gpb2", "ngh_kf")}
     for C in Cs:
         params = with_stationary_init(c_influence_model(C))
-        di = {"imm": [], "gpb2": [], "h5": []}
-        dp = {"imm": [], "gpb2": [], "h5": []}
+        di = {"imm": [], "gpb2": [], "ngh_kf": []}
+        dp = {"imm": [], "gpb2": [], "ngh_kf": []}
         for sd in seeds:
             _, _, ys = _simulate(params, N, seed=sd)
             ExE, _, PiE = exact_mixture_filter(params, ys)
             ExI, _, PiI, _ = imm_filter(params, ys)
             ExG, _, PiG, _ = gpb2_filter(params, ys)
-            ExH, PiH, _ = _run(params, ys, "h5_exact")
-            for key, Ex, Pi in (("imm", ExI, PiI), ("gpb2", ExG, PiG), ("h5", ExH, PiH)):
-                di[key].append(float(np.max(np.abs(np.asarray(Ex).reshape(N, -1) - ExE.reshape(N, -1)))))
+            ExH, PiH, _ = _run(params, ys, "ngh_kf")
+            for key, Ex, Pi in (("imm", ExI, PiI), ("gpb2", ExG, PiG), ("ngh_kf", ExH, PiH)):
+                di[key].append(
+                    float(np.max(np.abs(np.asarray(Ex).reshape(N, -1) - ExE.reshape(N, -1))))
+                )
                 dp[key].append(float(np.max(np.abs(np.asarray(Pi) - PiE))))
         for key in di:
             dev[key]["ex"].append(float(np.mean(di[key])))
@@ -1058,15 +1160,33 @@ def exp_imm_exactness(outdir: Path) -> dict:
     clip = lambda v: np.maximum(v, floor)
     gpb2col = "#2ca02c"
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(8.4, 3.4))
-    a1.semilogy(Cs, clip(dev["imm"]["ex"]), "D--", color=_C["imm"], mfc="none", ms=7, label="pairwise IMM (order 1)")
+    a1.semilogy(
+        Cs,
+        clip(dev["imm"]["ex"]),
+        "D--",
+        color=_C["imm"],
+        mfc="none",
+        ms=7,
+        label="pairwise IMM (order 1)",
+    )
     a1.semilogy(Cs, clip(dev["gpb2"]["ex"]), "s-", color=gpb2col, ms=5, label="GPB2 (order 2)")
-    a1.semilogy(Cs, clip(dev["h5"]["ex"]), "o-", color=_C["h5"], ms=4, label="NGH-MSM-KF (proposed)")
+    a1.semilogy(
+        Cs, clip(dev["ngh_kf"]["ex"]), "o-", color=_C["ngh_kf"], ms=4, label="NGH-MSM-KF (proposed)"
+    )
     a1.set_xlabel("observation coupling $C$")
     a1.set_ylabel(r"max$_n\,|\widehat X_n-\widehat X_n^{\mathrm{exact}}|$")
     a1.set_title("state read-out: exactness vs $C$")
     a1.legend(fontsize=7)
     a1.grid(alpha=0.3, which="both")
-    a2.semilogy(Cs, clip(dev["imm"]["pi"]), "D--", color=_C["imm"], mfc="none", ms=7, label="pairwise IMM (order 1)")
+    a2.semilogy(
+        Cs,
+        clip(dev["imm"]["pi"]),
+        "D--",
+        color=_C["imm"],
+        mfc="none",
+        ms=7,
+        label="pairwise IMM (order 1)",
+    )
     a2.semilogy(Cs, clip(dev["gpb2"]["pi"]), "s-", color=gpb2col, ms=5, label="GPB2 (order 2)")
     a2.set_xlabel("observation coupling $C$")
     a2.set_ylabel(r"max$_n\,\|\pi_n-\pi_n^{\mathrm{exact}}\|_\infty$")
@@ -1091,7 +1211,7 @@ def _quasi_ab_model(C: float, eps: float, p_switch: float = 0.02) -> GSSParams:
     departure from the AB manifold. Used by exp_ab_robustness (E12)."""
     from prg.classes.FMatrix import FMatrix
     from prg.classes.NoiseCovariance import GSSNoiseCovariance
-    from prg.utils.h5_constraint import compute_AB
+    from prg.utils.ab_constraint import compute_AB
 
     K, q, s = 2, 1, 1
     P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
@@ -1124,13 +1244,15 @@ def _quasi_ab_model(C: float, eps: float, p_switch: float = 0.02) -> GSSParams:
 
 def exp_ab_robustness(outdir: Path) -> dict:
     """E12 -- robustness to AB violation. The exact constant-gain filter (NGH-MSM-KF)
-    is exact only under the AB constraint, i.e. the marginal (R,Y)-Markovianity (H5).
+    is exact only under the AB constraint. AB *implies* that the marginal pair (R,Y) is
+    Markov but is not equivalent to it -- at C=0 the pair is Markov for any A_r, off-AB
+    included -- so Markovianity alone does not buy the constant gain.
     We push the model off AB by eps (residual |A_r - M_r C_r| = eps) and score three
     filters against the exact K^N filter of the PERTURBED model: NGH-MSM-KF (assumes
-    AB/H5), GPB2 (order 2, correct model, depth-2 mode collapse), and the order-1 IMM.
+    AB), GPB2 (order 2, correct model, depth-2 mode collapse), and the order-1 IMM.
 
     Finding (adversarially verified): NGH-MSM-KF is machine-exact on AB but degrades
-    ~linearly in eps (its (H5) collapse is misspecified off-AB); GPB2 is the most
+    ~linearly in eps (its constant-gain collapse is misspecified off-AB); GPB2 is the most
     robust by 1.5-2.5 decades (it uses the correct perturbed dynamics and only
     approximates by depth-2 collapse); the order-1 IMM has a nonzero on-AB floor but
     grows slowly. Off-AB the ranking flips to GPB2 < IMM < NGH-MSM-KF -- the AB-exact
@@ -1140,7 +1262,7 @@ def exp_ab_robustness(outdir: Path) -> dict:
     C = 0.4
     epss = [0.0, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
     N, seeds = 12, list(range(20))
-    dev = {"h5": [], "gpb2": [], "imm": []}
+    dev = {"ngh_kf": [], "gpb2": [], "imm": []}
     for eps in epss:
         params = _quasi_ab_model(C, eps)
         dh, dg, di = [], [], []
@@ -1149,14 +1271,14 @@ def exp_ab_robustness(outdir: Path) -> dict:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 ExE, _, _ = exact_mixture_filter(params, ys)
-                ExH, _, _ = _run(params, ys, "h5_exact")
+                ExH, _, _ = _run(params, ys, "ngh_kf")
                 ExG, _, _, _ = gpb2_filter(params, ys)
                 ExI, _, _, _ = imm_filter(params, ys)
             f = lambda E: float(np.max(np.abs(np.asarray(E).reshape(N, -1) - ExE.reshape(N, -1))))
             dh.append(f(ExH))
             dg.append(f(ExG))
             di.append(f(ExI))
-        dev["h5"].append(float(np.mean(dh)))
+        dev["ngh_kf"].append(float(np.mean(dh)))
         dev["gpb2"].append(float(np.mean(dg)))
         dev["imm"].append(float(np.mean(di)))
 
@@ -1164,9 +1286,19 @@ def exp_ab_robustness(outdir: Path) -> dict:
     clip = lambda v: np.maximum(v, floor)
     gpb2col = "#2ca02c"
     fig, ax = plt.subplots(figsize=(5.6, 3.7))
-    ax.semilogy(epss, clip(dev["h5"]), "o-", color=_C["h5"], ms=5, label="NGH-MSM-KF (assumes AB)")
+    ax.semilogy(
+        epss, clip(dev["ngh_kf"]), "o-", color=_C["ngh_kf"], ms=5, label="NGH-MSM-KF (assumes AB)"
+    )
     ax.semilogy(epss, clip(dev["gpb2"]), "s-", color=gpb2col, ms=5, label="GPB2 (order 2)")
-    ax.semilogy(epss, clip(dev["imm"]), "D--", color=_C["imm"], mfc="none", ms=6, label="pairwise IMM (order 1)")
+    ax.semilogy(
+        epss,
+        clip(dev["imm"]),
+        "D--",
+        color=_C["imm"],
+        mfc="none",
+        ms=6,
+        label="pairwise IMM (order 1)",
+    )
     ax.set_xlabel(r"AB-constraint violation $\epsilon=\max_r|A_r-M_rC_r|$")
     ax.set_ylabel(r"max$_n\,|\widehat X_n-\widehat X_n^{\mathrm{exact}}|$")
     ax.set_title("robustness to AB violation")
@@ -1198,13 +1330,16 @@ def exp_approx_exactness(outdir: Path) -> dict:
         params = _build(name)
         _, _, ys = _simulate(params, N, seed=11)
         ExE, _VarE, PiE = exact_mixture_filter(params, ys)
-        ExH, PiH, _ = _run(params, ys, "h5_exact")
+        ExH, PiH, _ = _run(params, ys, "ngh_kf")
         Eg, _, Pg, llg = gpb2_filter(params, ys)
         Ei, _, Pim, lli = imm_filter(params, ys)
         Er, _, Pr, llr = rbpf_filter(params, ys, n_particles=rbpf_M, seed=0)
         res[name] = {
             "N": N,
-            "h5": {"dEx": float(np.abs(ExH - ExE).max()), "dpi": float(np.abs(PiH - PiE).max())},
+            "ngh_kf": {
+                "dEx": float(np.abs(ExH - ExE).max()),
+                "dpi": float(np.abs(PiH - PiE).max()),
+            },
             "gpb2": {
                 "dEx": float(np.abs(Eg - ExE).max()),
                 "dpi": float(np.abs(Pg - PiE).max()),
@@ -1261,7 +1396,7 @@ def exp_approx_exactness(outdir: Path) -> dict:
 
     cost = {
         "N": Nt,
-        "h5_exact": _us(lambda: _run(pT, ysT, "h5_exact")),
+        "ngh_kf": _us(lambda: _run(pT, ysT, "ngh_kf")),
         "imm": _us(lambda: imm_filter(pT, ysT)),
         "gpb2": _us(lambda: gpb2_filter(pT, ysT)),
         "rbpf": _us(lambda: rbpf_filter(pT, ysT, n_particles=rbpf_M, seed=0)),
@@ -1270,7 +1405,7 @@ def exp_approx_exactness(outdir: Path) -> dict:
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12.2, 3.4))
     keys = [
-        ("h5", "NGH-MSM-KF", _C["h5"]),
+        ("ngh_kf", "NGH-MSM-KF", _C["ngh_kf"]),
         ("gpb2", "GPB2", _C["exact"]),
         ("imm", "IMM", _C["imm"]),
         ("rbpf", f"RBPF ({rbpf_M})", _C["oracle"]),
@@ -1301,7 +1436,7 @@ def exp_approx_exactness(outdir: Path) -> dict:
     )
     ax2.set_xscale("log")
     ax2.set_yscale("log")
-    ax2.axhline(max(floor, 1e-17), color="black", ls="--", lw=1, label="GPB2 / h5 floor")
+    ax2.axhline(max(floor, 1e-17), color="black", ls="--", lw=1, label="GPB2 / NGH-MSM-KF floor")
     guide = rb_err[0] * np.sqrt(Ms[0] / np.array(Ms, dtype=float))
     ax2.plot(Ms, guide, ":", color="grey", lw=1, label=r"$\propto 1/\sqrt{M}$")
     ax2.set_xlabel("RBPF particles $M$")
@@ -1309,8 +1444,8 @@ def exp_approx_exactness(outdir: Path) -> dict:
     ax2.set_title("(b) RBPF converges to the exact filter")
     ax2.legend(fontsize=7)
 
-    cvals = [cost["h5_exact"], cost["imm"], cost["gpb2"], cost["rbpf"]]
-    ccols = [_C["h5"], _C["imm"], _C["exact"], _C["oracle"]]
+    cvals = [cost["ngh_kf"], cost["imm"], cost["gpb2"], cost["rbpf"]]
+    ccols = [_C["ngh_kf"], _C["imm"], _C["exact"], _C["oracle"]]
     ax3.bar(range(4), cvals, color=ccols)
     ax3.set_yscale("log")
     ax3.set_xticks(range(4))
@@ -1340,7 +1475,7 @@ def exp_fair_comparison(outdir: Path) -> dict:
     """
     from prg.classes.FMatrix import FMatrix
     from prg.classes.NoiseCovariance import GSSNoiseCovariance
-    from prg.utils.h5_constraint import apply_AB_constraint
+    from prg.utils.ab_constraint import apply_AB_constraint
 
     # ---- (a) scalar symmetric moment model: Sigma over (x1,y1,x2,y2) ----
     def _sig4(c, t, d):
@@ -1439,13 +1574,13 @@ def exp_fair_comparison(outdir: Path) -> dict:
     # ---- figure ----
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 3.4))
     ax1.plot(deltas, fwd_old, color=_C["kal"], lw=2, label="CGOMSM")
-    ax1.plot(deltas, fwd_new, color=_C["h5"], lw=2, label="NGH-MSM")
+    ax1.plot(deltas, fwd_new, color=_C["ngh_kf"], lw=2, label="NGH-MSM")
     ax1.set_title("(a1) naive metric: causal forward filtering")
     ax1.set_xlabel(r"departure $\delta$")
     ax1.set_ylabel("state MSE")
     ax1.legend(fontsize=8)
     ax2.plot(deltas, sm_old, color=_C["kal"], lw=3, label="CGOMSM")
-    ax2.plot(deltas, sm_new, "--", color=_C["h5"], lw=2, label="NGH-MSM")
+    ax2.plot(deltas, sm_new, "--", color=_C["ngh_kf"], lw=2, label="NGH-MSM")
     ax2.set_title("(a2) fair metric: time-symmetric (smoothing)")
     ax2.set_xlabel(r"departure $\delta$")
     ax2.set_ylabel("state MSE")
@@ -1500,7 +1635,7 @@ def consigne_model(g: float = 1.2, p_switch: float = 0.04, m: float = 0.8) -> GS
     (NGH-MSM valid by construction), stationary init."""
     from prg.classes.FMatrix import FMatrix
     from prg.classes.NoiseCovariance import GSSNoiseCovariance
-    from prg.utils.h5_constraint import compute_AB
+    from prg.utils.ab_constraint import compute_AB
 
     K, q, s = 2, 1, 1
     P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
@@ -1543,11 +1678,11 @@ def _sim_u(params, N, seed, u):
     return np.array(rs), np.array(xs), np.array(ys)
 
 
-def _run_h5_u(params, ys, u):
-    """h5_exact E_x with (u not None) or without (u None) the consigne."""
+def _run_ab_u(params, ys, u):
+    """ngh_kf E_x with (u not None) or without (u None) the consigne."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        f = GSSFilter(params, mode="h5_exact")
+        f = GSSFilter(params, mode="ngh_kf")
         s = params.s
         ex = []
         for n, y in enumerate(ys):
@@ -1564,32 +1699,32 @@ def exp_consigne(outdir: Path) -> dict:
     N, seeds = 600, list(range(40))
     u = make_input("square(140)", N, p_in) * 2.0  # slow ±2 square wave
 
-    rmse = {"pairwise_blind": [], "h5_blind": [], "h5_consigne": [], "oracle_consigne": []}
+    rmse = {"pairwise_blind": [], "ngh_kf_blind": [], "ngh_kf_consigne": [], "oracle_consigne": []}
     for sd in seeds:
         rs, xs, ys = _sim_u(params, N, 100 + sd, u)
         rmse["pairwise_blind"].append(_rmse(single_kalman_filter(params, ys)[0], xs))
-        rmse["h5_blind"].append(_rmse(_run_h5_u(params, ys, None), xs))
-        rmse["h5_consigne"].append(_rmse(_run_h5_u(params, ys, u), xs))
+        rmse["ngh_kf_blind"].append(_rmse(_run_ab_u(params, ys, None), xs))
+        rmse["ngh_kf_consigne"].append(_rmse(_run_ab_u(params, ys, u), xs))
         rmse["oracle_consigne"].append(_rmse(oracle_filter(params, rs, ys, us=u)[0], xs))
     means = {m: float(np.mean(v)) for m, v in rmse.items()}
     stds = {m: float(np.std(v)) for m, v in rmse.items()}
 
-    # Exactness WITH the input: h5_exact == brute-force Kᴺ (short N)
+    # Exactness WITH the input: ngh_kf == brute-force Kᴺ (short N)
     Ns = 11
     u_s = make_input("gaussian", Ns, p_in, seed=0)
     _, _, ys_s = _sim_u(params, Ns, 7, u_s)
     resid = float(
-        np.max(np.abs(_run_h5_u(params, ys_s, u_s) - exact_mixture_filter(params, ys_s, us=u_s)[0]))
+        np.max(np.abs(_run_ab_u(params, ys_s, u_s) - exact_mixture_filter(params, ys_s, us=u_s)[0]))
     )
 
     # Figure: (a) one trajectory segment, (b) RMSE bars
     _, xs0, ys0 = _sim_u(params, N, 100, u)
-    ex_u, ex_no = _run_h5_u(params, ys0, u), _run_h5_u(params, ys0, None)
+    ex_u, ex_no = _run_ab_u(params, ys0, u), _run_ab_u(params, ys0, None)
     seg = slice(120, 360)
     nn = np.arange(N)[seg]
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8.8, 3.4))
     ax1.plot(nn, xs0[seg, 0], color="black", lw=1.3, label="true $X_n$")
-    ax1.plot(nn, ex_u[seg, 0], color=_C["h5"], lw=1.1, label=r"NGH-MSM-KF (consigne)")
+    ax1.plot(nn, ex_u[seg, 0], color=_C["ngh_kf"], lw=1.1, label=r"NGH-MSM-KF (consigne)")
     ax1.plot(
         nn, ex_no[seg, 0], color=_C["imm"], lw=1.0, ls="--", label=r"NGH-MSM-KF (blind to $u$)"
     )
@@ -1597,14 +1732,14 @@ def exp_consigne(outdir: Path) -> dict:
     ax1.set_ylabel("state $X_n$")
     ax1.set_title(r"E$_c$a — sign-flipping input drives $X$")
     ax1.legend(fontsize=7, loc="upper right")
-    order = ["pairwise_blind", "h5_blind", "h5_consigne", "oracle_consigne"]
+    order = ["pairwise_blind", "ngh_kf_blind", "ngh_kf_consigne", "oracle_consigne"]
     labels = [
         "pairwise\nKalman\n(blind)",
         "NGH-MSM-KF\n(blind to $u$)",
         "NGH-MSM-KF\n(consigne)",
         "oracle\n(regimes+$u$)",
     ]
-    cols = [_C["kal"], _C["imm"], _C["h5"], _C["oracle"]]
+    cols = [_C["kal"], _C["imm"], _C["ngh_kf"], _C["oracle"]]
     ax2.bar(
         range(4), [means[m] for m in order], yerr=[stds[m] for m in order], color=cols, capsize=3
     )
@@ -1617,7 +1752,7 @@ def exp_consigne(outdir: Path) -> dict:
     return {
         "rmse_mean": means,
         "rmse_std": stds,
-        "h5_vs_bruteforce_max_abs": resid,
+        "ngh_kf_vs_bruteforce_max_abs": resid,
         "N_r": [float(params.N(k).ravel()[0]) for k in range(params.K)],
         "N": N,
         "n_seeds": len(seeds),

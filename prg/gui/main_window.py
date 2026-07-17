@@ -254,7 +254,7 @@ class GSSMainWindow(QMainWindow):
             "When enabled, the filter runs automatically after every single simulation.\n"
             "The filter uses the parameters captured at simulate time — editing the\n"
             "widgets afterwards does not affect the auto-filter run.\n"
-            "The Filter mode (IMM / H5) and Joseph form settings below apply as usual.\n"
+            "The Filter mode (GPB2 / NGH-MSM-KF) and Joseph form settings below apply as usual.\n"
             "No effect in Monte-Carlo mode."
         )
         auto_row.addWidget(self._auto_filter_check)
@@ -265,28 +265,29 @@ class GSSMainWindow(QMainWindow):
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("Filter mode:"))
         self._mode_combo = QComboBox()
-        self._mode_combo.addItem("Approximate IMM - H5 not required", "imm_general")
-        self._mode_combo.addItem("exactIMM - Exact IMM - H5 required", "h5_exact")
+        self._mode_combo.addItem("GPB2 (order 2) - any model", "gpb2")
+        self._mode_combo.addItem("NGH-MSM-KF (constant gain) - AB required", "ngh_kf")
         self._mode_combo.setToolTip(
-            "Approximate IMM — per-step moment propagation from the filtered π_n.\n"
-            "               Works for any GSS model, with or without (H5)\n"
-            "               (matches exactIMM ≤ v0.9.0).\n"
-            "Exact IMM    — stationary pre-computed moments. Exact when (H5)\n"
-            "               holds: the algebraic constraint\n"
-            "               Δᵀ Aᵀ + Σ_V Bᵀ = P M⁻¹ W linking the 7 blocks.\n"
-            "               Emits a warning when the residual exceeds the\n"
-            "               tolerance. Tick the per-regime 'AB constraint'\n"
-            "               to enforce it (sets A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D)."
+            "GPB2 (order 2) — K² regime-pair Kalman updates per step, then a\n"
+            "               collapse back to K. Exact when C = 0 or A = Δ Σ_V⁻¹ C;\n"
+            "               a good approximation otherwise. Use it on any model\n"
+            "               that violates the AB constraint.\n"
+            "NGH-MSM-KF   — stationary pre-computed moments, no covariance\n"
+            "               recursion, so its cost does not grow with the state\n"
+            "               dimension. Exact only under the AB constraint\n"
+            "               A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D; emits a warning when\n"
+            "               the residual exceeds the tolerance. Tick the\n"
+            "               per-regime 'AB constraint' to enforce it."
         )
         mode_row.addWidget(self._mode_combo)
         mode_row.addStretch()
         left_layout.addLayout(mode_row)
 
-        # Joseph form row (only meaningful for h5_exact mode)
+        # Joseph form row (only meaningful for ngh_kf mode)
         joseph_row = QHBoxLayout()
         self._joseph_check = QCheckBox("Joseph form (covariance update)")
         self._joseph_check.setToolTip(
-            "Only used in 'Exact IMM under (H5)' mode. When checked, the\n"
+            "Only used in NGH-MSM-KF mode. When checked, the\n"
             "mode-conditional posterior covariance is computed via the Joseph\n"
             "form (numerically stable, symmetric and PSD by construction).\n"
             "Mathematically equivalent to the short form under stationarity.\n"
@@ -296,9 +297,9 @@ class GSSMainWindow(QMainWindow):
         joseph_row.addStretch()
         left_layout.addLayout(joseph_row)
 
-        # Gray out the Joseph checkbox unless mode is h5_exact
+        # Gray out the Joseph checkbox unless mode is ngh_kf
         def _sync_joseph_enabled():
-            self._joseph_check.setEnabled(self._mode_combo.currentData() == "h5_exact")
+            self._joseph_check.setEnabled(self._mode_combo.currentData() == "ngh_kf")
 
         self._mode_combo.currentIndexChanged.connect(lambda _: _sync_joseph_enabled())
         _sync_joseph_enabled()
@@ -471,8 +472,8 @@ class GSSMainWindow(QMainWindow):
             "           (no autocorrelation up to lag h).\n"
             "Shape:    skewness S and excess kurtosis K of STANDARDISED\n"
             "           innovations ν̃ = S^{-1/2} ν.\n"
-            "           (h5_exact: whitened by stationary Γ mixture;\n"
-            "            imm_general: whitened by sample covariance)\n"
+            "           (ngh_kf: whitened by stationary Γ mixture;\n"
+            "            gpb2: whitened by sample covariance)\n"
             "           For a well-tuned filter: |S|≈0, |K|≈0."
         )
         innov_layout.addWidget(innov_title)
@@ -579,7 +580,7 @@ class GSSMainWindow(QMainWindow):
         self._right_tabs.setTabToolTip(
             1,
             "Exact conditional Gaussian density p(y_{n+1} | r_n=j, r_{n+1}=k, y_n).\n"
-            "Available after filtering in 'Exact IMM – H5 required' mode.",
+            "Available after filtering in NGH-MSM-KF mode.",
         )
 
         splitter.addWidget(self._right_tabs)
@@ -608,13 +609,13 @@ class GSSMainWindow(QMainWindow):
         self._load_settings()
         self._refresh_session_summary()
 
-        # When a preset is loaded at startup: ensure h5_exact is the active
+        # When a preset is loaded at startup: ensure ngh_kf is the active
         # filter mode.  The AB constraint stays unchecked by default so
         # the user can opt in explicitly.
         if _preset_loaded:
-            idx_h5 = self._mode_combo.findData("h5_exact")
-            if idx_h5 >= 0:
-                self._mode_combo.setCurrentIndex(idx_h5)
+            idx_ab = self._mode_combo.findData("ngh_kf")
+            if idx_ab >= 0:
+                self._mode_combo.setCurrentIndex(idx_ab)
 
     # ------------------------------------------------------------------
     # Slots
@@ -829,17 +830,17 @@ class GSSMainWindow(QMainWindow):
         self.statusBar().showMessage(f"Simulation error: {msg}", 8000)
         self._refresh_simulate_button()
 
-    def _h5_exact_blockers(self, params) -> list[str]:
+    def _ngh_kf_blockers(self, params) -> list[str]:
         """Reasons the selected mode would be inexact for ``params``.
 
         Returns the list of NGH-MSM/CNS violations (from ``validate_ngh_msm``)
-        when the filter-mode combo is set to ``"h5_exact"`` and ``params`` is
+        when the filter-mode combo is set to ``"ngh_kf"`` and ``params`` is
         not a valid NGH-MSM; otherwise an empty list. Pure logic (no UI), so it
         is unit-testable independently of the warning dialog.
         """
-        if params is None or self._mode_combo.currentData() != "h5_exact":
+        if params is None or self._mode_combo.currentData() != "ngh_kf":
             return []
-        from prg.utils.h5_constraint import validate_ngh_msm
+        from prg.utils.ab_constraint import validate_ngh_msm
 
         return validate_ngh_msm(params)
 
@@ -847,11 +848,11 @@ class GSSMainWindow(QMainWindow):
         if not self._state.can_filter():
             return
 
-        # CNS guard: 'exactIMM (H5 required)' is exact only on a valid NGH-MSM.
-        # If the user picked it for a model that violates (H5) / the structural
+        # CNS guard: 'NGH-MSM-KF' is exact only on a valid NGH-MSM.
+        # If the user picked it for a model that violates AB / the structural
         # CNS, surface the issues (the filter would otherwise only emit a
         # RuntimeWarning the GUI swallows) and let them proceed or cancel.
-        blockers = self._h5_exact_blockers(self._state.params)
+        blockers = self._ngh_kf_blockers(self._state.params)
         if blockers:
             from PyQt6.QtWidgets import QMessageBox
 
@@ -859,10 +860,10 @@ class GSSMainWindow(QMainWindow):
             resp = QMessageBox.warning(
                 self,
                 "Model is not a valid NGH-MSM",
-                "The 'exactIMM (H5 required)' filter is exact only for a model that "
-                "satisfies (H5) and the structural conditions. The captured model "
+                "The 'NGH-MSM-KF' filter is exact only for a model that "
+                "satisfies AB and the structural conditions. The captured model "
                 f"violates:\n\n{detail}\n\nThe filter will be biased. Switch to "
-                "'Approximate IMM', or enforce the AB constraint on every regime.\n\n"
+                "'GPB2 (order 2)', or enforce the AB constraint on every regime.\n\n"
                 "Run the exact filter anyway?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
@@ -1055,15 +1056,15 @@ class GSSMainWindow(QMainWindow):
         """Update Ljung-Box + shape badge pills in the innovation diagnostics frame.
 
         Standardises innovations (D1 / A12) before the shape tests:
-          h5_exact  → weighted mixture covariance from cond_moments
-          imm_general → sample covariance (fallback)
+          ngh_kf  → weighted mixture covariance from cond_moments
+          gpb2 → sample covariance (fallback)
         Applies Bonferroni correction over 2·s simultaneous tests (D2).
         """
         try:
             innov_std = _standardise_innovations(innovations, mix_w, Gamma_cm, muY_jk)
         except Exception:  # noqa: BLE001
             innov_std = innovations
-        std_mode = "h5 S" if mix_w is not None else "sample S"
+        std_mode = "ngh_kf S" if mix_w is not None else "sample S"
 
         n_tests = max(1, 2 * self._s)
         alpha_fam = _INNOV_ALPHA_FAM  # C3: named constant
@@ -1352,7 +1353,7 @@ class GSSMainWindow(QMainWindow):
             "_K": np.array(self._K),
             "_q": np.array(self._q),
             "_s": np.array(self._s),
-            "_filter_mode": np.array(self._mode_combo.currentData() or "imm_general", dtype=object),
+            "_filter_mode": np.array(self._mode_combo.currentData() or "gpb2", dtype=object),
             "_joseph": np.array(self._joseph_check.isChecked()),
             "_P": P,
         }
@@ -1849,15 +1850,15 @@ class GSSMainWindow(QMainWindow):
         seed = self._seed_edit.text().strip() or "random"
         auto = "auto-filter" if self._auto_filter_check.isChecked() else ""
         mode = self._mode_combo.currentData()
-        mode_short = "H5-exact" if mode == "h5_exact" else "IMM-general"
+        mode_short = "NGH-MSM-KF" if mode == "ngh_kf" else "IMM-general"
         parts = [
             f"K={self._K}·q={self._q}·s={self._s}",
             f"N={self._n_spin.value()}",
             f"seed={seed}",
             f"filter={mode_short}",
         ]
-        # Joseph flag is only meaningful in h5_exact mode
-        if mode == "h5_exact":
+        # Joseph flag is only meaningful in ngh_kf mode
+        if mode == "ngh_kf":
             joseph = "Joseph" if self._joseph_check.isChecked() else "short"
             parts.append(f"cov={joseph}")
         if auto:
@@ -1878,7 +1879,7 @@ class GSSMainWindow(QMainWindow):
             self._seed_edit.setText(str(seed))
         self._auto_filter_check.setChecked(s.value("auto_filter", False, type=bool))
         self._joseph_check.setChecked(s.value("joseph", False, type=bool))
-        saved_mode = s.value("filter_mode", "h5_exact")
+        saved_mode = s.value("filter_mode", "ngh_kf")
         idx = self._mode_combo.findData(saved_mode)
         if idx >= 0:
             self._mode_combo.setCurrentIndex(idx)

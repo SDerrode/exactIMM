@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "exactIMM"
-version = "1.1.1"
+version = "2.0.0"
 description = "Fast optimal filtering in Gaussian switching systems"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -65,11 +65,11 @@ source = ["prg"]
 omit = ["tests/*"]
 
 [tool.mypy]
-# Strict typing is enforced only on prg/utils/h5_constraint.py (the
+# Strict typing is enforced only on prg/utils/ab_constraint.py (the
 # central, mathematical, well-tested module).  Other modules are
 # imported in "silent" mode to avoid noise from incomplete annotations
 # in numpy stubs and the rest of the codebase.
-files = ["prg/utils/h5_constraint.py"]
+files = ["prg/utils/ab_constraint.py"]
 strict = true
 follow_imports = "silent"
 

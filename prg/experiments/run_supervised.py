@@ -15,9 +15,9 @@ For each N_train ∈ {200, 500, 1000, 2000} × seed ∈ range(100):
   3. For each setting:
        - relative Frobenius error on the full F matrix and on b
          (averaged over regimes)
-       - H5 residual (max over regimes of the relative residual
+       - AB residual (max over regimes of the relative residual
          ‖Δᵀ A + Σ_V Bᵀ − P M⁻¹ W‖_F / max(‖Z‖_F, 1))
-  4. For each setting: build estimated GSSParams → run h5_exact
+  4. For each setting: build estimated GSSParams → run ngh_kf
      filter on the simulated observations → compute RMSE.
   5. Also compute the oracle filter RMSE (true parameters).
 
@@ -47,7 +47,7 @@ from prg.experiments.models_paper import get_params
 from prg.experiments.run_simulations import _params_from_dict
 from prg.filter.gss_filter import GSSFilter
 from prg.learning.supervised import fit_supervised
-from prg.utils.h5_constraint import compute_h5_residual
+from prg.utils.ab_constraint import compute_ab_residual
 
 __all__ = ["run_supervised_all", "run_supervised_trial"]
 
@@ -107,12 +107,12 @@ def _rel_frob(M_est: np.ndarray, M_true: np.ndarray) -> float:
     return float(np.linalg.norm(M_est - M_true, "fro") / denom)
 
 
-def _max_h5_residual(est: dict) -> float:
+def _max_ab_residual(est: dict) -> float:
     """
-    Max relative H5 residual over all regimes of an estimated model.
+    Max relative AB residual over all regimes of an estimated model.
 
-    Uses the same definition as GSSFilter._check_h5 and
-    prg/experiments/models_paper.py::_check_h5.
+    Uses the same definition as GSSFilter._check_ab and
+    prg/experiments/models_paper.py::_check_ab.
     """
     K, q = est["K"], est["q"]
     max_rel = 0.0
@@ -125,10 +125,10 @@ def _max_h5_residual(est: dict) -> float:
         Dt = est["Delta_list"][k]
         SV = est["Sigma_V_list"][k]
         try:
-            F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
+            F = compute_ab_residual(A, B, C, D, SU, Dt, SV)
         except np.linalg.LinAlgError:
             return float("nan")
-        Z = Dt.T @ A.T + SV @ B.T  # LHS of (H5): Δᵀ Aᵀ + Σ_V Bᵀ
+        Z = Dt.T @ A.T + SV @ B.T  # LHS of AB: Δᵀ Aᵀ + Σ_V Bᵀ
         scale = max(float(np.linalg.norm(Z, "fro")), 1.0)
         rel = float(np.linalg.norm(F, "fro")) / scale
         max_rel = max(max_rel, rel)
@@ -141,7 +141,7 @@ def _filter_rmse(
     xs: np.ndarray,
 ) -> float:
     """
-    Run h5_exact filter with *params* on observations *ys* and return RMSE.
+    Run ngh_kf filter with *params* on observations *ys* and return RMSE.
 
     Parameters
     ----------
@@ -157,7 +157,7 @@ def _filter_rmse(
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        filt = GSSFilter(params, mode="h5_exact")
+        filt = GSSFilter(params, mode="ngh_kf")
 
     N, s = ys.shape
     q = xs.shape[1]
@@ -194,7 +194,7 @@ def run_supervised_trial(
     seed : int
         Random seed for the simulator.
     projections : sequence
-        H5 projection choices passed as ``constraint`` to fit_supervised.
+        AB projection choices passed as ``constraint`` to fit_supervised.
         Elements are None, 'b', 'a', or 'su'.
 
     Returns
@@ -202,7 +202,7 @@ def run_supervised_trial(
     list of dict, one per projection, with keys:
         model, N, seed, projection,
         rel_err_F,  rel_err_b,
-        h5_residual,
+        ab_residual,
         rmse_estimated, rmse_oracle
     """
     # ------------------------------------------------------------------
@@ -236,7 +236,7 @@ def run_supervised_trial(
     ys = np.array(ys_list)  # (N, s)
 
     # ------------------------------------------------------------------
-    # Oracle filter RMSE (true params, h5_exact)
+    # Oracle filter RMSE (true params, ngh_kf)
     # ------------------------------------------------------------------
     oracle_rmse = _filter_rmse(true_p, ys, xs)
 
@@ -276,7 +276,7 @@ def run_supervised_trial(
                     "projection": proj_label,
                     "rel_err_F": float("nan"),
                     "rel_err_b": float("nan"),
-                    "h5_residual": float("nan"),
+                    "ab_residual": float("nan"),
                     "rmse_estimated": float("nan"),
                     "rmse_oracle": oracle_rmse,
                 }
@@ -304,9 +304,9 @@ def run_supervised_trial(
 
         rel_err_F = float(np.nanmean(rel_F_vals))
         rel_err_b = float(np.nanmean(rel_b_vals))
-        h5_res = _max_h5_residual(est)
+        ab_res = _max_ab_residual(est)
 
-        # --- Filter with estimated params (h5_exact) -------------------
+        # --- Filter with estimated params (ngh_kf) -------------------
         # Guard: if any matrix is non-finite or has huge norm (ill-conditioned
         # projection), skip the filter and report nan.
         _all_mats = est["A_list"] + est["B_list"] + est["C_list"] + est["D_list"]
@@ -347,7 +347,7 @@ def run_supervised_trial(
                 "projection": proj_label,
                 "rel_err_F": rel_err_F,
                 "rel_err_b": rel_err_b,
-                "h5_residual": h5_res,
+                "ab_residual": ab_res,
                 "rmse_estimated": rmse_e,
                 "rmse_oracle": oracle_rmse,
             }
@@ -379,7 +379,7 @@ def run_supervised_all(
     N_list : sequence of int
         Training sequence lengths.
     projections : sequence of str or None
-        H5 projection choices (None=free OLS, 'b', 'a', 'su').
+        AB projection choices (None=free OLS, 'b', 'a', 'su').
     n_runs : int
         Number of MC runs (seeds 0..n_runs-1).
     output_dir : path-like
@@ -436,7 +436,7 @@ def run_supervised_all(
                                 "projection": proj if proj else "none",
                                 "rel_err_F": float("nan"),
                                 "rel_err_b": float("nan"),
-                                "h5_residual": float("nan"),
+                                "ab_residual": float("nan"),
                                 "rmse_estimated": float("nan"),
                                 "rmse_oracle": float("nan"),
                             }
@@ -477,7 +477,7 @@ def _print_supervised_summary(df: pd.DataFrame) -> None:
     print(
         f"{'Model':>5}  {'N':>5}  {'Proj':>4}  "
         f"{'rel F err':>10}  {'rel b err':>10}  "
-        f"{'H5 resid':>10}  {'RMSE est':>9}  {'RMSE ora':>9}"
+        f"{'AB resid':>10}  {'RMSE est':>9}  {'RMSE ora':>9}"
     )
     print("-" * 72)
     for (model, N, proj), g in df.groupby(["model", "N", "projection"]):
@@ -485,7 +485,7 @@ def _print_supervised_summary(df: pd.DataFrame) -> None:
             f"{model:>5}  {N:>5}  {proj:>4}  "
             f"{g['rel_err_F'].mean():10.4f}  "
             f"{g['rel_err_b'].mean():10.4f}  "
-            f"{g['h5_residual'].mean():10.2e}  "
+            f"{g['ab_residual'].mean():10.2e}  "
             f"{g['rmse_estimated'].mean():9.4f}  "
             f"{g['rmse_oracle'].mean():9.4f}"
         )
@@ -520,7 +520,7 @@ def _parse_args(argv=None):
         nargs="+",
         default=["none", "ab"],
         choices=["none", "ab"],
-        help="Constraint choices (none = free OLS; ab = (H5)-compatible AB).",
+        help="Constraint choices (none = free OLS; ab = AB constraint).",
     )
     parser.add_argument("--n-runs", type=int, default=DEFAULT_N_RUNS)
     parser.add_argument("--output-dir", default=str(DEFAULT_OUT_DIR))

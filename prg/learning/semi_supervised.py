@@ -21,7 +21,7 @@ Parameters are estimated by **Expectation-Maximisation** (Baum-Welch):
   M-step   closed-form weighted updates of P, π₀, F(k), b(k), Σ_W(k)
            (weighted OLS with weights γ_{n+1}(k))
 
-By default the optional (H5)-compatible AB projection on (A, B)
+By default the optional AB projection on (A, B)
 (and Δ=0) is applied **only once** on the converged parameters at the end
 of EM — log-likelihood remains monotonically non-decreasing during EM
 iterations.
@@ -49,7 +49,7 @@ Options
     csv                    Path to the (R,X,Y) or (X,Y) CSV.  If 'r' is
                            present it is *ignored*.
     -K, --K                Number of regimes (required)
-    --constraint ab   Apply the (H5)-compatible AB projection
+    --constraint ab   Apply the AB projection
     --delta-zero           Force Δ(k)=0 before the projection
     --constraint-each-iter Apply the projection at every M-step (GEM mode);
                            otherwise it is applied only once at the end of EM
@@ -213,7 +213,7 @@ def _compute_xi(
 
 
 # ---------------------------------------------------------------------------
-# Constraint projection (delta_zero + H5) — shared by GEM and post-hoc paths
+# Constraint projection (delta_zero + AB) — shared by GEM and post-hoc paths
 # ---------------------------------------------------------------------------
 
 
@@ -232,7 +232,7 @@ def _apply_constraints(
     where: str = "M-step",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Apply optional Δ=0 and H5 projection to one regime's blocks.
+    Apply optional Δ=0 and AB projection to one regime's blocks.
 
     Used both inside the M-step (Generalized-EM) and as a one-shot
     post-hoc projection on the final converged parameters.
@@ -247,7 +247,7 @@ def _apply_constraints(
     SV = _nearest_spd(SV)
 
     if constraint == "ab":
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         try:
             A, B = compute_AB(C, D, Dt, SV)
@@ -285,7 +285,7 @@ def _weighted_fit(
     np.ndarray,  # b
 ]:
     """
-    Weighted least-squares fit for one regime, plus optional H5 projection.
+    Weighted least-squares fit for one regime, plus optional AB projection.
 
     sqrt-w trick: solve  diag(√w) [Z_curr | 1] Θ ≈ diag(√w) Z_next
     via :func:`numpy.linalg.lstsq`.
@@ -487,7 +487,7 @@ def _em_run(
     Parameters
     ----------
     constraint_each_iter : bool
-        If True, apply the constraint (Δ=0 and/or H5) at every M-step
+        If True, apply the constraint (Δ=0 and/or AB) at every M-step
         (Generalized-EM, log-lik may not be monotone).
         If False (default), run EM unconstrained and apply the constraint
         once on the final converged parameters.
@@ -710,8 +710,8 @@ def fit_semi_supervised(
     xs, ys : ndarrays of shape (N, q) and (N, s)
     K      : int — number of regimes
     constraint : None | 'a' | 'b' | 'su'
-        H5 projection target.
-    delta_zero : if True, force Δ(k)=0 before the H5 step.
+        AB projection target.
+    delta_zero : if True, force Δ(k)=0 before the AB step.
     constraint_each_iter : bool, default False
         If True, apply ``constraint`` and ``delta_zero`` at *every* M-step
         (Generalized-EM — log-likelihood may not be monotone).
@@ -822,7 +822,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["ab"],
         default=None,
         metavar="TARGET",
-        help="(H5)-compatible AB projection: A = Δ Σ_V⁻¹ C, "
+        help="AB projection: A = Δ Σ_V⁻¹ C, "
         "B = Δ Σ_V⁻¹ D.  By default applied once at the end of EM; "
         "with --constraint-each-iter applied at every M-step "
         "(GEM, log-lik may not be monotone).",

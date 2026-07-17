@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-scripts/e1_supervised_h5.py
+scripts/e1_supervised_ab.py
 ===========================
-Experiment **E1** — Empirical (H5) test on the S&P500 / VIX dataset.
+Experiment **E1** — Empirical AB test on the S&P500 / VIX dataset.
 
 For each proxy label (L1 = VIX median, L2 = NBER recession):
     1. Run supervised OLS per regime (unconstrained).
     2. Report   ‖B(k)‖_F   and Fisher p-value of   H0 : B(k) = 0.
-    3. Re-run with constraint='b' (post-hoc H5 projection on B).
+    3. Re-run with constraint='b' (post-hoc AB projection on B).
 
 The resulting Table 1 tells us whether B(k) ≠ 0 is statistically
-detectable — i.e. whether (H5) is a non-trivial assumption on this data.
+detectable — i.e. whether AB is a non-trivial assumption on this data.
 
 Outputs
 -------
@@ -149,7 +149,7 @@ def _fmt_p(p: float) -> str:
 
 def emit_tex_table(results: dict, out_path: Path) -> None:
     lines = [
-        r"% Table 1 — empirical (H5) test on S&P500 / VIX (train period only)",
+        r"% Table 1 — empirical AB test on S&P500 / VIX (train period only)",
         r"\begin{tabular}{llrrrr}",
         r"\toprule",
         r"Label & Regime & $n_k$ & $B(k)$ & $\|B(k)\|_F$ & $p$-value \\",

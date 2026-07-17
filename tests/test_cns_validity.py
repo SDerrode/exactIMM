@@ -33,13 +33,13 @@ from prg.filter.gss_filter import GSSFilter
 from prg.models.model_gss_K2_q1_s1 import ModelGssK2Q1S1
 from prg.models.model_gss_K2_q2_s1 import ModelGss_K2_q2_s1
 from prg.models.presets import PRESETS
-from prg.utils.exceptions import ParamError
-from prg.utils.h5_constraint import (
+from prg.utils.ab_constraint import (
     apply_AB_constraint,
     compute_AB,
     is_ngh_msm,
     validate_ngh_msm,
 )
+from prg.utils.exceptions import ParamError
 
 
 # ---------------------------------------------------------------------------
@@ -110,14 +110,14 @@ def test_preset_satisfies_s_ge_q(entry):
 def test_s_lt_q_validity_is_about_AB_not_rank():
     # s < q (rank-deficient C) is NOT a rejection reason anymore: the full-column-
     # rank condition was an over-restriction (verified single- and multi-regime).
-    # The raw fixture has non-AB blocks, so it is rejected *only* for the AB / (H5)
+    # The raw fixture has non-AB blocks, so it is rejected *only* for the AB
     # violation — not for rank or s < q. AB-constraining the same blocks yields a
     # valid NGH-MSM.
     raw = GSSParams.from_model(ModelGss_K2_q2_s1())  # s=1 < q=2, raw (non-AB) blocks
     issues = validate_ngh_msm(raw)
     assert not any("rank(C)" in m for m in issues)
     assert not any("< q" in m for m in issues)
-    assert any("AB / (H5)" in m for m in issues)
+    assert any("AB" in m for m in issues)
     assert not is_ngh_msm(raw)
     assert is_ngh_msm(apply_AB_constraint(raw))  # AB-constrained s<q model is valid
 
@@ -170,7 +170,7 @@ def test_non_ab_model_is_flagged():
         [p.noise_cov.Sigma_V(k) for k in range(p.K)],
     )
     issues = validate_ngh_msm(broken)
-    assert any("AB / (H5) constraint violated" in m for m in issues)
+    assert any("AB constraint violated" in m for m in issues)
 
 
 def test_singular_D_is_now_valid():
@@ -298,7 +298,7 @@ class TestNGHMSMParams:
             C_list=[p.f_matrix.C(k) for k in range(2)],
             D_list=[p.f_matrix.D(k) for k in range(2)],
         )
-        with pytest.raises(ParamError, match="AB / \\(H5\\) constraint violated"):
+        with pytest.raises(ParamError, match="AB constraint violated"):
             NGHMSMParams(
                 K=2,
                 q=1,
@@ -339,10 +339,10 @@ class TestNGHMSMParams:
 # Closed-form filter (Prop. 4 is redundant) and the regime-conditional law
 # ---------------------------------------------------------------------------
 class TestClosedFormFilter:
-    def test_h5_exact_gain_equals_M_and_Gamma(self):
-        """Under AB, the h5_exact gain/posterior are exactly M_k and Γ_k."""
+    def test_ngh_kf_gain_equals_M_and_Gamma(self):
+        """Under AB, the ngh_kf gain/posterior are exactly M_k and Γ_k."""
         p = NGHMSMParams.from_model(ModelGssK2Q1S1())
-        filt = GSSFilter(p, mode="h5_exact")
+        filt = GSSFilter(p, mode="ngh_kf")
         for k in range(p.K):
             np.testing.assert_allclose(filt._K_gain[k], p.M(k), atol=1e-12)
             np.testing.assert_allclose(filt._P_post[k], p.Gamma(k), atol=1e-12)
@@ -352,7 +352,7 @@ class TestClosedFormFilter:
         M_k / Γ_k — i.e. the Riccati/Prop.-4 machinery is redundant under AB."""
         ref = NGHMSMParams.from_model(ModelGssK2Q1S1())
         base = GSSParams.from_model(ModelGssK2Q1S1())  # AB-valid, but base type
-        filt = GSSFilter(base, mode="h5_exact")
+        filt = GSSFilter(base, mode="ngh_kf")
         for k in range(base.K):
             np.testing.assert_allclose(filt._K_gain[k], ref.M(k), atol=1e-7)
             np.testing.assert_allclose(filt._P_post[k], ref.Gamma(k), atol=1e-7)
@@ -360,8 +360,8 @@ class TestClosedFormFilter:
     def test_default_mode_dispatches_on_type(self):
         nghmsm = NGHMSMParams.from_model(ModelGssK2Q1S1())
         base = GSSParams.from_model(ModelGssK2Q1S1())
-        assert GSSFilter(nghmsm).mode == "h5_exact"
-        assert GSSFilter(base).mode == "imm_general"
+        assert GSSFilter(nghmsm).mode == "ngh_kf"
+        assert GSSFilter(base).mode == "gpb2"
 
     def test_simulator_matches_regime_conditional_law(self):
         """Empirically X_n | (r_n=k, y_n) = M_k y_n + ξ, Cov(ξ)=Γ_k (slaving)."""

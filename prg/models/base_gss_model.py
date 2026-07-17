@@ -102,7 +102,7 @@ class BaseGSSModel(ABC):
 
         NGH-MSM presets declare only the *free* blocks (C, D, Δ, Σ_V) and call
         this in ``get_params()`` so that A, B are **derived** — guaranteeing the
-        model satisfies the AB / (H5) constraint by construction (Proposition 2,
+        model satisfies the AB constraint by construction (Proposition 2,
         sufficiency), rather than relying on hand-entered A, B that may be
         inconsistent with it. Mirrors ``prg/experiments/models_paper.py``.
 
@@ -112,7 +112,7 @@ class BaseGSSModel(ABC):
         """
         import numpy as np
 
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         A_list, B_list = [], []
         for C, D, Dt, SV in zip(C_list, D_list, Delta_list, Sigma_V_list, strict=True):

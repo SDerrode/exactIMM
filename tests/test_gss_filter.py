@@ -55,13 +55,13 @@ def run_df(params):
 
 
 @pytest.fixture(scope="module")
-def non_h5_params(params) -> GSSParams:
-    """A model that deliberately violates (H5).
+def non_ab_params(params) -> GSSParams:
+    """A model that deliberately violates AB.
 
-    The reference preset is now (H5)-valid by construction (A, B are derived from
+    The reference preset is now AB-valid by construction (A, B are derived from
     (C, D, Δ, Σ_V) via the AB constraint), so these tests rebuild the original
-    non-(H5) blocks (A = 0.8 / 0.5, B = 0.1 / 0.3 — stable but off the AB
-    manifold) to exercise the h5_exact warning / bias path.
+    blocks violating AB (A = 0.8 / 0.5, B = 0.1 / 0.3 — stable but off the AB
+    manifold) to exercise the ngh_kf warning / bias path.
     """
     from prg.classes.FMatrix import FMatrix
 
@@ -342,7 +342,7 @@ class TestStatisticalSanity:
         On a long run, both regimes must receive non-trivial probability
         at *some* time step (no permanent collapse to a single regime).
 
-        Note: under the exact-IMM-under-(H5) formulation, the per-step
+        Note: under the exact-IMM-under-AB formulation, the per-step
         ``p_r_0`` can be very confident (close to 0 or 1) when the
         observation strongly identifies the active regime. This test
         therefore checks that the *trajectory* visits both regimes,
@@ -394,14 +394,14 @@ class TestOptionB:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.filterwarnings("ignore:mode='h5_exact'.*:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:mode='ngh_kf'.*:RuntimeWarning")
 class TestJosephForm:
-    """Joseph form is mathematically equivalent under stationarity (h5_exact mode)."""
+    """Joseph form is mathematically equivalent under stationarity (ngh_kf mode)."""
 
     def test_joseph_constructor(self, params):
         """The joseph flag is exposed via constructor and property."""
-        f_short = GSSFilter(params, mode="h5_exact")
-        f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
+        f_short = GSSFilter(params, mode="ngh_kf")
+        f_joseph = GSSFilter(params, joseph=True, mode="ngh_kf")
         assert f_short.joseph is False
         assert f_joseph.joseph is True
         assert "joseph=True" in repr(f_joseph)
@@ -412,8 +412,8 @@ class TestJosephForm:
         per-regime posterior covariance (the centred Schur complement is
         the same matrix, computed two different ways).
         """
-        f_short = GSSFilter(params, mode="h5_exact")
-        f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
+        f_short = GSSFilter(params, mode="ngh_kf")
+        f_joseph = GSSFilter(params, joseph=True, mode="ngh_kf")
         for k in range(params.K):
             assert np.allclose(f_short._P_post[k], f_joseph._P_post[k], atol=1e-9), (
                 f"Joseph vs short form mismatch for regime k={k}"
@@ -427,8 +427,8 @@ class TestJosephForm:
         """
         rng = np.random.default_rng(2024)
         ys = [rng.standard_normal((params.s, 1)) for _ in range(50)]
-        f_short = GSSFilter(params, mode="h5_exact")
-        f_joseph = GSSFilter(params, joseph=True, mode="h5_exact")
+        f_short = GSSFilter(params, mode="ngh_kf")
+        f_joseph = GSSFilter(params, joseph=True, mode="ngh_kf")
         for y in ys:
             r_s = f_short.step(y)
             r_j = f_joseph.step(y)
@@ -437,7 +437,7 @@ class TestJosephForm:
 
     def test_joseph_psd(self, params):
         """Joseph posterior covariance must be PSD by construction."""
-        filt = GSSFilter(params, joseph=True, mode="h5_exact")
+        filt = GSSFilter(params, joseph=True, mode="ngh_kf")
         rng = np.random.default_rng(99)
         for _ in range(30):
             y = rng.standard_normal((params.s, 1))
@@ -447,28 +447,28 @@ class TestJosephForm:
 
 
 # ---------------------------------------------------------------------------
-# Stationary moments (precomputation, h5_exact mode only)
+# Stationary moments (precomputation, ngh_kf mode only)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.filterwarnings("ignore:mode='h5_exact'.*:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:mode='ngh_kf'.*:RuntimeWarning")
 class TestStationaryMoments:
     """The pre-computed stationary moments satisfy the fixed-point equation."""
 
     def test_closed_form_moments_equal_fixed_point(self):
         """Proposition 4 (direct form): for an AB-constrained model the closed-form
         regime gain ``M_k = Δ_k Σ_V_k⁻¹`` and covariance
-        ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T`` — used by ``mode='h5_exact'`` for a
+        ``Γ_k = Σ_U_k − Δ_k Σ_V_k⁻¹ Δ_k^T`` — used by ``mode='ngh_kf'`` for a
         validated NGH-MSM (:mod:`prg.filter.gss_filter`) — coincide with the gain
         and posterior built from the fixed-point stationary moments,
         ``K_k = Σ_XY(k) Σ_YY(k)⁻¹`` and ``Σ_XX(k) − K_k Σ_YY(k) K_k^T``. This is
         the numerical check that the Riccati fixed-point machinery is redundant
         under the AB constraint, so the closed forms can replace it exactly.
         """
-        from prg.utils.h5_constraint import apply_AB_constraint
+        from prg.utils.ab_constraint import apply_AB_constraint
 
         ab = apply_AB_constraint(GSSParams.from_model(ModelGssK2Q1S1()))
-        f = GSSFilter(ab, mode="h5_exact")
+        f = GSSFilter(ab, mode="ngh_kf")
         for k in range(ab.K):
             Sxy, Syy, Sxx = f._S_XY[k], f._S_YY[k], f._S_XX[k]
             Kg = Sxy @ np.linalg.inv(Syy)  # fixed-point Kalman gain
@@ -477,7 +477,7 @@ class TestStationaryMoments:
             np.testing.assert_allclose(ab.noise_cov.Gamma(k), Ppost, rtol=1e-6, atol=1e-9)
 
     def test_stationary_distribution_exposed(self, params):
-        filt = GSSFilter(params, mode="h5_exact")
+        filt = GSSFilter(params, mode="ngh_kf")
         pi_inf = filt.stationary_distribution
         assert pi_inf.shape == (params.K,)
         assert abs(pi_inf.sum() - 1.0) < 1e-12
@@ -485,13 +485,13 @@ class TestStationaryMoments:
 
     def test_stationary_distribution_invariant(self, params):
         """π_∞ P = π_∞."""
-        filt = GSSFilter(params, mode="h5_exact")
+        filt = GSSFilter(params, mode="ngh_kf")
         pi_inf = filt.stationary_distribution
         assert np.allclose(pi_inf @ params.P, pi_inf, atol=1e-10)
 
     def test_mu_fixed_point(self, params):
         """µ(k) = F_k Σ_j p_rev[j,k] µ(j) + b_k."""
-        filt = GSSFilter(params, mode="h5_exact")
+        filt = GSSFilter(params, mode="ngh_kf")
         K = params.K
         for k in range(K):
             F = params.f_matrix.F(k)
@@ -506,58 +506,76 @@ class TestStationaryMoments:
 
 
 class TestFilterModes:
-    """GSSFilter dispatches between 'imm_general' (default) and 'h5_exact'."""
+    """GSSFilter dispatches between 'gpb2' (default) and 'ngh_kf'."""
 
-    def test_default_mode_is_imm_general(self, params):
+    def test_default_mode_is_gpb2(self, params):
         filt = GSSFilter(params)
-        assert filt.mode == "imm_general"
-        assert "mode='imm_general'" in repr(filt)
+        assert filt.mode == "gpb2"
+        assert "mode='gpb2'" in repr(filt)
 
-    def test_explicit_h5_exact(self, params):
+    def test_explicit_ngh_kf(self, params):
         import warnings
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            filt = GSSFilter(params, mode="h5_exact")
-        assert filt.mode == "h5_exact"
+            filt = GSSFilter(params, mode="ngh_kf")
+        assert filt.mode == "ngh_kf"
 
-    def test_h5_warns_on_non_h5_model(self, non_h5_params):
-        """A model off the AB manifold violates (H5), so h5_exact must warn."""
+    def test_ab_warns_on_non_ab_model(self, non_ab_params):
+        """A model off the AB manifold violates AB, so ngh_kf must warn."""
         import warnings
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")
-            GSSFilter(non_h5_params, mode="h5_exact")
+            GSSFilter(non_ab_params, mode="ngh_kf")
         runtime_ws = [w for w in ws if issubclass(w.category, RuntimeWarning)]
         assert len(runtime_ws) >= 1
         assert "B(k)" in str(runtime_ws[0].message)
 
-    def test_imm_general_no_warning(self, params):
+    def test_gpb2_no_warning(self, params):
         import warnings
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")
-            GSSFilter(params, mode="imm_general")
-        # imm_general must not emit the (H5) warning
-        h5_ws = [
-            w for w in ws if issubclass(w.category, RuntimeWarning) and "h5_exact" in str(w.message)
+            GSSFilter(params, mode="gpb2")
+        # gpb2 must not emit the AB warning
+        ab_ws = [
+            w for w in ws if issubclass(w.category, RuntimeWarning) and "ngh_kf" in str(w.message)
         ]
-        assert h5_ws == []
+        assert ab_ws == []
 
     def test_unknown_mode_raises(self, params):
         with pytest.raises(ValueError, match="Unknown mode"):
             GSSFilter(params, mode="nope")
 
-    def test_imm_general_matches_pre_v0_10_behavior(self, non_h5_params):
-        """
-        imm_general on a non-(H5) model should track the true state well
-        (MSE much smaller than h5_exact's biased estimate).
+    def test_gpb2_beats_ngh_kf_off_ab(self, non_ab_params):
+        """Off the AB manifold, gpb2 tracks the exact posterior and ngh_kf cannot.
+
+        The criterion is the deviation from the brute-force K^N posterior, not the
+        MSE against the true state: on a single short run the latter is dominated
+        by process noise and separates nothing (both land near 0.23 here, and the
+        AB-assuming filter can even come out marginally ahead by luck). Against the
+        exact posterior the gap is unambiguous — ~5e-5 versus ~1.6e-1.
         """
         import warnings
 
-        _, df_gen = GSSFilter(non_h5_params, mode="imm_general").run(N=300, seed=11)
+        from prg.classes.GSSSimulator import GSSSimulator
+        from prg.experiments.reference_filters import exact_mixture_filter, with_stationary_init
+
+        params = with_stationary_init(non_ab_params)
+        n = 12  # K^N enumeration: keep it tiny
+        ys = np.array([t[-1] for t in GSSSimulator(params, N=n, seed=11)]).reshape(n, -1)
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            _, df_h5 = GSSFilter(non_h5_params, mode="h5_exact").run(N=300, seed=11)
-        # On a non-(H5) model, imm_general should have strictly lower MSE.
-        assert df_gen["sq_err"].mean() < df_h5["sq_err"].mean()
+            E_exact, _, _ = exact_mixture_filter(params, ys)
+            f_gpb2 = GSSFilter(params, mode="gpb2")
+            E_gpb2 = np.array([f_gpb2.step(y.reshape(-1, 1)).E_x.ravel() for y in ys])
+            f_ngh = GSSFilter(params, mode="ngh_kf")
+            E_ngh = np.array([f_ngh.step(y.reshape(-1, 1)).E_x.ravel() for y in ys])
+
+        ref = np.asarray(E_exact).reshape(n, -1)
+        dev_gpb2 = float(np.abs(E_gpb2 - ref).max())
+        dev_ngh = float(np.abs(E_ngh - ref).max())
+        assert dev_gpb2 < 1e-3, f"gpb2 should stay near the exact posterior: {dev_gpb2:.2e}"
+        assert dev_gpb2 < 0.01 * dev_ngh, f"gpb2 {dev_gpb2:.2e} vs ngh_kf {dev_ngh:.2e}"

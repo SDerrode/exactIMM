@@ -4,8 +4,8 @@ tests/test_reference_filters.py
 ===============================
 Guards the ground-truth filters of the simulation study. The exact
 hypothesis-tree filter is the reference against which the paper's claim of
-exactness is checked, so it must itself be correct: on an (H5)/AB model it has to
-agree with ``GSSFilter`` mode ``h5_exact`` to floating-point precision.
+exactness is checked, so it must itself be correct: on an AB/AB model it has to
+agree with ``GSSFilter`` mode ``ngh_kf`` to floating-point precision.
 """
 
 from __future__ import annotations
@@ -39,15 +39,15 @@ def _data(params, N, seed):
 
 
 @pytest.mark.parametrize("name,N", [("M1", 8), ("M2", 7), ("M3", 6)])
-def test_exact_mixture_equals_h5_exact(name, N):
-    """On an AB model, the exact Bayesian filter coincides with h5_exact."""
+def test_exact_mixture_equals_ngh_kf(name, N):
+    """On an AB model, the exact Bayesian filter coincides with ngh_kf."""
     params = with_stationary_init(_params_from_dict(get_params(name)))
     _, ys = _data(params, N, seed=1)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        filt = GSSFilter(params, mode="h5_exact")
+        filt = GSSFilter(params, mode="ngh_kf")
         ExH = np.array([filt.step(y.reshape(-1, 1)).E_x.ravel() for y in ys])
-        filt2 = GSSFilter(params, mode="h5_exact")
+        filt2 = GSSFilter(params, mode="ngh_kf")
         PiH = np.array([np.asarray(filt2.step(y.reshape(-1, 1)).pi).ravel() for y in ys])
     ExE, _VarE, PiE = exact_mixture_filter(params, ys)
     assert np.abs(ExH - ExE).max() < 1e-9
@@ -72,9 +72,9 @@ def test_oracle_beats_single_kalman():
 
 def test_rank_deficient_model_is_valid_and_exact():
     """E7: with a rank-deficient C (s < q, full column rank impossible), the model
-    is still a valid NGH-MSM and h5_exact still equals the exact Bayesian filter."""
+    is still a valid NGH-MSM and ngh_kf still equals the exact Bayesian filter."""
     from prg.experiments.study import rank_deficient_model
-    from prg.utils.h5_constraint import validate_ngh_msm
+    from prg.utils.ab_constraint import validate_ngh_msm
 
     params = rank_deficient_model()
     assert params.s < params.q  # under-observed: C cannot be full column rank
@@ -84,9 +84,9 @@ def test_rank_deficient_model_is_valid_and_exact():
     _, ys = _data(params, N=9, seed=11)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        filt = GSSFilter(params, mode="h5_exact")
+        filt = GSSFilter(params, mode="ngh_kf")
         ExH = np.array([filt.step(y.reshape(-1, 1)).E_x.ravel() for y in ys])
-        filt2 = GSSFilter(params, mode="h5_exact")
+        filt2 = GSSFilter(params, mode="ngh_kf")
         PiH = np.array([np.asarray(filt2.step(y.reshape(-1, 1)).pi).ravel() for y in ys])
     ExE, _VarE, PiE = exact_mixture_filter(params, ys)
     assert np.abs(ExH - ExE).max() < 1e-9
@@ -113,7 +113,7 @@ def test_baseline_output_contract(filt):
 
 @pytest.mark.parametrize("name,N", [("M1", 8), ("M2", 7), ("M3", 7)])
 def test_gpb2_equals_exact_on_ab_model(name, N):
-    """On an AB/(H5) model the regime-conditional posterior depends only on the
+    """On an AB/AB model the regime-conditional posterior depends only on the
     current regime (marginal Markovianity, Prop. 4), so GPB2's K-hypothesis
     collapse is lossless: it coincides with the exact Kᴺ filter."""
     params = with_stationary_init(_params_from_dict(get_params(name)))

@@ -1,11 +1,11 @@
 # Reproducing the paper experiments
 
-The paper has two empirical sections:
+The paper's experiments, plus a companion real-data study that is no longer part of it:
 
 | Section | Content | Wall time | Script |
 |---|---|---|---|
 | §6 | Monte-Carlo simulation study (M1, M2, M3 reference models) | ~20 h total (EM-dominated) | `prg.experiments.run_simulations` + `run_supervised` + `run_em` |
-| §7 | ENSO real-data experiment (K=3 regimes, NOAA SST) | ~1 min | `prg.experiments.run_real_data` |
+| — | ENSO real-data study (K=3 regimes, NOAA SST) — **companion, not in the paper**: the current paper's real-data section is the vehicle-dynamics study | ~1 min | `prg.experiments.run_real_data` |
 
 All scripts are deterministic given a fixed `--seed`.
 
@@ -55,7 +55,7 @@ python -m prg.experiments.fill_placeholders
 `fill_placeholders` substitutes numerical `\ph{…}` macros in
 `paper/sections/06_experiments.tex` with the values just computed.
 
-## §7 — ENSO real-data experiment
+## ENSO real-data study (companion, not in the paper)
 
 ```bash
 # (Only needed if data/real/enso_sst.csv is missing or stale)
@@ -69,7 +69,7 @@ python -m prg.experiments.make_figures_real
 ```
 
 `run_real_data` writes:
-- `paper/figures/generated/tab_enso_h5_test.tex`  (E1)
+- `paper/figures/generated/tab_enso_ab_test.tex`  (E1)
 - `paper/figures/generated/tab_enso_filter.tex`   (E2)
 - `paper/figures/generated/tab_enso_em.tex`       (E3)
 - `results/enso/{e1,e2,e3}_table.json`            (raw numbers, JSON)
@@ -85,7 +85,7 @@ If you run the scripts as shipped (default seed 42), you should get
 the values printed in the paper, typically reproducible to 3–4
 significant digits. The most distinctive results:
 
-### §7 / E1 (H5 empirical test on ENSO)
+### E1 (AB empirical test on ENSO)
 
 | Regime | n_k | ‖B‖_F | p-value (H₀: B=0) |
 |---|---|---|---|
@@ -93,47 +93,66 @@ significant digits. The most distinctive results:
 | Neutral | 336 | 0.0460 | **0.372** |
 | El Niño | 197 | 0.0261 | **0.664** |
 
-→ (H5) is *not* rejected on this dataset.
+→ AB is *not* rejected on this dataset.
 
-### §7 / E2 (filter comparison)
+### E2 (filter comparison)
+
+Regenerated with v2.0.0; these are the values in `results/enso/e2_table.json`.
 
 | Filter | logL test | MSE X |
 |---|---|---|
-| **H5-exact (H5 fit)** | **−20.56** | 0.69 |
-| IMM-general (OLS fit) | −32.38 | 0.54 |
-| IMM-general (H5 fit)  | −31.55 | 0.81 |
-| Kalman K=1            | −24.26 | 0.47 |
+| Kalman K=1 | **−24.26** | **0.467** |
+| GPB2 (OLS fit) | −24.85 | 0.577 |
+| GPB2 (AB fit) | −29.80 | 0.645 |
+| NGH-MSM-KF (AB fit) | −30.09 | 0.644 |
 
-→ H5-exact achieves the best test log-likelihood, as predicted by theory.
+→ On ENSO the constant-gain NGH-MSM-KF does **not** win, and there is no reason it
+should: this dataset is not an NGH-MSM, so the AB constraint the filter assumes is
+misspecified, and a plain regime-blind Kalman filter comes out ahead on both test
+log-likelihood and MSE. GPB2, which does not assume AB, sits in between — as
+expected. The exactness claims of the paper are established on models that *are*
+NGH-MSMs (see the paper's §VI); this study probes what happens when they are not.
 
-### §7 / E3 (EM variants)
+*(Before v2.0.0 this table reported −20.56 for the constant-gain filter and
+concluded that it "achieves the best test log-likelihood, as predicted by theory".
+That number matched no reproducible run — the committed `e2_table.json` already
+said −30.09 — and the conclusion was the opposite of what the data shows.)*
 
-| Variant | train logL | test logL | MSE X |
-|---|---|---|---|
-| V0 unconstrained | −437.4 | −32.21 | 0.42 |
-| V1 post-hoc τ=B  | −437.4 | −34.06 | 0.41 |
-| V2 post-hoc τ=A† | −437.4 | **diverges** | **diverges** |
-| V3 GEM τ=B       | −441.4 | −31.21 | 0.42 |
+### E3 (EM variants)
 
-→ V2 fails for the same numerical reason as in simulation (§6.3): the
-G matrix is ill-conditioned. V0/V1/V3 are essentially equivalent,
-confirming that the H5 projection is benign on data compatible with (H5).
+Regenerated with v2.0.0 (`results/enso/e3_table.json`, seed 42, 5 restarts,
+50 iterations). The pipeline runs **three** variants, not four.
+
+| Variant | train logL | test logL | MSE X | regime acc. |
+|---|---|---|---|---|
+| V0 unconstrained | −437.4 | +0.26 | 0.414 | 0.484 |
+| V1 post-hoc AB | −437.4 | +0.34 | 1.066 | 0.500 |
+| V2 GEM AB | −1482.1 | −21.70 | 0.664 | 0.418 |
+
+→ V0 and V1 reach the same training likelihood, so the *post-hoc* AB projection is
+benign on this dataset — consistent with E1, where AB is not rejected. Enforcing AB
+at every M-step (V2) is a different matter: it costs ~1000 nats of training
+likelihood and degrades every test metric, because the constraint is imposed
+throughout the optimisation rather than at the end. None of the three separates the
+regimes (accuracy ≈ 0.42–0.50 for K=3, i.e. at or below chance): recovering an
+NGH-MSM from data is the open identifiability problem the paper's conclusion flags
+as future work, not a solved one.
 
 ## Recompiling the paper
 
-The paper sources are *not* in the public repo (gitignored), but with
-a local copy:
+The paper sources are *not* in the public repo (gitignored). With a local copy in
+`docs/NGH-MSM_V2/`:
 
 ```bash
-cd paper
-pdflatex paper && bibtex paper && pdflatex paper && pdflatex paper
+cd docs/NGH-MSM_V2
+pdflatex main && biber main && pdflatex main && pdflatex main
 ```
 
-You should obtain a 26-page PDF.
+The figures it uses are regenerated by `python -m prg.experiments.make_paper_figures`.
 
 ## Why are some `*.csv` not in the repo?
 
 The MC simulation outputs (`data/experiments/*.csv`, ~1 MB) are
 **regenerable** in a few hours and are excluded from the repository
 to keep clones small. Only the small ENSO files (`data/real/*`) and
-some §7 outputs (`results/enso/regime_trace.csv`) are versioned.
+some ENSO outputs (`results/enso/regime_trace.csv`) are versioned.

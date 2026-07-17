@@ -61,7 +61,7 @@ PRESETS: list[PresetEntry] = [
         s=2,
     ),
     # NOTE: the K=2, q=2, s=1 model is not offered as a preset. Its raw blocks are
-    # not AB-constrained, so it is not a valid NGH-MSM (the AB / (H5) residual is
+    # not AB-constrained, so it is not a valid NGH-MSM (the AB residual is
     # nonzero). Note that s < q (rank-deficient C) is NOT itself a defect: an
     # AB-constrained s < q model IS a valid NGH-MSM (the full-column-rank condition
     # was an over-restriction). The file model_gss_K2_q2_s1.py is kept as a test

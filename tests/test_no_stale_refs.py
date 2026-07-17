@@ -3,7 +3,7 @@
 tests/test_no_stale_refs.py
 ===========================
 Lint test that fails if any source file references an obsolete name
-from before the v0.13.0 (H5)-AB-constraint refactor. Prevents
+from before the v0.13.0 AB-AB-constraint refactor. Prevents
 copy-paste regressions of removed API symbols, removed CLI flags, or
 old equation labels.
 
@@ -41,7 +41,7 @@ _FORBIDDEN_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
         "compute_C_from_h5",
         "removed; C is fully free under the AB constraint",
     ),
-    (re.compile(r"\bapply_h5_constraint\b"), "apply_h5_constraint", "use apply_AB_constraint"),
+    (re.compile(r"\bapply_ab_constraint\b"), "apply_ab_constraint", "use apply_AB_constraint"),
     # Removed v0.12 → v0.13 (Lehmann naming)
     (re.compile(r"\bcompute_AB_lehmann\b"), "compute_AB_lehmann", "use compute_AB"),
     (
@@ -61,14 +61,25 @@ _FORBIDDEN_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
         "eq. (4.4) / (4.8) / (4.20)",
         "the constraint is eq:H5_compact + eq:AB",
     ),
+    # Removed v1.1.1 → v2.0.0: filter modes renamed, no aliases
+    (re.compile(r"\bimm_general\b"), "imm_general", "removed; use mode='gpb2'"),
+    (re.compile(r"\bh5_exact\b"), "h5_exact", "use mode='ngh_kf'"),
+    # Removed v1.1.1 → v2.0.0: the internal (H5) alias for the AB constraint
+    (re.compile(r"\bh5_constraint\b"), "h5_constraint", "the module is prg.utils.ab_constraint"),
+    (re.compile(r"\bcompute_h5_residual\b"), "compute_h5_residual", "use compute_ab_residual"),
+    (re.compile(r"\bh5_residual_max\b"), "h5_residual_max", "use ab_residual_max"),
+    (re.compile(r"\bH5_TOL\b"), "H5_TOL", "use AB_TOL"),
 ]
 
 # Files where matches are acceptable (historical / external docs).
 # Paths are repo-relative and matched as substrings.
 _WHITELIST: tuple[str, ...] = (
     "tests/test_no_stale_refs.py",  # this test
-    "CHANGELOG.md",  # historical v0.12.0 entry
+    "CHANGELOG.md",  # historical v0.12.0 and v2.0.0 entries
     "audit/",  # the 2026-06 audit documents the old API names / Lehmann proof verbatim
+    # Names the removed v2.0.0 mode on purpose, to explain why the two modes no
+    # longer agree away from stationarity.
+    "tests/test_filter_modes.py",
 )
 
 

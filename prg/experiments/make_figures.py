@@ -11,13 +11,13 @@ Writes ``paper/figures/generated/*.pdf``  (one file per figure)
 
 Figures produced
 ----------------
-fig_rmse_vs_N.pdf   RMSE vs N (log-log) for M1, comparing h5_exact and
-                    imm_general (Fig. 1 of §6.2).
+fig_rmse_vs_N.pdf   RMSE vs N (log-log) for M1, comparing ngh_kf and
+                    gpb2 (Fig. 1 of §6.2).
 
 Tables produced (LaTeX row fragments)
 --------------------------------------
 tab_filter_M1.tex   Rows for Table 2 (M1 filter benchmark):
-                    N | RMSE h5 | NEES h5 | LB h5 | CPU h5 ||
+                    N | RMSE ngh_kf | NEES ngh_kf | LB ngh_kf | CPU ngh_kf ||
                         RMSE imm | NEES imm | LB imm | CPU imm
 tab_filter_M2M3.tex Rows for Table 3 (M2/M3 filter benchmark, N=2000).
 tab_bic.tex         Rows for Table 7 (BIC model selection on M1).
@@ -76,16 +76,16 @@ DEFAULT_FIG_DIR = REPO_ROOT / "paper" / "figures" / "generated"
 # ---------------------------------------------------------------------------
 
 COLORS = {
-    "h5_exact": "#1f77b4",  # blue
-    "imm_general": "#ff7f0e",  # orange
+    "ngh_kf": "#1f77b4",  # blue
+    "gpb2": "#ff7f0e",  # orange
 }
 MARKERS = {
-    "h5_exact": "o",
-    "imm_general": "s",
+    "ngh_kf": "o",
+    "gpb2": "s",
 }
 MODE_LABELS = {
-    "h5_exact": r"H5-exact",
-    "imm_general": r"IMM-general",
+    "ngh_kf": r"NGH-MSM-KF",
+    "gpb2": r"IMM-general",
 }
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def make_fig_rmse_vs_N(
     """
     RMSE vs sequence length N (log–log) for model M1.
 
-    One curve per filter mode (h5_exact, imm_general) with
+    One curve per filter mode (ngh_kf, gpb2) with
     ± 1 standard error shading.
     """
     if not _HAS_MPL:
@@ -127,7 +127,7 @@ def make_fig_rmse_vs_N(
 
     fig, ax = plt.subplots(figsize=(4.5, 3.2))
 
-    for mode in ("h5_exact", "imm_general"):
+    for mode in ("ngh_kf", "gpb2"):
         means, sems, xs = [], [], []
         for N in N_vals:
             vals = sub[(sub["N"] == N) & (sub["mode"] == mode)]["rmse"].dropna()
@@ -214,7 +214,7 @@ def make_tab_filter(
 
     def _data_row(sub: pd.DataFrame, label: str = "") -> str:
         parts = [label] if label else []
-        for mode in ("h5_exact", "imm_general"):
+        for mode in ("ngh_kf", "gpb2"):
             g = sub[sub["mode"] == mode]
             if g.empty:
                 parts += ["---"] * 4
@@ -231,7 +231,7 @@ def make_tab_filter(
             ]
         return "    " + " & ".join(parts) + r" \\"
 
-    two_method_header = r"& \multicolumn{4}{c}{H5-exact} & \multicolumn{4}{c}{IMM-approx}"
+    two_method_header = r"& \multicolumn{4}{c}{NGH-MSM-KF} & \multicolumn{4}{c}{GPB2}"
     col_header = (
         r"$N$ / Model & RMSE & NEES & LB\% & CPU($\mu$s) "
         r"& RMSE & NEES & LB\% & CPU($\mu$s)"
@@ -300,7 +300,7 @@ def make_tab_bic(
 ) -> pathlib.Path:
     """
     BIC rows for Table 7: for model M1 at N=2000, compare BIC when
-    fitting H5-GSS(K,q=1,s=1) for K in {1,2,3,4} (using h5_exact mode
+    fitting AB-GSS(K,q=1,s=1) for K in {1,2,3,4} (using ngh_kf mode
     results; the true K=2 should have the lowest mean BIC).
 
     Note: the BIC here comes from the *true* K=2 filter log-likelihood
@@ -309,22 +309,22 @@ def make_tab_bic(
     each K.  We include it as a table-format placeholder; the values will
     be replaced by EM-based BICs once §6.4 is implemented.
     """
-    from prg.experiments.metrics import dof_h5
+    from prg.experiments.metrics import dof_ab
 
     fig_dir.mkdir(parents=True, exist_ok=True)
     out = fig_dir / "tab_bic.tex"
 
-    # Use h5_exact log-likelihoods at N=2000
-    sub = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "h5_exact")]
+    # Use ngh_kf log-likelihoods at N=2000
+    sub = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "ngh_kf")]
     N_val = 2000
     q, s = 1, 1
 
     lines = []
     for K_test in (1, 2, 3, 4):
         # Re-penalise the log-lik with the DOF of K_test-regime model
-        # (K_test=1 is handled specially: dof_h5 requires K>=2 so use K=1 manually)
+        # (K_test=1 is handled specially: dof_ab requires K>=2 so use K=1 manually)
         if K_test >= 2:
-            d = dof_h5(K_test, q, s)
+            d = dof_ab(K_test, q, s)
         else:
             # K=1: A(q²)+C(qs)+Sigma_W((q+s)(q+s+1)/2)+b(q+s), K²-1=0
             d = 1 * (q**2 + q * s + (q + s) * (q + s + 1) // 2 + (q + s)) + 0
@@ -443,7 +443,7 @@ def make_tab_supervised(
 ) -> pathlib.Path:
     """
     Complete LaTeX table environment for Table 4 (tab:supervised_M1):
-    relative F error and H5 residual for each projection × N.
+    relative F error and AB residual for each projection × N.
 
     Generated file is a self-contained ``\\begin{table}...\\end{table}``
     block (use ``\\input`` from outside any tabular environment).
@@ -463,11 +463,11 @@ def make_tab_supervised(
         for N in N_cols:
             g = sub[sub["N"] == N]["rel_err_F"].dropna()
             parts.append(_fmt(g.mean()) if len(g) else r"\text{---}")
-        # H5 residual at largest N
-        g_h5 = sub[sub["N"] == max(N_cols)]["h5_residual"].dropna()
-        med_h5 = float(g_h5.median()) if len(g_h5) else float("nan")
-        if np.isfinite(med_h5) and med_h5 > 0:
-            exp = int(np.floor(np.log10(med_h5)))
+        # AB residual at largest N
+        g_ab = sub[sub["N"] == max(N_cols)]["ab_residual"].dropna()
+        med_ab = float(g_ab.median()) if len(g_ab) else float("nan")
+        if np.isfinite(med_ab) and med_ab > 0:
+            exp = int(np.floor(np.log10(med_ab)))
             parts.append(f"$10^{{{exp}}}$")
         else:
             parts.append(r"\text{---}")
@@ -483,8 +483,8 @@ def make_tab_supervised(
         r" Columns: relative Frobenius error"
         r" $\|\hat F_k - F_k\|_F / \|F_k\|_F$ (mean, averaged over"
         r" the two regimes $k=1,2$), for $N \in \{200, 500, 2000\}$,"
-        r" and median H5 residual at $N=2\,000$."
-        r" The AB constraint reduces the H5 residual to machine precision"
+        r" and median AB residual at $N=2\,000$."
+        r" The AB constraint reduces the AB residual to machine precision"
         r" by construction."
     )
     lbl = "tab:supervised_M1"
@@ -499,7 +499,7 @@ def make_tab_supervised(
         r"    \toprule",
         (
             r"    & \multicolumn{" + str(n_N) + r"}{c}"
-            r"{Rel.\ error $\|\hat F - F\|_F/\|F\|_F$} & H5 resid. \\"
+            r"{Rel.\ error $\|\hat F - F\|_F/\|F\|_F$} & AB resid. \\"
         ),
         r"    \cmidrule(lr){2-" + str(cmidrule_end) + "}",
         r"    Setting & " + col_N_hdrs + r" & ($N=2\,000$) \\",
@@ -858,7 +858,7 @@ def make_all(
     else:
         print(f"\nLoading supervised results: {supervised_path}")
         df_sup = pd.read_csv(supervised_path)
-        for c in ("rel_err_F", "rel_err_b", "h5_residual", "rmse_estimated", "rmse_oracle"):
+        for c in ("rel_err_F", "rel_err_b", "ab_residual", "rmse_estimated", "rmse_oracle"):
             df_sup[c] = pd.to_numeric(df_sup[c], errors="coerce")
         print(f"  {len(df_sup)} rows")
         print(f"Generating §6.3 outputs → {fig_dir}/")

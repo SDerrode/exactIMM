@@ -2,14 +2,16 @@
 """
 prg/filter/gss_filter.py
 ========================
-IMM-style optimal filter for the GSS model with two operating modes.
+Switching filter for the GSS model, with two operating modes.
 
 Modes
 -----
 
-``mode="h5_exact"`` — exact IMM recursion under hypothesis (H5)
-    Under (H5) the mode-conditional state posterior collapses on the
-    current regime and observation alone:
+``mode="ngh_kf"`` — exact constant-gain filter under the AB constraint
+    Under the AB constraint A(k) = Δ(k) Σ_V(k)⁻¹ C(k), B(k) = Δ(k) Σ_V(k)⁻¹ D(k)
+    (see :mod:`prg.utils.ab_constraint`), the state is slaved to the current
+    observation, so the mode-conditional posterior collapses on the current
+    regime and observation alone:
 
         p(X_{n+1} | r_{n+1}, y_{1:n+1}) = p(X_{n+1} | r_{n+1}, y_{n+1})
 
@@ -18,10 +20,9 @@ Modes
         µ(k) := E[Z_n | r_n = k]          (constant in n under stationarity)
         P(k) := Var[Z_n | r_n = k]        (constant in n under stationarity)
 
-    are **observation-free** and depend only on the model parameters
-    and on the **stationary distribution π_∞** of the regime chain.
-    They are pre-computed once at filter construction. The recursion
-    then reduces to:
+    are **observation-free** and depend only on the model parameters and on the
+    **stationary distribution π_∞** of the regime chain. They are pre-computed
+    once at construction, so the recursion propagates no covariance:
 
       Step (I)   regime moments = pre-computed constants;
       Step (II)  mode-probability update via pair-conditional likelihoods;
@@ -29,48 +30,32 @@ Modes
                  moments of regime k;
       Step (IV)  combination using π_{n+1}(k).
 
-    This mode is mathematically exact under (H5), the algebraic constraint
+    Exact if and only if the AB constraint holds; a ``RuntimeWarning`` is
+    emitted at construction when the relative residual exceeds ``AB_TOL``.
 
-        Δ(k)ᵀ A(k)ᵀ + Σ_V(k) B(k)ᵀ = P(k) M(k)⁻¹ W(k),
+``mode="gpb2"`` — generalised pseudo-Bayesian, order 2
+    Keeps one Gaussian per current regime; each step expands to the K² regime
+    pairs (previous, current), runs K² exact-observation Kalman updates, then
+    collapses back to K by merging over the previous regime.
 
-    tying together all 7 parameter matrices (A, B, C, D, Σ_U, Σ_V, Δ) of
-    each regime. (H5) is **not** equivalent to B(k) = 0 — A(k) and B(k)
-    are determined together from (C, D, Δ, Σ_V) by the closed-form
-    "AB constraint" A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D;
-    see :mod:`prg.utils.h5_constraint`.
-    When (H5) is violated a ``RuntimeWarning`` is emitted at construction
-    (relative residual above ``H5_TOL``).
+    Exact whenever C(k) = 0 or A(k) = Δ(k) Σ_V(k)⁻¹ C(k) — a strictly larger
+    region than AB — and an approximation elsewhere, the only loss being the
+    depth-2 collapse. It carries K² Riccati updates per step, so unlike
+    ``ngh_kf`` its cost grows with the state dimension.
 
-``mode="imm_general"`` — IMM-style recursion, no (H5) required
-    The full F(k) = [[A_k, B_k], [C_k, D_k]] is used. Per-regime moments
-    µ_n(r), P_n(r) are propagated **at each step** following the recursion
-    of the companion paper CS_FinaleBis eqs (17ter), (17quater), (13')–(15),
-    (18), (21')–(22). This matches the behaviour of ``exactIMM ≤ v0.9.0``
-    and is appropriate for any GSS model, in particular non-(H5) models.
-
-    **IMM approximation note.** The paper's recursion (17ter)/(17quater)
-    uses the *prior* marginal p(r_n) to form the time-reversed transition
-    p(r_n | r_{n+1}).  This implementation instead uses the *filtered*
-    posterior π_n = p(r_n | y_{1:n}) — i.e.
-
-        p(r_n=j | r_{n+1}=k, y_{1:n})  ∝  π_n(j) · P(j, k)
-
-    which is the standard IMM heuristic and more responsive to the data.
-    Concretely this means µ_n(r), P_n(r) are *prior* (observation-free)
-    quantities propagated via the IMM mixing weights rather than the
-    unconditional marginals of the paper.  The difference is negligible
-    when the chain is near-stationary but can be significant in transient
-    regimes.  For the exact (H5)-optimal filter use ``mode="h5_exact"``.
+    This is the mode to use on any model that violates AB. It mirrors, step for
+    step, the batch reference implementation
+    :func:`prg.experiments.reference_filters.gpb2_filter`, against which it is
+    validated to machine precision.
 
 Default mode (``mode=None``)
 ---------------------------
 When ``mode`` is left ``None`` the filter dispatches on the *type* of
 ``params``: a :class:`~prg.classes.GSSParams.NGHMSMParams` (a validated
-NGH-MSM, where (H5) holds by construction) defaults to ``"h5_exact"``;
-any other :class:`GSSParams` defaults to ``"imm_general"`` (safe for
-general, possibly non-(H5) models). Pass ``mode`` explicitly to override.
+NGH-MSM, where AB holds by construction) defaults to ``"ngh_kf"``; any other
+:class:`GSSParams` defaults to ``"gpb2"``. Pass ``mode`` explicitly to override.
 
-Joseph form (optional, h5_exact only)
+Joseph form (optional, ngh_kf only)
 -------------------------------------
 The mode-conditional posterior covariance admits the standard short form
 
@@ -108,11 +93,11 @@ from prg.utils.input_signal import make_input
 
 __all__ = ["GSSFilter", "FilterResult"]
 
-FILTER_MODES = ("h5_exact", "imm_general")
-# Relative residual ‖F(k)‖_F / max(‖Z(k)‖_F, 1) of the (H5) constraint
-# F(k) = Z(k) − P(k) M(k)⁻¹ W(k) below this → (H5) holds. 1e-6 is the
+FILTER_MODES = ("ngh_kf", "gpb2")
+# Relative residual ‖F(k)‖_F / max(‖Z(k)‖_F, 1) of the AB constraint
+# F(k) = Z(k) − P(k) M(k)⁻¹ W(k) below this → AB holds. 1e-6 is the
 # practical floor for float64 matrix arithmetic.
-H5_TOL = 1e-6
+AB_TOL = 1e-6
 
 # log(2π), used by the fast Gaussian log-pdf (mirrors scipy's _LOG_2PI).
 _LOG_2PI = float(np.log(2.0 * np.pi))
@@ -167,47 +152,48 @@ class FilterResult:
 
 class GSSFilter:
     """
-    IMM-style optimal filter for GSS models.
+    Switching filter for GSS models.
 
     Parameters
     ----------
     params : GSSParams
         Validated model parameters.
     joseph : bool, default False
-        (Only used when ``mode="h5_exact"``.) If True, the mode-conditional
+        (Only used when ``mode="ngh_kf"``.) If True, the mode-conditional
         posterior covariance uses the Joseph form (paper App. E) instead of
         the short form. Mathematically equivalent under stationarity;
         numerically more stable.
-    mode : {"imm_general", "h5_exact"} or None, default None
+    mode : {"ngh_kf", "gpb2"} or None, default None
         Filter recursion variant. When ``None`` the mode dispatches on the
         type of ``params``: a :class:`~prg.classes.GSSParams.NGHMSMParams`
-        (validated NGH-MSM) uses ``"h5_exact"``, any other ``GSSParams``
-        uses ``"imm_general"``. An explicit value always overrides.
+        (validated NGH-MSM) uses ``"ngh_kf"``, any other ``GSSParams``
+        uses ``"gpb2"``. An explicit value always overrides.
 
-        * ``"imm_general"`` — IMM recursion with per-step
-          moment propagation; no (H5) requirement. Matches
-          ``exactIMM ≤ v0.9.0`` and is the correct choice for any GSS
-          model, in particular those that do not satisfy (H5).
-        * ``"h5_exact"`` — exact IMM under hypothesis (H5), with
-          stationary pre-computed regime moments. Requires (H5), i.e.
-          the (H5) algebraic constraint holds for every regime k;
-          emits a ``RuntimeWarning`` at construction when the relative
-          residual exceeds ``H5_TOL``. To enforce (H5) automatically,
-          use :func:`prg.utils.h5_constraint.apply_AB_constraint`,
-          which recomputes A(k), B(k) from (C, D, Δ, Σ_V) via the
-          closed form A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
+        * ``"ngh_kf"`` — exact constant-gain filter, with stationary
+          pre-computed regime moments and no covariance recursion, so its
+          per-step cost does not grow with the state dimension. Requires the
+          AB constraint for every regime k; emits a ``RuntimeWarning`` at
+          construction when the relative residual exceeds ``AB_TOL``. To
+          enforce AB automatically, use
+          :func:`prg.utils.ab_constraint.apply_AB_constraint`, which
+          recomputes A(k), B(k) from (C, D, Δ, Σ_V) via the closed form
+          A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
+        * ``"gpb2"`` — generalised pseudo-Bayesian order 2: K² regime-pair
+          Kalman updates per step, then a collapse back to K. Exact whenever
+          C(k) = 0 or A(k) = Δ(k) Σ_V(k)⁻¹ C(k); an approximation elsewhere.
+          Use it on any model that violates AB.
 
     Examples
     --------
-    Step-by-step, (H5)-exact::
+    Step-by-step on an AB model::
 
         filt = GSSFilter(params)                    # default mode dispatches on type(params)
         for y in observations:
             res = filt.step(y)
 
-    General IMM for a non-(H5) model::
+    GPB2 for a model that violates AB::
 
-        filt = GSSFilter(params, mode="imm_general")
+        filt = GSSFilter(params, mode="gpb2")
         sim_path, df = filt.run(N=1000, seed=42)
     """
 
@@ -220,76 +206,75 @@ class GSSFilter:
         from prg.classes.GSSParams import NGHMSMParams
 
         # Default mode dispatches on type: a validated NGH-MSM uses the exact
-        # filter; a general GSSParams uses the IMM approximation (see module
+        # constant-gain filter; a general GSSParams uses GPB2 (see module
         # docstring). An explicit mode always overrides.
         if mode is None:
-            mode = "h5_exact" if isinstance(params, NGHMSMParams) else "imm_general"
+            mode = "ngh_kf" if isinstance(params, NGHMSMParams) else "gpb2"
         if mode not in FILTER_MODES:
             raise ValueError(f"Unknown mode {mode!r}. Expected one of: {FILTER_MODES}.")
         self._p = params
         self._joseph = bool(joseph)
         self._mode = mode
 
-        if mode == "h5_exact":
-            # An NGHMSMParams already guarantees the (H5) / CNS precondition by
+        if mode == "ngh_kf":
+            # An NGHMSMParams already guarantees the AB / CNS precondition by
             # its type, so the residual recheck is redundant; only re-check
             # (and possibly warn) when handed a base GSSParams.
             if not isinstance(params, NGHMSMParams):
-                self._check_h5()
+                self._check_ab()
             self._precompute()  # calls _precompute_stationary() internally
         else:
-            # imm_general: no (H5) pre-computation; joseph flag is ignored
+            # gpb2: no AB pre-computation; joseph flag is ignored
             if self._joseph:
                 logger.warning(
-                    "joseph=True has no effect in mode='imm_general' "
+                    "joseph=True has no effect in mode='gpb2' "
                     "(the per-step posterior covariance is already PSD-floored)."
                 )
-            # Compute stationary moments so the filter can start at stationarity
-            self._precompute_stationary()
+            self._precompute_gpb2()
         self._reset_state()
 
     # ------------------------------------------------------------------
-    # (H5) check
+    # AB check
     # ------------------------------------------------------------------
 
-    def _check_h5(self) -> None:
-        """Emit a RuntimeWarning if (H5) is violated.
+    def _check_ab(self) -> None:
+        """Emit a RuntimeWarning if AB is violated.
 
-        (H5) — the Markovianity of (R, Y) — requires, for **every** ordered
+        AB — the Markovianity of (R, Y) — requires, for **every** ordered
         regime pair (j, k), that the regression of X_{n+1} on (Y_n, Y_{n+1})
         given (r_n=j, r_{n+1}=k) not load on Y_n. We evaluate the relative
         pairwise residual
 
             r(j, k) = ‖β₁(j, k)‖_F / ‖[β₁ β₂](j, k)‖_F
 
-        over all K² pairs and warn if  max_{j,k} r(j, k) > H5_TOL. (The
-        same-regime algebraic residual alone — compute_h5_residual — is
+        over all K² pairs and warn if  max_{j,k} r(j, k) > AB_TOL. (The
+        same-regime algebraic residual alone — compute_ab_residual — is
         necessary but **not** sufficient.)
         """
-        from prg.utils.h5_constraint import h5_residual_max
+        from prg.utils.ab_constraint import ab_residual_max
 
-        max_rel, (worst_j, worst_k) = h5_residual_max(self._p, relative=True)
+        max_rel, (worst_j, worst_k) = ab_residual_max(self._p, relative=True)
 
         if not np.isfinite(max_rel):
             warnings.warn(
-                f"mode='h5_exact': could not evaluate the (H5) residual for "
+                f"mode='ngh_kf': could not evaluate the AB residual for "
                 f"regime pair (j={worst_j}, k={worst_k}) — the conditional "
                 f"(Y_n, Y_{{n+1}}) covariance is singular. The filter may be "
-                f"biased. Use mode='imm_general' if in doubt.",
+                f"biased. Use mode='gpb2' if in doubt.",
                 RuntimeWarning,
                 stacklevel=3,
             )
             return
 
-        if max_rel > H5_TOL:
+        if max_rel > AB_TOL:
             warnings.warn(
-                f"mode='h5_exact' assumes (H5) — the Markovianity of (R, Y), "
+                f"mode='ngh_kf' assumes AB — the Markovianity of (R, Y), "
                 f"requiring that for every regime pair the predictive law of "
                 f"Y_{{n+1}} not depend on Y_n through X_n — but the model has "
                 f"max relative pairwise residual = {max_rel:.3g} (worst pair "
                 f"(j={worst_j}, k={worst_k})). The filter will be biased. Use "
-                f"mode='imm_general' for non-(H5) models, or apply "
-                f"prg.utils.h5_constraint.apply_AB_constraint to enforce (H5) "
+                f"mode='gpb2' for models violating AB, or apply "
+                f"prg.utils.ab_constraint.apply_AB_constraint to enforce AB "
                 f"by recomputing A(k), B(k) via the closed form "
                 f"A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.",
                 RuntimeWarning,
@@ -389,12 +374,12 @@ class GSSFilter:
         self._S_YY = [self._Sigma[k][q:, q:] for k in range(K)]
 
     # ------------------------------------------------------------------
-    # Pre-computation of IMM constants (h5_exact only)
+    # Pre-computation of IMM constants (ngh_kf only)
     # ------------------------------------------------------------------
 
     def _precompute(self) -> None:
         """
-        Pre-compute all IMM constants for mode='h5_exact': stationary moments
+        Pre-compute all IMM constants for mode='ngh_kf': stationary moments
         (via :meth:`_precompute_stationary`), per-regime Kalman gain, posterior
         covariance, and pair-conditional regime-update constants.
 
@@ -456,7 +441,7 @@ class GSSFilter:
         #
         # The pair-conditional predictive covariance Γ(j,k) is derived by
         # integrating out the filtered state X_n | (r_n=j, y_{1:n}) which,
-        # under (H5), is N(µ_X(j) + K_j(y_n − µ_Y(j)), P_post(j)):
+        # under AB, is N(µ_X(j) + K_j(y_n − µ_Y(j)), P_post(j)):
         #
         #   Var(Y_{n+1} | r_n=j, r_{n+1}=k, y_n) = C_k P_post(j) C_k^T + Σ_V(k)
         #
@@ -469,7 +454,7 @@ class GSSFilter:
         self._M_t: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         self._Gamma: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         # Pre-factorised Γ(j,k) for the fast per-step Gaussian log-pdf.
-        # These are time-invariant under (H5), so factorising them once here
+        # These are time-invariant under AB, so factorising them once here
         # avoids an eigen-decomposition on every (j,k) at every step.
         self._Gamma_prec: list[list[np.ndarray]] = [[None] * K for _ in range(K)]
         self._Gamma_lognorm: list[list[float]] = [[0.0] * K for _ in range(K)]
@@ -498,28 +483,26 @@ class GSSFilter:
 
     def _reset_state(self) -> None:
         """Reset the per-step dynamic state (pre-computed constants stay cached)."""
-        p = self._p
-        # Posterior regime weights — start at the stationary distribution π_∞
-        # (computed by _precompute_stationary(), called during __init__).
-        self._pi: np.ndarray = self._pi_inf.copy()
         # Previous observation — needed from step 1 onward
         self._y_prev: np.ndarray | None = None
         # Previous exogenous inputs: u_{n-1} drives the step-n transition/read-out;
-        # u_{n-2} enters the h5 regime likelihood via the slaved state X_{n-1}.
+        # u_{n-2} enters the ngh_kf regime likelihood via the slaved state X_{n-1}.
         self._u_prev: np.ndarray | None = None
         self._u_prev2: np.ndarray | None = None
         self._n: int = 0
         self._initialized: bool = False
 
-        # Mode-specific per-step moments (only used in mode="imm_general").
-        # Start at the stationary moments (from _precompute_stationary()).
-        if self._mode == "imm_general":
-            self._mu: list[np.ndarray] = [self._mu_z[k].copy() for k in range(p.K)]
-            self._P_z: list[np.ndarray] = [self._P_z_stat[k].copy() for k in range(p.K)]
-            # Per-regime posterior state covariance Var(X_n | r_n, y_{1:n}), persisted
-            # across steps: the transition innovation covariance reuses it (convolution
-            # of the read-out law). Seeded by _init_step_general.
-            self._var_x: list[np.ndarray] | None = None
+        if self._mode == "ngh_kf":
+            # Posterior regime weights start at the stationary distribution π_∞
+            # (computed by _precompute_stationary(), called during __init__).
+            self._pi: np.ndarray = self._pi_inf.copy()
+        else:  # "gpb2": start from the model's stated initial law
+            self._pi = self._pi_start.copy()
+            # Per-regime couple summaries N(z[k], Pc[k]), seeded by _init_step_gpb2.
+            self._z: list[np.ndarray] = []
+            self._Pc: list[np.ndarray] = []
+            # Observation pending in the current step, read by _kalman_y_update.
+            self._y_now: np.ndarray | None = None
 
     def reset(self) -> None:
         """Reset the filter to n = 0 (call before re-processing a sequence)."""
@@ -555,10 +538,10 @@ class GSSFilter:
         y = np.asarray(y, dtype=float).reshape(-1, 1)  # (s, 1)
         u = self._reshape_u(u)  # (p, 1) or None
 
-        if self._mode == "h5_exact":
-            init_fn, step_fn = self._init_step_h5, self._update_step_h5
-        else:  # "imm_general"
-            init_fn, step_fn = self._init_step_general, self._update_step_general
+        if self._mode == "ngh_kf":
+            init_fn, step_fn = self._init_step_ngh_kf, self._update_step_ngh_kf
+        else:  # "gpb2"
+            init_fn, step_fn = self._init_step_gpb2, self._update_step_gpb2
 
         if not self._initialized:
             result = init_fn(y)
@@ -585,7 +568,7 @@ class GSSFilter:
         return np.asarray(u, dtype=float).reshape(pdim, 1)
 
     # ==================================================================
-    # MODE = "h5_exact" — exact IMM under hypothesis (H5)
+    # MODE = "ngh_kf" — exact IMM under the AB constraint
     # ==================================================================
     #
     # The initial step uses the *stationary* prior (µ_z[r], Σ[r], π_∞[r]),
@@ -594,7 +577,7 @@ class GSSFilter:
     # transient that would arise from an arbitrary user-supplied π_0 / Σ_z0.
     # ------------------------------------------------------------------
 
-    def _init_step_h5(self, y1: np.ndarray) -> FilterResult:
+    def _init_step_ngh_kf(self, y1: np.ndarray) -> FilterResult:
         p = self._p
         K, q = p.K, p.q
 
@@ -655,7 +638,7 @@ class GSSFilter:
     # Recursion  n → n+1   (paper §3 — IMM steps II, III, IV)
     # ------------------------------------------------------------------
 
-    def _update_step_h5(self, y_new: np.ndarray) -> FilterResult:
+    def _update_step_ngh_kf(self, y_new: np.ndarray) -> FilterResult:
         p = self._p
         K, q = p.K, p.q
         y_prev = self._y_prev  # (s, 1) — previous observation
@@ -760,217 +743,114 @@ class GSSFilter:
         )
 
     # ==================================================================
-    # MODE = "imm_general" — IMM-style recursion, no (H5) required
+    # MODE = "gpb2" — generalised pseudo-Bayesian, order 2
     # ==================================================================
     #
-    # This is the filter of CS_FinaleBis (eqs 17ter, 16–17, 13'–15, 18,
-    # 21'–22, 8–9) — i.e. the exactIMM ≤ v0.9.0 implementation. The full
-    # F(k) = [[A_k, B_k], [C_k, D_k]] is used, per-regime moments
-    # µ_n(r), P_n(r) are propagated at each step from the filtered π_n
-    # (*not* the stationary π_∞), and the Kalman update uses the
-    # up-to-date Σ_n(r) rather than a constant Σ(k). No (H5) requirement.
+    # Keeps one Gaussian per current regime; each step expands to the K^2
+    # regime pairs (previous, current), runs K^2 exact-observation Kalman
+    # updates, then collapses back to K by merging over the previous regime.
+    # Exact whenever C_r = 0 or A_r = M_r C_r; elsewhere the depth-2 collapse
+    # is an approximation. This mirrors, step for step, the batch reference
+    # implementation in prg.experiments.reference_filters.gpb2_filter (which
+    # cannot be imported here: it already imports GSSFilter).
     # ------------------------------------------------------------------
 
-    def _init_step_general(self, y1: np.ndarray) -> FilterResult:
-        """Initial step using the stationary prior µ_z[r], Σ[r], π_∞[r]."""
+    def _precompute_gpb2(self) -> None:
+        """Cache the model arrays GPB2 needs, plus the stated initial law."""
         p = self._p
-        K, q = p.K, p.q
-
-        log_w: np.ndarray = np.empty(K)
-        E_x_r: list[np.ndarray] = []
-        Var_x_r: list[np.ndarray] = []
-
-        for r in range(K):
-            # Use stationary moments (from _precompute_stationary())
-            Sig = self._Sigma[r]  # (dim_z, dim_z) centred cov
-            mu = self._mu_z[r]  # (dim_z, 1)
-            mu_X = mu[:q]
-            mu_Y = mu[q:]
-            S_XX = Sig[:q, :q]
-            S_XY = Sig[:q, q:]
-            S_YY = Sig[q:, q:]
-
-            log_w[r] = np.log(self._pi_inf[r] + 1e-300) + multivariate_normal.logpdf(
-                y1.ravel(),
-                mean=mu_Y.ravel(),
-                cov=S_YY,
-                allow_singular=True,
-            )
-
-            M_r = _safe_solve(S_YY.T, S_XY.T).T  # (q, s)
-            e_x = mu_X + M_r @ (y1 - mu_Y)  # (q, 1)
-            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))  # (q, q)
-
-            E_x_r.append(e_x)
-            Var_x_r.append(var_x)
-
-        log_lik = float(logsumexp(log_w)) if np.isfinite(log_w).any() else -np.inf
-
-        log_max = log_w.max()
-        if not np.isfinite(log_max):
-            pi1 = self._pi_inf.copy()
-            logger.warning("Filter init: log-weights all -inf; falling back to π_∞.")
-        else:
-            log_w -= log_max
-            pi1 = np.exp(log_w)
-            s_pi = pi1.sum()
-            if not np.isfinite(s_pi) or s_pi <= 0.0:
-                pi1 = self._pi_inf.copy()
-                logger.warning("Filter init: invalid posterior sum; falling back to π_∞.")
-            else:
-                pi1 /= s_pi
-
-        E_x, E_xx = _mix(pi1, E_x_r, Var_x_r, K)
-
-        # Innovation: ν_1 = y_1 − Σ_r π_∞(r) µ_Y(r)
-        y_pred = sum(self._pi_inf[r] * self._mu_Y[r] for r in range(K))
-        innov = y1 - y_pred
-
-        self._pi = pi1
-        self._var_x = Var_x_r  # posterior state cov, reused by the next transition
-        return FilterResult(
-            n=self._n, E_x=E_x, E_xx=E_xx, pi=pi1, innovation=innov, log_lik=log_lik
+        K, q, s = p.K, p.q, p.s
+        dim = q + s
+        self._F = [np.asarray(p.f_matrix.F(k), dtype=float) for k in range(K)]
+        self._b = [np.asarray(p.b(k), dtype=float).reshape(dim, 1) for k in range(K)]
+        self._SW = [np.asarray(p.noise_cov.Sigma_W(k), dtype=float) for k in range(K)]
+        self._mu_z0 = [np.asarray(p.mu_z0(k), dtype=float).reshape(dim, 1) for k in range(K)]
+        self._Sigma_z0 = [np.asarray(p.Sigma_z0(k), dtype=float) for k in range(K)]
+        self._G = [np.asarray(p.G(k), dtype=float) for k in range(K)] if p.p > 0 else None
+        self._H_obs = np.hstack([np.zeros((s, q)), np.eye(s)])
+        pi0 = p.pi0
+        self._pi_start = (
+            np.asarray(pi0, dtype=float).ravel() if pi0 is not None else p.stationary_distribution()
         )
 
-    def _update_step_general(self, y_new: np.ndarray) -> FilterResult:
+    def _kalman_y_update(self, z_pred, P_pred):
+        """One exact-observation Kalman update against the pending y (self._y_now)."""
+        H = self._H_obs
+        nu = self._y_now - H @ z_pred
+        S = _sym(H @ P_pred @ H.T)
+        log_lik = float(
+            multivariate_normal.logpdf(nu.ravel(), mean=None, cov=S, allow_singular=True)
+        )
+        Kg = P_pred @ H.T @ np.linalg.inv(S)
+        z_post = z_pred + Kg @ nu
+        P_post = (np.eye(P_pred.shape[0]) - Kg @ H) @ P_pred
+        return z_post, _sym(P_post), log_lik
+
+    def _gpb2_result(self, log_lik: float, innov: np.ndarray) -> FilterResult:
+        """Marginal X moments from the per-regime couple summaries."""
+        q, K = self._p.q, self._p.K
+        E_x_r = [self._z[k][:q] for k in range(K)]
+        Var_x_r = [self._Pc[k][:q, :q] for k in range(K)]
+        E_x, E_xx = _mix(self._pi, E_x_r, Var_x_r, K)
+        return FilterResult(
+            n=self._n, E_x=E_x, E_xx=E_xx, pi=self._pi, innovation=innov, log_lik=log_lik
+        )
+
+    def _init_step_gpb2(self, y1: np.ndarray) -> FilterResult:
+        """Initial step: update the stated initial law p(Z_0 | r_0) against y_1."""
+        K = self._p.K
+        self._y_now = y1
+        z, Pc, ll = [], [], np.empty(K)
+        for k in range(K):
+            zk, Pk, lk = self._kalman_y_update(self._mu_z0[k], self._Sigma_z0[k])
+            z.append(zk)
+            Pc.append(Pk)
+            ll[k] = lk
+        log_w = np.log(self._pi_start + 1e-300) + ll
+        lse = float(logsumexp(log_w))
+        self._z, self._Pc = z, Pc
+        self._pi = np.exp(log_w - lse)
+        y_pred = sum(self._pi_start[k] * (self._H_obs @ self._mu_z0[k]) for k in range(K))
+        return self._gpb2_result(lse, y1 - y_pred)
+
+    def _update_step_gpb2(self, y_new: np.ndarray) -> FilterResult:
+        """Expand to the K^2 regime pairs, score, then collapse back to K."""
         p = self._p
-        K, q = p.K, p.q
-        y_prev = self._y_prev  # (s, 1)
-        # Exogenous input u_{n-1}: enters the predicted mean of Z_n; the
-        # subsequent Kalman update then carries it into the X estimate.
+        K = p.K
+        self._y_now = y_new
         u_prev = self._u_prev
-        has_u = p.p > 0 and u_prev is not None
+        has_u = self._G is not None and u_prev is not None
 
-        # ---- (17bis)  joint[rn, rnp1] = π_n[rn] · P[rn, rnp1] -------------
-        joint = self._pi[:, None] * p.P  # (K, K)
-        marg_rnp1 = joint.sum(axis=0)  # (K,)
-        safe_marg = np.where(marg_rnp1 > 0, marg_rnp1, 1.0)
-        p_rn_rnp1 = joint / safe_marg[None, :]  # (K, K): [rn, rnp1]
-
-        # ---- (17ter) + (17)  Mean and second-moment propagation -----------
-        mu_np1: list[np.ndarray] = []
-        P_np1: list[np.ndarray] = []
-        for rnp1 in range(K):
-            F = p.f_matrix.F(rnp1)
-            b = p.b(rnp1)  # (q+s, 1)
-            w_mu = sum(p_rn_rnp1[rn, rnp1] * self._mu[rn] for rn in range(K))
-            w_P = sum(p_rn_rnp1[rn, rnp1] * self._P_z[rn] for rn in range(K))
-
-            Fw_mu = F @ w_mu
-            # Full deterministic offset d = b + G u_{n-1}.  The input is
-            # deterministic, so it must enter BOTH the mean and the uncentred
-            # second moment, otherwise the centred covariance
-            # Var = P_np1 - mu_np1 mu_np1^T would be corrupted.
-            d = b + p.G(rnp1) @ u_prev if has_u else b
-            mu_np1.append(Fw_mu + d)  # (17ter)
-            P_np1.append(
-                _sym(
-                    F @ w_P @ F.T + Fw_mu @ d.T + d @ Fw_mu.T + d @ d.T + p.noise_cov.Sigma_W(rnp1)
-                )
-            )
-
-        # ---- (13'),(14),(15),(18)  Transition density → π_{n+1} -----------
-        log_alpha = np.full(K, -np.inf)
-        y_pred_acc = np.zeros_like(y_new)  # (s, 1)
-
-        for rnp1 in range(K):
-            F = p.f_matrix.F(rnp1)
-
-            log_terms: list[float] = []
-            for rn in range(K):
-                w = joint[rn, rnp1]
-                if w < 1e-300:
-                    continue
-
-                Sig_n = _sym(self._P_z[rn] - self._mu[rn] @ self._mu[rn].T)
-                mu_Y_n = self._mu[rn][q:]
-                S_YY_n = Sig_n[q:, q:]
-
-                Cov_Ynp1_Yn = (F @ Sig_n)[q:, q:]  # (16)
-                M_t = _safe_solve(S_YY_n.T, Cov_Ynp1_Yn.T).T  # (14)
-                # Innovation covariance = Gaussian convolution of the read-out law:
-                # Var(Y_{n+1} | rn, rnp1, y_n) = C_k Var(X_n | rn, y_n) C_k^T + Σ_V(rnp1),
-                # reusing the previous step's posterior state covariance self._var_x[rn].
-                # A sum of PSD terms — PSD by construction, no Schur difference. Equal to
-                # the Schur complement S_YY_pair − M_t Cov^T but numerically safer. (eq. 22)
-                C_k = F[q:, :q]
-                Gamma = _psd_floor(_sym(C_k @ self._var_x[rn] @ C_k.T + p.noise_cov.Sigma_V(rnp1)))
-
-                mu_Ynp1 = F[q:, :] @ self._mu[rn] + p.b(rnp1)[q:]
+        z_pair, P_pair = {}, {}
+        log_w = np.full((K, K), -np.inf)
+        y_pred = np.zeros_like(y_new)
+        for j in range(K):
+            for k in range(K):
+                z_pred = self._F[k] @ self._z[j] + self._b[k]
                 if has_u:
-                    mu_Ynp1 = mu_Ynp1 + p.G(rnp1)[q:] @ u_prev  # input shift on Y_n
-                mean_c = mu_Ynp1 + M_t @ (y_prev - mu_Y_n)
+                    z_pred = z_pred + self._G[k] @ u_prev
+                P_pred = _sym(self._F[k] @ self._Pc[j] @ self._F[k].T + self._SW[k])
+                zk, Pk, lk = self._kalman_y_update(z_pred, P_pred)
+                z_pair[(j, k)], P_pair[(j, k)] = zk, Pk
+                w_jk = self._pi[j] * p.P[j, k]
+                log_w[j, k] = np.log(self._pi[j] + 1e-300) + np.log(p.P[j, k] + 1e-300) + lk
+                y_pred = y_pred + w_jk * (self._H_obs @ z_pred)
 
-                y_pred_acc += w * mean_c
+        log_lik = float(logsumexp(log_w.ravel()))
+        w = np.exp(log_w - log_w.max())
+        w /= w.sum()
+        self._pi = w.sum(axis=0)  # collapsed current-mode probabilities
 
-                log_lik_c = multivariate_normal.logpdf(
-                    y_new.ravel(),
-                    mean=mean_c.ravel(),
-                    cov=Gamma,
-                    allow_singular=True,
-                )
-                log_terms.append(np.log(w) + log_lik_c)
-
-            if log_terms:
-                log_alpha[rnp1] = float(logsumexp(log_terms))
-
-        log_lik = float(logsumexp(log_alpha)) if np.isfinite(log_alpha).any() else -np.inf
-
-        log_max = log_alpha.max()
-        if not np.isfinite(log_max):
-            pi_np1 = marg_rnp1.copy()
-            logger.warning(
-                "Filter step %d: log_alpha all -inf; falling back to marg_rnp1.",
-                self._n,
+        for k in range(K):
+            sk = w[:, k].sum()
+            w_jk = w[:, k] / sk if sk > 1e-300 else np.full(K, 1.0 / K)
+            zk = sum(w_jk[j] * z_pair[(j, k)] for j in range(K))
+            Pk = sum(
+                w_jk[j] * (P_pair[(j, k)] + (z_pair[(j, k)] - zk) @ (z_pair[(j, k)] - zk).T)
+                for j in range(K)
             )
-        else:
-            log_alpha -= log_max
-            pi_np1 = np.exp(log_alpha)
-            s_pi = pi_np1.sum()
-            if not np.isfinite(s_pi) or s_pi <= 0.0:
-                pi_np1 = marg_rnp1.copy()
-                logger.warning(
-                    "Filter step %d: invalid posterior sum; falling back to marg_rnp1.",
-                    self._n,
-                )
-            else:
-                pi_np1 /= s_pi
+            self._z[k], self._Pc[k] = zk, _sym(Pk)
 
-        # ---- (21'),(22)  Kalman update ------------------------------------
-        E_x_r: list[np.ndarray] = []
-        Var_x_r: list[np.ndarray] = []
-        for rnp1 in range(K):
-            Sig = _sym(P_np1[rnp1] - mu_np1[rnp1] @ mu_np1[rnp1].T)
-            mu_X = mu_np1[rnp1][:q]
-            mu_Y = mu_np1[rnp1][q:]
-            S_XX = Sig[:q, :q]
-            S_XY = Sig[:q, q:]
-            S_YY = Sig[q:, q:]
-
-            M_r = _safe_solve(S_YY.T, S_XY.T).T  # (21')
-            e_x = mu_X + M_r @ (y_new - mu_Y)
-            var_x = _psd_floor(_sym(S_XX - M_r @ S_XY.T))  # (22)
-
-            E_x_r.append(e_x)
-            Var_x_r.append(var_x)
-
-        # ---- (8),(9)  Marginal estimates ----------------------------------
-        E_x, E_xx = _mix(pi_np1, E_x_r, Var_x_r, K)
-        innov = y_new - y_pred_acc
-
-        # ---- State update --------------------------------------------------
-        self._pi = pi_np1
-        self._P_z = P_np1
-        self._mu = mu_np1
-        self._var_x = Var_x_r  # reused by the next step's transition covariance
-
-        return FilterResult(
-            n=self._n, E_x=E_x, E_xx=E_xx, pi=pi_np1, innovation=innov, log_lik=log_lik
-        )
-
-    # ------------------------------------------------------------------
-    # Batch run methods
-    # ------------------------------------------------------------------
+        return self._gpb2_result(log_lik, y_new - y_pred)
 
     def run_csv(self, csv_path: str | pathlib.Path) -> pd.DataFrame:
         """
@@ -1109,12 +989,12 @@ class GSSFilter:
 
     @property
     def joseph(self) -> bool:
-        """Whether the Joseph-form covariance update is enabled (h5_exact only)."""
+        """Whether the Joseph-form covariance update is enabled (ngh_kf only)."""
         return self._joseph
 
     @property
     def mode(self) -> str:
-        """Filter mode: ``'h5_exact'`` or ``'imm_general'``."""
+        """Filter mode: ``'ngh_kf'`` or ``'gpb2'``."""
         return self._mode
 
     @property

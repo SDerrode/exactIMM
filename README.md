@@ -7,7 +7,7 @@ Simulation and **fast exact jump-filtering** algorithms for the paper:
 
 The paper introduces an exact, **linear-time** optimal filter for Gaussian
 switching state-space models satisfying a closed-form structural constraint
-(the **AB / (H5) constraint**). The commands that regenerate its figures from this code are in
+(the **AB constraint**). The commands that regenerate its figures from this code are in
 [Reproducing the paper figures](#reproducing-the-paper-figures) below.
 
 This README documents the **jump-filtering** pipeline: define a model →
@@ -29,7 +29,7 @@ so that $\Sigma_U(k)$ is the state-noise covariance, $\Sigma_V(k)$ the observati
 
 The central objective is to compute $\mathbb{E}[X_n \mid Y_{1:n}]$ efficiently (fast optimal filter).
 
-The (H5) structural assumption translates into an algebraic constraint
+The AB structural assumption translates into an algebraic constraint
 between the seven block matrices $(A, B, C, D, \Sigma_U, \Sigma_V, \Delta)$
 of each regime. Since **v0.13.0** the constraint is enforced by the
 closed-form **AB constraint**:
@@ -40,18 +40,18 @@ A(k) = \Delta(k)\,\Sigma_V(k)^{-1}\,C(k),
 B(k) = \Delta(k)\,\Sigma_V(k)^{-1}\,D(k).
 $$
 
-This is the unique parametrisation of $(A, B)$ compatible with (H5)
+This is the unique parametrisation of $(A, B)$ compatible with AB
 *uniformly* in the joint covariance $\Sigma(r_1)$, making the $K^2$
-regime-pair equations of (H5) trivially satisfied. The free blocks per
+regime-pair equations of AB trivially satisfied. The free blocks per
 regime become $(C, D, \Sigma_U, \Sigma_V, \Delta)$.
 
 ```python
-from prg.utils.h5_constraint import compute_AB, apply_AB_constraint
+from prg.utils.ab_constraint import compute_AB, apply_AB_constraint
 
 # Single regime: closed-form helper
 A, B = compute_AB(C, D, Delta, Sigma_V)
 
-# All regimes at once: project an existing GSSParams onto the (H5) manifold
+# All regimes at once: project an existing GSSParams onto the AB manifold
 constrained_params = apply_AB_constraint(params)
 ```
 
@@ -156,7 +156,7 @@ python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42
 # Dry run (no CSV written), full debug output
 python -m prg.simulate --model model_gss_K2_q1_s1 -N 500 --no-save --log-level DEBUG -v 2
 
-# Enforce (H5) AB constraint: A, B from (C, D, Δ, Σ_V) before simulating
+# Enforce AB constraint: A, B from (C, D, Δ, Σ_V) before simulating
 python -m prg.simulate --model model_gss_K2_q1_s1 -N 1000 --seed 42 --constraint
 
 # Custom output directory
@@ -176,7 +176,7 @@ Log files are written automatically to `logs/`.
 | `--output` | auto | Output CSV filename |
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip CSV writing (dry run) |
-| `--constraint` | `False` | Apply (H5)-compatible AB constraint: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
+| `--constraint` | `False` | Apply AB constraint: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
 
 ---
@@ -193,7 +193,7 @@ python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42
 python -m prg.filter.main --model model_gss_K2_q1_s1 \
     --csv data/simulated/simulated_model_gss_K2_q1_s1_N1000_seed42.csv
 
-# Enforce (H5) AB constraint before filtering
+# Enforce AB constraint before filtering
 python -m prg.filter.main --model model_gss_K2_q1_s1 -N 1000 --seed 42 --constraint
 
 # Dry run (no CSV written)
@@ -220,7 +220,7 @@ Output CSV columns: `n, E_x_0, …, E_x_{q-1}, V_x_0, …, V_x_{q-1}, p_r_0, …
 | `--output` | auto | Output CSV filename for filter results |
 | `--log-level` | from `config.toml` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `--no-save` | `False` | Skip all CSV writing (dry run) |
-| `--constraint` | `False` | Apply (H5)-compatible AB constraint: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
+| `--constraint` | `False` | Apply AB constraint: A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D before run |
 | `-v` / `--verbose` | `1` | Console verbosity: 0=silent, 1=normal, 2=debug |
 
 ### Python API
@@ -248,11 +248,11 @@ sim_path, df = filt.run(N=1000, seed=42, output_dir="data/simulated")
 > [`notebooks/`](notebooks/) — a quickstart (`01_filtering_quickstart.ipynb`) and
 > a filter comparison (`02_filters_comparison.ipynb`).
 
-### (H5) AB constraint API
+### AB constraint API
 
 ```python
-from prg.utils.h5_constraint import (
-    apply_AB_constraint, compute_AB, compute_h5_residual,
+from prg.utils.ab_constraint import (
+    apply_AB_constraint, compute_AB, compute_ab_residual,
 )
 
 # Apply A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D to all regimes at once
@@ -261,8 +261,8 @@ constrained_params = apply_AB_constraint(params)
 # Or compute (A, B) for a single regime from (C, D, Δ, Σ_V)
 A, B = compute_AB(C, D, Delta, SV)
 
-# Verify any (A, B, C, D, Σ_U, Δ, Σ_V) satisfies (H5):
-F = compute_h5_residual(A, B, C, D, SU, Delta, SV)  # ‖F‖_F = 0 ⇔ (H5) holds
+# Verify any (A, B, C, D, Σ_U, Δ, Σ_V) satisfies AB:
+F = compute_ab_residual(A, B, C, D, SU, Delta, SV)  # ‖F‖_F = 0 ⇔ AB holds
 ```
 
 ---
@@ -285,7 +285,7 @@ python -m prg.gui.main --model model_gss_K2_q1_s1
 |---|---|
 | Preset selector | Load any model from `prg/models/` in one click; triggers a full window restart when K, q, or s differ |
 | Parameter tabs | One tab per Markov state; editable F(k), Σ_W(k), μ_{z0}(k), b(k) with block colour coding (A=blue, B=green, C=yellow, D=pink) |
-| H5 constraint checkboxes | Four per tab (A / B / Σ_U / Δ=0); auto-compute B(k) or enforce Δ=0 in real-time; affected cells become read-only |
+| AB constraint checkboxes | Four per tab (A / B / Σ_U / Δ=0); auto-compute B(k) or enforce Δ=0 in real-time; affected cells become read-only |
 | Stability badges | Spectral radii ρ(F), ρ(A), ρ(D) shown live below the F(k) table |
 | Randomize button 🎲 | Fills F(k) and Σ_W(k) with random stable parameters |
 | Transition matrix P | Editable (K×K) row-stochastic matrix; stationary distribution π* shown live |
@@ -428,12 +428,12 @@ the four that appear in the paper.
 ```bash
 source .venv/bin/activate
 pytest                        # full suite, ~45 s
-mypy                          # strict typing on prg/utils/h5_constraint.py
+mypy                          # strict typing on prg/utils/ab_constraint.py
 ```
 
 The suite covers matrix diagnostics, parameter validation, the
 iterator-based simulator, reproducibility, CSV output, statistical sanity,
-exact-filter correctness, and the (H5) AB constraint computation.
+exact-filter correctness, and the AB constraint computation.
 
 ---
 
@@ -454,7 +454,7 @@ logs            = "logs"
 
 ## Citing
 
-If you use this code or the (H5) framework in your work, please cite:
+If you use this code or the AB framework in your work, please cite:
 
 ```bibtex
 % Note: 5th author (Ugo, surname to be confirmed) to be added to the author list.

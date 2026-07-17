@@ -7,7 +7,7 @@ Module map and the role of each component.
 ```
 prg/
 ├── classes/        # Data containers (parameters, simulator, F matrix)
-├── filter/         # Optimal filter (h5_exact and imm_general modes)
+├── filter/         # Optimal filter (ngh_kf and gpb2 modes)
 ├── learning/       # Supervised + semi-supervised estimators
 ├── models/         # Built-in BaseGSSModel subclasses
 ├── experiments/    # Paper-reproduction pipelines (§6, §7)
@@ -57,23 +57,23 @@ spectral radius, conditioning, etc.
 ```python
 from prg.filter import GSSFilter
 
-filt = GSSFilter(params, mode="h5_exact")  # or "imm_general"
+filt = GSSFilter(params, mode="ngh_kf")  # or "gpb2"
 res  = filt.step(y)                         # one observation
 print(res.E_x, res.Var_x, res.pi, res.log_lik, res.innovation)
 ```
 
 | `mode` | Cost per step | Assumption |
 |---|---|---|
-| `h5_exact` | constant Kalman gain (precomputed) | requires (H5) |
-| `imm_general` | full IMM mixing | works for any GSS |
+| `ngh_kf` | constant Kalman gain (precomputed) | requires AB |
+| `gpb2` | full IMM mixing | works for any GSS |
 
 Both modes use the exact pair-conditional predictive covariance, so on
-(H5)-compatible params they produce numerically identical output (checked
-in `tests/test_filter_modes.py`); `imm_general` is the fallback for
+AB-constrained params they produce numerically identical output (checked
+in `tests/test_filter_modes.py`); `gpb2` is the fallback for
 unconstrained models.
 
-Note that `h5_exact` issues a `RuntimeWarning` if the params do not
-satisfy (H5) — you can suppress this with `warnings.catch_warnings()`
+Note that `ngh_kf` issues a `RuntimeWarning` if the params do not
+satisfy AB — you can suppress this with `warnings.catch_warnings()`
 when you knowingly want to feed unconstrained params (as in the §7
 fairness comparison).
 
@@ -82,7 +82,7 @@ fairness comparison).
 ### `fit_supervised(rs, xs, ys, K, q, s, constraint=None, …)`
 
 Per-regime weighted OLS in closed form. `constraint='ab'` applies a
-post-hoc (H5)-compatible AB projection. Returns a parameter dict
+post-hoc AB projection. Returns a parameter dict
 ready for `GSSParams`.
 
 ### `fit_semi_supervised(xs, ys, K, n_inits=10, max_iter=100, constraint=None, constraint_each_iter=False, …)`
@@ -108,29 +108,29 @@ Recompute \(A(k)\) and \(B(k)\) for every regime from
 
 Same, for a single regime. Returns the tuple `(A, B)`.
 
-### `compute_h5_residual(A, B, C, D, Su, Delta, Sv)`
+### `compute_ab_residual(A, B, C, D, Su, Delta, Sv)`
 
-Frobenius-norm residual of the **same-regime** \((k, k)\) (H5) algebraic
+Frobenius-norm residual of the **same-regime** \((k, k)\) AB algebraic
 identity
 \(\Delta^T A^T + \Sigma_V B^T - P M^{-1}(Q A^T + R B^T + \Delta^T)\).
 Returns a `(s, q)` array. \(\|F\|_F = 0\) is **necessary but not
-sufficient** for (H5): when regimes have different joint covariances,
-(H5) also constrains the cross pairs \((j, k)\), \(j \neq k\).
+sufficient** for AB: when regimes have different joint covariances,
+AB also constrains the cross pairs \((j, k)\), \(j \neq k\).
 
-### `compute_h5_pair_residual(A_k, B_k, C_k, D_k, Delta_k, Sv_k, Su_j, Delta_j, Sv_j)`
+### `compute_ab_pair_residual(A_k, B_k, C_k, D_k, Delta_k, Sv_k, Su_j, Delta_j, Sv_j)`
 
 Pairwise residual \(\beta_1(j, k)\) (shape `(q, s)`) — the loading on
 \(Y_n\) of the regression of \(X_{n+1}\) on \((Y_n, Y_{n+1})\) given
 \(r_n = j,\ r_{n+1} = k\). \(\|\beta_1(j, k)\| = 0\) for **all** \(K^2\)
-ordered pairs \(\iff\) (H5) holds.
+ordered pairs \(\iff\) AB holds.
 
-### `h5_residual_max(params, *, relative=True)`
+### `ab_residual_max(params, *, relative=True)`
 
-The **complete** (H5) check. Returns `(max_resid, (j, k))`: the largest
+The **complete** AB check. Returns `(max_resid, (j, k))`: the largest
 pairwise residual over all \(K^2\) ordered pairs (normalised by the
 regression scale when `relative=True`). `max_resid == 0` \(\iff\) the
-model is fully (H5)-compatible. This is the test `GSSFilter` uses to
-decide whether to emit the `h5_exact` warning.
+model is fully AB-constrained. This is the test `GSSFilter` uses to
+decide whether to emit the `ngh_kf` warning.
 
 ### Error hierarchy
 
@@ -138,7 +138,7 @@ decide whether to emit the `h5_exact` warning.
 GSSError
 ├── GSSConfigError        # bad parameters at construction time
 ├── GSSStateError         # invalid runtime state (e.g. NaN posterior)
-└── GSSConstraintError    # H5 not satisfied / cannot be enforced
+└── GSSConstraintError    # AB not satisfied / cannot be enforced
 ```
 
 ## Reproducibility helpers

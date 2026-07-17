@@ -3,7 +3,7 @@
 scripts/e3_bw_em.py
 ===================
 Experiment **E3** — Semi-supervised BW-EM estimation of the GSS model
-on the S&P500/VIX dataset, with four H5-projection variants.
+on the S&P500/VIX dataset, with four AB-projection variants.
 
 Variants
 --------
@@ -19,7 +19,7 @@ best-likelihood restart is retained.
 Evaluation
 ----------
     - train log-lik (from EM, best restart)
-    - test  log-lik via :class:`GSSFilter` with ``mode='imm_general'``
+    - test  log-lik via :class:`GSSFilter` with ``mode='gpb2'``
     - test  MSE on X
     - regime accuracy / ARI vs proxy labels L1 (VIX-median) and L2 (NBER)
       after Hungarian-like label alignment
@@ -108,9 +108,9 @@ def _best_regime_alignment(r_hat: np.ndarray, r_true: np.ndarray, K: int) -> np.
 def run_filter_on_test(
     params_dict: dict, xs_te: np.ndarray, ys_te: np.ndarray, trace: dict | None = None
 ) -> tuple[float, float, np.ndarray, np.ndarray]:
-    """Evaluate a fitted params dict on the test set via imm_general."""
+    """Evaluate a fitted params dict on the test set via gpb2."""
     params = params_from_dict(params_dict)
-    filt = GSSFilter(params, mode="imm_general")
+    filt = GSSFilter(params, mode="gpb2")
     N = len(ys_te)
     K = params.K
     pi_n = np.empty((N, K))

@@ -19,15 +19,15 @@ Modeling choice
 
 Experiments
 -----------
-    E1  Empirical (H5) test       (Fisher H0:B(k)=0, K=3 regimes)
-    E2  Filter comparison         (h5_exact vs imm_general vs Kalman_K=1)
+    E1  Empirical AB test       (Fisher H0:B(k)=0, K=3 regimes)
+    E2  Filter comparison         (ngh_kf vs gpb2 vs Kalman_K=1)
     E3  Semi-supervised EM        (V0 unconstrained, V1 post-hoc AB,
                                    V2 GEM AB)
 
 Outputs
 -------
     results/enso/
-        e1_table.json / .tex     H5 empirical test
+        e1_table.json / .tex     AB empirical test
         e2_table.json / .tex     filter comparison
         e3_table.json / .tex     EM variant comparison
         regime_trace.csv          test-period regime probs and predictions
@@ -188,23 +188,19 @@ def run_e2(data, K=3):
     xs_te, ys_te = data["xs"][n_tr:], data["ys"][n_tr:]
 
     fit_raw = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint=None)
-    fit_h5 = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint="ab")
+    fit_ab = fit_supervised(rs_tr, xs_tr, ys_tr, K=K, q=1, s=1, constraint="ab")
     p_raw = params_from_dict(fit_raw)
-    p_h5 = params_from_dict(fit_h5)
+    p_ab = params_from_dict(fit_ab)
 
     traces = {}
     scores = []
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         scores.append(
-            run_filter("h5_exact_h5fit", GSSFilter(p_h5, mode="h5_exact"), xs_te, ys_te, traces)
+            run_filter("ngh_kf_abfit", GSSFilter(p_ab, mode="ngh_kf"), xs_te, ys_te, traces)
         )
-    scores.append(
-        run_filter("imm_general_olsfit", GSSFilter(p_raw, mode="imm_general"), xs_te, ys_te, traces)
-    )
-    scores.append(
-        run_filter("imm_general_h5fit", GSSFilter(p_h5, mode="imm_general"), xs_te, ys_te, traces)
-    )
+    scores.append(run_filter("gpb2_olsfit", GSSFilter(p_raw, mode="gpb2"), xs_te, ys_te, traces))
+    scores.append(run_filter("gpb2_abfit", GSSFilter(p_ab, mode="gpb2"), xs_te, ys_te, traces))
     kf = SingleKalmanFilter.from_regressed(xs_tr, ys_tr)
     scores.append(run_filter("kalman_k1", kf, xs_te, ys_te, traces))
 
@@ -213,7 +209,7 @@ def run_e2(data, K=3):
         "scores": [asdict(s) for s in scores],
         "traces": traces,
         "fit_raw": fit_raw,
-        "fit_h5": fit_h5,
+        "fit_ab": fit_ab,
     }
 
 
@@ -265,7 +261,7 @@ def run_e3(data, K=3, n_inits=5, max_iter=50, seed=42):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            f = GSSFilter(params_from_dict(params), mode="imm_general")
+            f = GSSFilter(params_from_dict(params), mode="gpb2")
             ll = 0.0
             sse = 0.0
             pi_n = np.empty((len(ys_te), K))
@@ -347,7 +343,7 @@ def emit_e1_tex(res, path):
             f"{r['B_fro']:.4f} & {fp(r['p_value'])} \\\\"
         )
     cap = (
-        r"Empirical test of (H5) on the ENSO training period"
+        r"Empirical test of AB on the ENSO training period"
         r" (1950--2010, 732 months). $B(k)$ is the unconstrained OLS"
         r" estimate within regime~$k$, $\|B(k)\|_F$ its Frobenius norm,"
         r" and $p$-value is for $H_0:B(k)=0$ via a nested-model"
@@ -356,7 +352,7 @@ def emit_e1_tex(res, path):
     _write_table(
         path,
         cap,
-        "tab:enso_h5_test",
+        "tab:enso_ab_test",
         "lrrrr",
         r"Regime & $n_k$ & $B(k)$ & $\|B(k)\|_F$ & $p$-value",
         rows,
@@ -365,9 +361,9 @@ def emit_e1_tex(res, path):
 
 def emit_e2_tex(res, path):
     label = {
-        "h5_exact_h5fit": "H5-exact (H5 fit)",
-        "imm_general_olsfit": "IMM-approx (OLS fit)",
-        "imm_general_h5fit": "IMM-approx (H5 fit)",
+        "ngh_kf_abfit": "NGH-MSM-KF (AB fit)",
+        "gpb2_olsfit": "GPB2 (OLS fit)",
+        "gpb2_abfit": "GPB2 (AB fit)",
         "kalman_k1": "Kalman $K=1$",
     }
     rows = []
@@ -381,7 +377,7 @@ def emit_e2_tex(res, path):
         r"Filter comparison on the ENSO test period"
         r" (2011-01 to 2026-02, 182 months)."
         r" Parameters $\boldsymbol{\theta}$ are fit by supervised OLS"
-        r" on the training period; the H5-fit applies the AB constraint,"
+        r" on the training period; the AB-fit applies the AB constraint,"
         r" the OLS-fit is unconstrained. $\log\hat L$ is the joint test"
         r" log-likelihood, NLL/obs $= -\log\hat L / N_{\rm test}$;"
         r" MSE is computed on $X$ (Niño~1+2)."
@@ -421,7 +417,7 @@ def emit_e3_tex(res, path):
         r"Semi-supervised EM variants on ENSO"
         r" ($K=3$, $n_{\mathrm{init}}=5$, $I_{\max}=50$)."
         r" Train log-lik is on the joint $(X,Y)$ training period;"
-        r" test metrics use the IMM-approx filter on EM-fitted"
+        r" test metrics use the GPB2 filter on EM-fitted"
         r" parameters. Acc and ARI are computed on the ground-truth"
         r" ONI regime after optimal regime-permutation alignment."
         r" V1 applies the AB constraint of"
@@ -471,7 +467,7 @@ def main():
 
     # ------------- E1 -------------
     if "e1" not in args.skip:
-        print("\n=== E1 — Empirical (H5) test ===")
+        print("\n=== E1 — Empirical AB test ===")
         e1 = run_e1(data, K=args.K)
         for r in e1["rows"]:
             p_str = f"{r['p_value']:.3g}" if not np.isnan(r["p_value"]) else "n/a"
@@ -481,8 +477,8 @@ def main():
                 f"F={r['F']:>6.2f}  p={p_str}"
             )
         (args.out_dir / "e1_table.json").write_text(json.dumps(e1, indent=2), encoding="utf-8")
-        emit_e1_tex(e1, args.fig_dir / "tab_enso_h5_test.tex")
-        print(f"  saved {args.fig_dir / 'tab_enso_h5_test.tex'}")
+        emit_e1_tex(e1, args.fig_dir / "tab_enso_ab_test.tex")
+        print(f"  saved {args.fig_dir / 'tab_enso_ab_test.tex'}")
 
     # ------------- E2 -------------
     if "e2" not in args.skip:

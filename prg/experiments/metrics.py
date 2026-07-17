@@ -10,12 +10,12 @@ that the Monte-Carlo runner can call them from any parallelisation backend.
 
 Functions
 ---------
-dof_h5                — free-parameter count d_{H5}(K, q, s) under the AB constraint
+dof_ab                — free-parameter count d_{AB}(K, q, s) under the AB constraint
 compute_rmse          — root mean squared filtering error (scalar)
 compute_nees          — average normalised estimation error squared (ANEES)
 compute_ljung_box     — Ljung–Box test p-value for innovation whiteness
 compute_jarque_bera   — Jarque–Bera normality test p-value on innovations
-compute_bic           — BIC for an H5-constrained GSS model
+compute_bic           — BIC for an AB-constrained GSS model
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import numpy as np
 from scipy import stats as sp_stats
 
 __all__ = [
-    "dof_h5",
+    "dof_ab",
     "compute_rmse",
     "compute_nees",
     "compute_ljung_box",
@@ -37,12 +37,12 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def dof_h5(K: int, q: int, s: int) -> int:
+def dof_ab(K: int, q: int, s: int) -> int:
     """
-    Number of free parameters of an (H5)-compatible GSS(K, q, s) model
+    Number of free parameters of an AB-constrained GSS(K, q, s) model
     under the closed-form AB constraint.
 
-    Under (H5) the closed-form AB constraint determines A(k) and B(k)
+    Under AB the closed-form AB constraint determines A(k) and B(k)
     *both* from (C, D, Δ, Σ_V) via
 
         A(k) = Δ(k) Σ_V(k)⁻¹ C(k),
@@ -58,7 +58,7 @@ def dof_h5(K: int, q: int, s: int) -> int:
     the transition matrix P (rows sum to 1) and K-1 for the initial
     distribution π_0 (sums to 1), giving
 
-        d_{H5}(K, q, s) = K [ qs + s² + (q+s)(q+s+1)/2 + (q+s) ]
+        d_{AB}(K, q, s) = K [ qs + s² + (q+s)(q+s+1)/2 + (q+s) ]
                          + K² - 1.
 
     Parameters
@@ -72,9 +72,9 @@ def dof_h5(K: int, q: int, s: int) -> int:
 
     Examples
     --------
-    >>> dof_h5(2, 1, 1)
+    >>> dof_ab(2, 1, 1)
     17
-    >>> dof_h5(3, 1, 1)
+    >>> dof_ab(3, 1, 1)
     29
     """
     dim_z = q + s
@@ -282,9 +282,9 @@ def compute_bic(
     s: int,
 ) -> float:
     """
-    Bayesian Information Criterion for an H5-constrained GSS(K, q, s) model.
+    Bayesian Information Criterion for an AB-constrained GSS(K, q, s) model.
 
-        BIC = d_{H5}(K, q, s) · log(N) − 2 · log p(y_{1:N})
+        BIC = d_{AB}(K, q, s) · log(N) − 2 · log p(y_{1:N})
 
     Lower BIC indicates a better model.
 
@@ -301,5 +301,5 @@ def compute_bic(
     -------
     float
     """
-    d = dof_h5(K, q, s)
+    d = dof_ab(K, q, s)
     return float(d * np.log(N) - 2.0 * log_lik)

@@ -38,8 +38,8 @@ from datetime import datetime
 from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
 from prg.models.base_gss_model import BaseGSSModel
+from prg.utils.ab_constraint import apply_AB_constraint
 from prg.utils.exceptions import GSSError
-from prg.utils.h5_constraint import apply_AB_constraint
 from prg.utils.input_signal import make_input
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--constraint",
         action="store_true",
-        help="Enforce the (H5)-compatible AB constraint: recompute "
+        help="Enforce the AB constraint: recompute "
         "A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k) for every "
         "regime before simulating.",
     )
@@ -292,9 +292,9 @@ def main() -> None:
     if args.verbose >= 2:
         params.summary()
 
-    # --- Apply (H5) AB constraint to A, B (optional) ---
+    # --- Apply AB constraint to A, B (optional) ---
     if args.constraint:
-        log.info("--constraint: applying (H5) AB constraint to A(k), B(k) …")
+        log.info("--constraint: applying AB constraint to A(k), B(k) …")
         try:
             params = apply_AB_constraint(params, logger=log)
         except ValueError as exc:

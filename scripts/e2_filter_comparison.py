@@ -8,8 +8,8 @@ Parameters are fit by supervised OLS on the training period using label L1
 (VIX-median); the filters are then evaluated on the test period (2019-2024).
 
 Filters compared (extensible):
-    h5_exact        : our filter under (H5) assumption (biased if B≠0)
-    imm_general     : our filter, general IMM recursion
+    ngh_kf        : our filter under AB assumption (biased if B≠0)
+    gpb2     : our filter, general IMM recursion
     kalman_k1       : single Kalman (K=1, no regime switching)
     imm_standard    : Blom-Bar-Shalom Interacting Multiple Model
     gpb2            : Generalized Pseudo-Bayesian order 2
@@ -198,15 +198,15 @@ def main() -> int:
     traces: dict[str, np.ndarray] = {}
     scores: list[FilterScore] = []
 
-    # h5_exact (warns for non-H5 models, expected here)
+    # ngh_kf (warns for models violating AB, expected here)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        gss_h5 = GSSFilter(params, mode="h5_exact")
-    scores.append(run_filter("h5_exact", gss_h5, xs_te, ys_te, traces))
+        gss_ab = GSSFilter(params, mode="ngh_kf")
+    scores.append(run_filter("ngh_kf", gss_ab, xs_te, ys_te, traces))
 
-    # imm_general
-    gss_gen = GSSFilter(params, mode="imm_general")
-    scores.append(run_filter("imm_general", gss_gen, xs_te, ys_te, traces))
+    # gpb2
+    gss_gen = GSSFilter(params, mode="gpb2")
+    scores.append(run_filter("gpb2", gss_gen, xs_te, ys_te, traces))
 
     # Kalman K=1 — fit on full train regardless of regimes
     kf = SingleKalmanFilter.from_regressed(xs_tr, ys_tr)

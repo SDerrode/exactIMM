@@ -11,7 +11,7 @@ Coverage
 - _compute_xi: marginals consistent with γ
 - _initialize_kmeans: returns valid hard assignment, all regimes present
 - _weighted_fit: reduces to OLS when w is uniform; constraints applied
-- _em_run: log_lik history non-decreasing without H5 constraint;
+- _em_run: log_lik history non-decreasing without AB constraint;
            shapes and SPD of outputs
 - fit_semi_supervised: smoke test, multi-start, convergence,
                        statistical recovery (loose)
@@ -292,7 +292,7 @@ class TestWeightedFit:
 
 class TestEMRun:
     def test_log_lik_monotone_no_constraint(self, simulated):
-        """Without H5 constraint, log L should be non-decreasing."""
+        """Without AB constraint, log L should be non-decreasing."""
         xs, ys, _, _ = simulated
         Z = np.hstack([xs, ys])
         params, info = _em_run(
@@ -337,8 +337,8 @@ class TestEMRun:
             np.linalg.cholesky(params["Sigma_V_list"][k])
 
     def test_with_constraint_b(self, simulated):
-        """Default (post-hoc) mode: H5 still satisfied at the end."""
-        from prg.utils.h5_constraint import compute_AB
+        """Default (post-hoc) mode: AB still satisfied at the end."""
+        from prg.utils.ab_constraint import compute_AB
 
         xs, ys, _, _ = simulated
         Z = np.hstack([xs, ys])
@@ -393,11 +393,11 @@ class TestEMRun:
 
     def test_constraint_each_iter_b(self, simulated):
         """
-        GEM mode: H5 must hold at the end, and the constraint is applied
+        GEM mode: AB must hold at the end, and the constraint is applied
         during the loop (so log-lik may not be strictly monotone — only
         check final feasibility).
         """
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         xs, ys, _, _ = simulated
         Z = np.hstack([xs, ys])
@@ -526,7 +526,7 @@ class TestFitSemiSupervised:
         assert info["best_log_lik"] == info["all_log_liks"][0]
 
     def test_constraint_b_passes(self, simulated):
-        """Default (post-hoc) mode: H5 satisfied on the returned params."""
+        """Default (post-hoc) mode: AB satisfied on the returned params."""
         xs, ys, _, _ = simulated
         params, info = fit_semi_supervised(
             xs,
@@ -537,7 +537,7 @@ class TestFitSemiSupervised:
             max_iter=15,
             seed=0,
         )
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         for k in range(2):
             A_check, B_check = compute_AB(
@@ -550,7 +550,7 @@ class TestFitSemiSupervised:
             np.testing.assert_allclose(params["B_list"][k], B_check, atol=1e-8)
 
     def test_constraint_each_iter_passes(self, simulated):
-        """GEM mode: H5 also satisfied (and applied at every iteration)."""
+        """GEM mode: AB also satisfied (and applied at every iteration)."""
         xs, ys, _, _ = simulated
         params, info = fit_semi_supervised(
             xs,
@@ -562,7 +562,7 @@ class TestFitSemiSupervised:
             max_iter=15,
             seed=0,
         )
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         for k in range(2):
             A_check, B_check = compute_AB(
@@ -692,7 +692,7 @@ class TestCLI:
 
     def test_constraint_each_iter_flag(self, simulated, tmp_path):
         """The --constraint-each-iter flag is accepted and produces a model."""
-        from prg.utils.h5_constraint import compute_AB
+        from prg.utils.ab_constraint import compute_AB
 
         _, _, _, csv = simulated
         out = tmp_path / "model_em_gem.py"

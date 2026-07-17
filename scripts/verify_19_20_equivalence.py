@@ -3,12 +3,12 @@
 scripts/verify_19_20_equivalence.py
 ====================================
 Numerical verification of the equivalence between two methods for computing
-the per-regime conditional moments (19)-(20) of the (H5) GSS paper:
+the per-regime conditional moments (19)-(20) of the AB GSS paper:
 
   (19)  E[X_{n+1} | r_{n+1}, y_{n+1}]
   (20)  E[X_{n+1} X_{n+1}^T | r_{n+1}, y_{n+1}]
 
-under the (H5)-compatible AB constraint
+under the AB constraint
 
     A(r) = Δ(r) Σ_V(r)⁻¹ C(r),       B(r) = Δ(r) Σ_V(r)⁻¹ D(r).
 
@@ -80,7 +80,7 @@ from prg.classes.FMatrix import FMatrix  # noqa: E402
 from prg.classes.GSSParams import GSSParams  # noqa: E402
 from prg.classes.GSSSimulator import GSSSimulator  # noqa: E402
 from prg.classes.NoiseCovariance import GSSNoiseCovariance  # noqa: E402
-from prg.utils.h5_constraint import apply_AB_constraint, compute_AB  # noqa: E402
+from prg.utils.ab_constraint import apply_AB_constraint, compute_AB  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -122,11 +122,11 @@ def make_random_AB_params(
 
     If ``ab_constraint=True`` (default), A, B are determined by the
     closed-form AB constraint A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D — the model
-    then satisfies (H5).
+    then satisfies AB.
 
     If ``ab_constraint=False``, A, B are independently drawn as random
     Gaussian matrices (with spectral radius bounded). The resulting
-    model violates (H5), and methods (a) and (b) should disagree.
+    model violates AB, and methods (a) and (b) should disagree.
     """
     P = _random_transition(K, rng)
     A_list, B_list, C_list, D_list = [], [], [], []
@@ -309,7 +309,7 @@ def method_b_moments(
     params: GSSParams,
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """
-    Direct (H5)-AB conditional moments (no recursion, no propagation):
+    Direct AB-AB conditional moments (no recursion, no propagation):
 
         M(k) = Δ(k) Σ_V(k)⁻¹
         Γ(k) = Σ_U(k) − Δ(k) Σ_V(k)⁻¹ Δ(k)ᵀ
@@ -411,7 +411,7 @@ def compare_one_model(
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Verify equivalence of methods (a) and (b) for "
-        "computing the (H5) conditional moments (19)-(20) "
+        "computing the AB conditional moments (19)-(20) "
         "under the AB constraint.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -461,7 +461,7 @@ def main() -> int:
 
     print("=" * 72)
     print("Verify (19)-(20) — Wojciech's (16)-(17)+(21)-(22)  vs  Frédéric's")
-    print("                   direct closed-form, under the (H5) AB constraint.")
+    print("                   direct closed-form, under the AB constraint.")
     print("=" * 72)
 
     rng = np.random.default_rng(args.seed)
@@ -551,7 +551,7 @@ def main() -> int:
                 f"differ by {dM.min():.2e} … {dM.max():.2e} "
                 f"(> tol = {args.tol:.0e})."
             )
-            print("      → The closed-form (b) requires (H5) AB to hold.")
+            print("      → The closed-form (b) requires AB to hold.")
             return 0
         print(f"WARN: without AB, min ‖M_a − M_b‖_F = {dM.min():.3e}  (expected > {args.tol:.0e}).")
         return 1

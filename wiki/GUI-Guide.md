@@ -25,7 +25,7 @@ The window is split horizontally:
 | Preset selector | Load any built-in model in one click |
 | F(k), Σ_W(k) tables | Inline editing with block colour coding (A blue, B green, C yellow, D pink) |
 | AB-constraint checkbox | One per tab. Locks A(k), B(k) to the closed form A=Δ Σ_V⁻¹ C, B=Δ Σ_V⁻¹ D, recomputed live as you edit C, D, Δ, Σ_V |
-| Stability + (H5) badges | ρ(F), ρ(A), ρ(D), and the live (H5) Frobenius residual ‖F‖_F (✓ green when ≤ 1e-6, ⚠ amber otherwise) |
+| Stability + AB badges | ρ(F), ρ(A), ρ(D), and the live AB Frobenius residual ‖F‖_F (✓ green when ≤ 1e-6, ⚠ amber otherwise) |
 | Randomize 🎲 | Fill F(k), Σ_W(k) with random stable parameters |
 | P (transition) table | K×K row-stochastic; π_∞ shown live |
 | N / Seed | Sequence length and optional integer seed |

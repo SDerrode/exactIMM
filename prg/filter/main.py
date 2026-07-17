@@ -40,8 +40,8 @@ from datetime import datetime
 from prg.classes.GSSParams import GSSParams
 from prg.filter.gss_filter import GSSFilter
 from prg.models.base_gss_model import BaseGSSModel
+from prg.utils.ab_constraint import apply_AB_constraint
 from prg.utils.exceptions import GSSError
-from prg.utils.h5_constraint import apply_AB_constraint
 
 # ---------------------------------------------------------------------------
 _CONFIG_FILENAME = "config.toml"
@@ -175,17 +175,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--constraint",
         action="store_true",
-        help="Enforce the (H5)-compatible AB constraint: recompute "
+        help="Enforce the AB constraint: recompute "
         "A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k) for every "
         "regime before filtering.",
     )
     parser.add_argument(
         "--mode",
         default=None,
-        choices=["imm_general", "h5_exact"],
+        choices=["gpb2", "ngh_kf"],
         help="Filter recursion variant. Omit to dispatch on the model: a model "
-        "satisfying (H5) — e.g. after --constraint — uses 'h5_exact' (exact "
-        "fast filter), any other model uses 'imm_general' (IMM approximation).",
+        "satisfying AB — e.g. after --constraint — uses 'ngh_kf' (exact "
+        "fast filter), any other model uses 'gpb2' (order-2 approximation).",
     )
     parser.add_argument(
         "--input",
@@ -246,9 +246,9 @@ def main() -> None:
     if args.verbose >= 2:
         params.summary()
 
-    # --- Apply (H5) AB constraint to A, B (optional) ---
+    # --- Apply AB constraint to A, B (optional) ---
     if args.constraint:
-        log.info("--constraint: applying (H5) AB constraint to A(k), B(k) …")
+        log.info("--constraint: applying AB constraint to A(k), B(k) …")
         try:
             params = apply_AB_constraint(params, logger=log)
         except ValueError as exc:
@@ -263,7 +263,7 @@ def main() -> None:
 
     # --- Build filter ---
     # mode=None lets GSSFilter dispatch on the params type (NGHMSMParams →
-    # h5_exact, base GSSParams → imm_general); --mode overrides explicitly.
+    # ngh_kf, base GSSParams → gpb2); --mode overrides explicitly.
     filt = GSSFilter(params, mode=args.mode)
     log.info("GSSFilter ready: %s", filt)
 

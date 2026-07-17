@@ -16,7 +16,7 @@ Matrice de transition (diagonale dominante — peu de transitions)
        [0.05, 0.95]]
 
 A_k, B_k sont dérivés de (C, D, Δ, Σ_V) via la contrainte AB
-(A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) dans get_params() — (H5) par construction.
+(A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) dans get_params() — AB par construction.
 Pour ce préréglage, C_k est de rang colonne plein et D_k inversible (ni l'un ni
 l'autre n'est requis par la CNS, qui n'exige que Σ_V ≻ 0) ; Σ_W(k) SPD :
   k=0 : max|λ(F)| = 0.608   min λ(Σ_W) ≈ 0.12
@@ -48,7 +48,7 @@ class ModelGss_K2_q2_s2(BaseGSSModel):
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
     #   A_k : (2,2)   B_k : (2,2)   C_k : (2,2)   D_k : (2,2)
     # A_k, B_k are derived from (C, D, Δ, Σ_V) in get_params() via the AB
-    # constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) — (H5) holds by construction.
+    # constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D) — AB holds by construction.
     # C_k happens to be full column rank here (not required by the CNS — only
     # Σ_V ≻ 0 is); both blocks below are.
     C_list: list[np.ndarray] = [

@@ -42,12 +42,12 @@ class _InnovHistDialog(QDialog):
     Tabs
     ----
     • Histograms — raw innovation distributions + theoretical Gaussian mixture
-      (h5_exact mode) or best-fit N (imm_general mode).
+      (ngh_kf mode) or best-fit N (gpb2 mode).
     • ACF        — sample autocorrelation function per component with
                    Ljung-Box 95 % confidence bands (±1.96 / √N).
     • Scatter    — pairwise scatter plot (only shown when s ≥ 2).
 
-    When *mix_params* is supplied (h5_exact mode), the histogram shows:
+    When *mix_params* is supplied (ngh_kf mode), the histogram shows:
         p(ν) = Σ_{j,k} w_{jk} N(ν ; δ̃_{jk}, Γ_{jk})
     where δ̃_{jk} = μ_{Y,jk}[i] − Σ_{k'} P(j,k') μ_{Y,jk'}[i] is the
     within-previous-regime centred component mean.

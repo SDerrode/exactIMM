@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-scripts/verify_h5_compat.py
+scripts/verify_ab_compat.py
 ============================
-Numerical verification of the closed-form (H5)-compatible AB constraint:
+Numerical verification of the closed-form AB constraint:
 
     A(r) = Δ(r) Σ_V(r)⁻¹ C(r),
     B(r) = Δ(r) Σ_V(r)⁻¹ D(r).                              (★)
 
 For each random draw of (C, D, Σ_U, Σ_V, Δ) per regime r ∈ Ω = {1, …, K}:
     1. Build A, B via formula (★).
-    2. For every pair (r_1, r_2) ∈ Ω², evaluate the (H5) residual
+    2. For every pair (r_1, r_2) ∈ Ω², evaluate the AB residual
             F  =  (Δ_{r_1}ᵀ A_{r_2}ᵀ + Σ_V_{r_1} B_{r_2}ᵀ)
                 − P_{r_1,r_2} M_{r_1,r_2}⁻¹
                     (Q_{r_1,r_2} A_{r_2}ᵀ + R_{r_1,r_2} B_{r_2}ᵀ + Δ_{r_2}ᵀ)
@@ -28,7 +28,7 @@ transposing both sides.
 
 Usage
 -----
-    python scripts/verify_h5_compat.py [-K K] [-q q] [-s s] [-n N_DRAWS]
+    python scripts/verify_ab_compat.py [-K K] [-q q] [-s s] [-n N_DRAWS]
                                        [--seed SEED] [--tol TOL]
 """
 
@@ -90,16 +90,16 @@ def build_AB_from_c(C_list, D_list, SV_list, Dt_list):
 
 
 def random_AB(K: int, q: int, s: int, rng: np.random.Generator):
-    """Draw arbitrary A, B matrices (NOT consistent with (H5))."""
+    """Draw arbitrary A, B matrices (NOT consistent with AB)."""
     A_list = [rng.standard_normal((q, q)) * 0.4 for _ in range(K)]
     B_list = [rng.standard_normal((q, s)) * 0.4 for _ in range(K)]
     return A_list, B_list
 
 
 # ---------------------------------------------------------------------------
-# (H5) residual
+# AB residual
 # ---------------------------------------------------------------------------
-def h5_residual(
+def ab_residual(
     A2: np.ndarray,
     B2: np.ndarray,  # at r_2
     C2: np.ndarray,
@@ -111,7 +111,7 @@ def h5_residual(
     Dt2: np.ndarray,  # at r_2
 ) -> np.ndarray:
     """
-    Evaluate the (H5) residual at the pair (r_1, r_2):
+    Evaluate the AB residual at the pair (r_1, r_2):
 
         F  =  (Δ_{r_1}ᵀ A_{r_2}ᵀ + Σ_V_{r_1} B_{r_2}ᵀ)
             − P M⁻¹ (Q A_{r_2}ᵀ + R B_{r_2}ᵀ + Δ_{r_2}ᵀ)
@@ -125,7 +125,7 @@ def h5_residual(
 
     Returns
     -------
-    F : ndarray of shape (s, q)   — ‖F‖_F = 0 ⇔ (H5) holds at (r_1, r_2).
+    F : ndarray of shape (s, q)   — ‖F‖_F = 0 ⇔ AB holds at (r_1, r_2).
     """
     P = Dt1.T @ C2.T + SV1 @ D2.T
     Q = C2 @ SU1 + D2 @ Dt1.T
@@ -145,7 +145,7 @@ def evaluate_all_pairs(C, D, SU, SV, Dt, A, B) -> np.ndarray:
     norms = np.zeros((K, K))
     for r1 in range(K):
         for r2 in range(K):
-            F = h5_residual(
+            F = ab_residual(
                 A[r2],
                 B[r2],
                 C[r2],
@@ -165,7 +165,7 @@ def evaluate_all_pairs(C, D, SU, SV, Dt, A, B) -> np.ndarray:
 # ---------------------------------------------------------------------------
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Verify the closed-form (H5)-compatible AB constraint "
+        description="Verify the closed-form AB constraint "
         "parametrisation A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D."
     )
     ap.add_argument("-K", type=int, default=3, help="Number of regimes (default 3).")

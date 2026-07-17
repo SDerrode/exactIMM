@@ -5,7 +5,7 @@ Welcome to the **exactIMM** wiki. This software accompanies the paper
 > *On Fast Optimal Filtering in Gaussian Switching Systems*  
 > S. Derrode & W. Pieczynski (2026)
 
-and provides a reference implementation of the H5-constrained
+and provides a reference implementation of the AB-constrained
 Gaussian Switching System framework.
 
 ## Where to start
@@ -21,11 +21,11 @@ Gaussian Switching System framework.
 ## What is in the package?
 
 - **Filter** (`prg/filter/`) — exact constant-gain optimal filter under
-  (H5), plus a general IMM mode for unconstrained models.
+  AB, plus a general IMM mode for unconstrained models.
 - **Simulator** (`prg/simulate.py`) — fast iterator-based generator of
   GSS trajectories.
 - **Learning** (`prg/learning/`) — supervised OLS and semi-supervised
-  Baum-Welch EM with three H5 projection variants
+  Baum-Welch EM with three AB projection variants
   (\(\tau \in \{B, A^\dagger, \Sigma_U\}\)).
 - **Experiments** (`prg/experiments/`) — Monte-Carlo benchmarks (§6 of
   the paper) and the ENSO real-data study (§7).

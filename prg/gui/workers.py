@@ -72,7 +72,7 @@ class _FilterWorker(QThread):
         params: GSSParams,
         ys: np.ndarray,  # (N, s)
         joseph: bool = False,
-        mode: str = "imm_general",
+        mode: str = "gpb2",
         u: np.ndarray | None = None,
         parent=None,
     ):
@@ -110,15 +110,15 @@ class _FilterWorker(QThread):
 
             # Expose pre-computed moments for diagnostics.
             # Stationary moments µ_Y[k] and Σ_YY(k) are always available (both modes
-            # call _precompute_stationary()).  h5_exact-specific keys (mu_Y_jk, …) are
-            # added only when the filter was run in h5_exact mode.
+            # call _precompute_stationary()).  ngh_kf-specific keys (mu_Y_jk, …) are
+            # added only when the filter was run in ngh_kf mode.
             self.cond_moments: dict = {}
             if hasattr(filt, "_mu_Y") and hasattr(filt, "_S_YY"):
                 self.cond_moments["mu_Y"] = filt._mu_Y  # [K] ndarray (s,1)
                 self.cond_moments["S_YY"] = filt._S_YY  # [K] ndarray (s,s)
 
             if hasattr(filt, "_mu_Y_jk"):
-                # ── h5_exact: Signal 2 — exact Markov transition density ──────
+                # ── ngh_kf: Signal 2 — exact Markov transition density ──────
                 # Per the Markovianité Proposition (formulas (f) and (h)):
                 #   μ₂(j,k) = b_Y(k) + (D_k + C_k Δ_j Σ_{V,j}^{-1}) y_n      (f)
                 #   Γ₂(j,k) = Σ_{V,k} + C_k (Σ_{U,j} − Δ_j Σ_{V,j}^{-1} Δ_j^T) C_k^T  (h)

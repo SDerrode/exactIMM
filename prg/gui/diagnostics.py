@@ -93,13 +93,13 @@ def _standardise_innovations(
 
     Two modes:
 
-    * h5_exact (all three extra arguments provided):
+    * ngh_kf (all three extra arguments provided):
       S = Σ_{j,k} w_{jk} [Γ(j,k) + δ_{jk} δ_{jk}ᵀ]
       where δ_{jk} = μ_{Y,jk} − Σ w μ_{Y} is the deviation of the
       component mean from the mixture mean.  S is the *stationary*
       marginal innovation covariance.
 
-    * imm_general (extra arguments None):
+    * gpb2 (extra arguments None):
       S is estimated from the sample covariance of the innovations.
 
     Returns  ν̃ = L⁻¹ ν   (shape same as *innovations*), where S = L Lᵀ.
@@ -124,7 +124,7 @@ def _standardise_innovations(
                 delta = mu_Y_jk[j][k] - mu_marg  # (s, 1)
                 S += w * (Gamma[j][k] + delta @ delta.T)
     else:
-        # Sample covariance fallback (imm_general mode)
+        # Sample covariance fallback (gpb2 mode)
         raw = innovations.T  # (s, N)
         S = np.cov(raw) if s > 1 else np.array([[float(np.var(innovations[:, 0]))]])
 

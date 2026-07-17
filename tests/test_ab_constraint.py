@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-tests/test_h5_constraint.py
+tests/test_ab_constraint.py
 ===========================
-Unit tests for prg/utils/h5_constraint.py.
+Unit tests for prg/utils/ab_constraint.py.
 
 Coverage
 --------
@@ -10,7 +10,7 @@ Coverage
 - apply_AB_constraint : return type, residual zero for all regimes,
                              preservation of (C, D, Σ_W, biases),
                              idempotency
-- compute_h5_residual     : zero on the AB manifold, non-zero off it
+- compute_ab_residual     : zero on the AB manifold, non-zero off it
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ import pytest
 
 from prg.classes.GSSParams import GSSParams
 from prg.models.base_gss_model import BaseGSSModel
-from prg.utils.h5_constraint import (
+from prg.utils.ab_constraint import (
+    ab_residual_max,
     apply_AB_constraint,
     compute_AB,
-    compute_h5_pair_residual,
-    compute_h5_residual,
-    h5_residual_max,
+    compute_ab_pair_residual,
+    compute_ab_residual,
 )
 
 
@@ -84,23 +84,23 @@ class TestComputeAB:
         assert B.shape == (q, s), f"expected ({q},{s}), got {B.shape}"
 
     def test_residual_zero(self, rng):
-        """A model parametrised by the AB constraint must satisfy (H5) for any Σ_U."""
+        """A model parametrised by the AB constraint must satisfy AB for any Σ_U."""
         q, s = 2, 3
         C, D, SU, Dt, SV = _random_inputs(q, s, rng)
         A, B = compute_AB(C, D, Dt, SV)
-        F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
+        F = compute_ab_residual(A, B, C, D, SU, Dt, SV)
         assert np.linalg.norm(F, "fro") < 1e-10, (
             f"residual at AB-constraint = {np.linalg.norm(F, 'fro'):.3e}"
         )
 
     def test_residual_zero_independent_of_SU(self, rng):
-        """The (H5) residual under the AB constraint must remain zero for any Σ_U."""
+        """The AB residual under the AB constraint must remain zero for any Σ_U."""
         q, s = 2, 3
         C, D, _, Dt, SV = _random_inputs(q, s, rng)
         A, B = compute_AB(C, D, Dt, SV)
         for _ in range(5):
             SU_alt = _make_pd(q, rng)
-            F = compute_h5_residual(A, B, C, D, SU_alt, Dt, SV)
+            F = compute_ab_residual(A, B, C, D, SU_alt, Dt, SV)
             assert np.linalg.norm(F, "fro") < 1e-10
 
     def test_singular_SV_raises(self):
@@ -134,7 +134,7 @@ class TestApplyABConstraint:
         assert isinstance(result, GSSParams)
 
     def test_residual_zero_for_all_regimes(self, params_K2_q1_s1):
-        """Every regime k of the projected model satisfies (H5)."""
+        """Every regime k of the projected model satisfies AB."""
         constrained = apply_AB_constraint(params_K2_q1_s1)
         for k in range(constrained.K):
             A = constrained.f_matrix.A(k)
@@ -144,7 +144,7 @@ class TestApplyABConstraint:
             SU = constrained.noise_cov.Sigma_U(k)
             Dt = constrained.noise_cov.Delta(k)
             SV = constrained.noise_cov.Sigma_V(k)
-            F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
+            F = compute_ab_residual(A, B, C, D, SU, Dt, SV)
             assert np.linalg.norm(F, "fro") < 1e-10, (
                 f"k={k}: residual = {np.linalg.norm(F, 'fro'):.3e}"
             )
@@ -183,37 +183,37 @@ class TestApplyABConstraint:
 
 
 # ---------------------------------------------------------------------------
-# compute_h5_residual
+# compute_ab_residual
 # ---------------------------------------------------------------------------
-class TestComputeH5Residual:
+class TestComputeABResidual:
     def test_zero_at_AB(self, rng):
-        """(H5) residual is exactly zero on the AB-constraint manifold."""
+        """AB residual is exactly zero on the AB-constraint manifold."""
         q, s = 2, 3
         C, D, SU, Dt, SV = _random_inputs(q, s, rng)
         A, B = compute_AB(C, D, Dt, SV)
-        F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
+        F = compute_ab_residual(A, B, C, D, SU, Dt, SV)
         assert F.shape == (s, q)
         assert np.linalg.norm(F, "fro") < 1e-10
 
     def test_nonzero_for_random_AB(self, rng):
-        """(H5) residual is generically non-zero for arbitrary A, B."""
+        """AB residual is generically non-zero for arbitrary A, B."""
         q, s = 2, 3
         C, D, SU, Dt, SV = _random_inputs(q, s, rng)
         A = rng.standard_normal((q, q)) * 0.5
         B = rng.standard_normal((q, s)) * 0.5
-        F = compute_h5_residual(A, B, C, D, SU, Dt, SV)
+        F = compute_ab_residual(A, B, C, D, SU, Dt, SV)
         assert np.linalg.norm(F, "fro") > 1e-3
 
 
 # ---------------------------------------------------------------------------
-# Pairwise (all-pairs) (H5) check
+# Pairwise (all-pairs) AB check
 # ---------------------------------------------------------------------------
-class TestPairwiseH5:
+class TestPairwiseAB:
     def test_ab_model_fully_compatible(self, params_K2_q1_s1):
-        """An AB-constrained model is (H5)-compatible across every regime pair."""
+        """An AB-constrained model is AB-constrained across every regime pair."""
         ab = apply_AB_constraint(params_K2_q1_s1)
-        max_rel, _ = h5_residual_max(ab)
-        assert max_rel < 1e-9, f"AB model not fully (H5)-compatible: {max_rel:.3e}"
+        max_rel, _ = ab_residual_max(ab)
+        assert max_rel < 1e-9, f"AB model not fully AB-constrained: {max_rel:.3e}"
 
     def test_pair_residual_zero_on_AB_manifold(self, rng):
         """β₁(j, k) vanishes for all pairs when every regime is AB-parametrised."""
@@ -227,12 +227,12 @@ class TestPairwiseH5:
             for k in range(2):
                 Ak, Bk, Ck, Dk, _, Dtk, SVk = reg[k]
                 _, _, _, _, SUj, Dtj, SVj = reg[j]
-                b1 = compute_h5_pair_residual(Ak, Bk, Ck, Dk, Dtk, SVk, SUj, Dtj, SVj)
+                b1 = compute_ab_pair_residual(Ak, Bk, Ck, Dk, Dtk, SVk, SUj, Dtj, SVj)
                 assert np.linalg.norm(b1, "fro") < 1e-9
 
     def test_pairwise_strictly_stronger_than_same_regime(self):
         """A non-AB model can satisfy *every* same-regime residual yet violate
-        (H5) on a cross pair (j != k); only the pairwise check catches it.
+        AB on a cross pair (j != k); only the pairwise check catches it.
 
         Built in the sub-determined regime K=2, q=2, s=1 (Ks < q+s), where the
         same-regime residual has a non-trivial null space.
@@ -260,7 +260,7 @@ class TestPairwiseH5:
         def mono_of(vec):
             A = vec[:nA].reshape(q, q)
             B = vec[nA:].reshape(q, s)
-            return compute_h5_residual(A, B, r0[2], r0[3], r0[4], r0[5], r0[6]).ravel()
+            return compute_ab_residual(A, B, r0[2], r0[3], r0[4], r0[5], r0[6]).ravel()
 
         n = base.size
         J = np.zeros((s * q, n))
@@ -276,14 +276,14 @@ class TestPairwiseH5:
         reg[0][1] = pert[nA:].reshape(q, s)
 
         # Same-regime residual stays ~0 for every regime (necessary condition holds) ...
-        mono_max = max(np.linalg.norm(compute_h5_residual(*reg[k]), "fro") for k in range(2))
+        mono_max = max(np.linalg.norm(compute_ab_residual(*reg[k]), "fro") for k in range(2))
         assert mono_max < 1e-8, f"same-regime residual unexpectedly nonzero: {mono_max:.2e}"
 
-        # ... yet the pairwise check detects the cross-pair (H5) violation.
+        # ... yet the pairwise check detects the cross-pair AB violation.
         pair_max = 0.0
         for j in range(2):
             for k in range(2):
-                b1 = compute_h5_pair_residual(
+                b1 = compute_ab_pair_residual(
                     reg[k][0],
                     reg[k][1],
                     reg[k][2],

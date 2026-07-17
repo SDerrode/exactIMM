@@ -6,7 +6,7 @@ prg/models/model_gss_K2_q1_s1_consigne.py
 NGH-MSM demo *with an exogenous input* ("consigne"): K=2, q=1, s=1, p=1.
 
 Same NGH-MSM blocks as ``model_gss_K2_q1_s1`` (A, B derived from the AB
-constraint, so (H5) holds by construction), plus a regime-dependent input gain
+constraint, so AB holds by construction), plus a regime-dependent input gain
 G(k) = [G^X(k); G^Y(k)] whose hidden-state component **flips sign across
 regimes** — so the known input u_n drives X in opposite directions depending on
 the active regime, and the exact filter's ``N_k u_{n-1}`` read-out genuinely

@@ -2,11 +2,11 @@
 """
 tests/test_filter_modes.py
 ==========================
-Equivalence of the two GSSFilter modes under (H5), across dimensions.
+Equivalence of the two GSSFilter modes under AB, across dimensions.
 
-Regression guard for the imm_general pair-variance bug: on any
-(H5)-compatible (AB) model the time-varying ``imm_general`` recursion and the
-constant-gain ``h5_exact`` recursion must agree to machine precision. The
+Regression guard for the gpb2 pair-variance bug: on any
+AB-constrained model the time-varying ``gpb2`` recursion and the
+constant-gain ``ngh_kf`` recursion must agree to machine precision. The
 original suite only exercised the scalar case K=2, q=1, s=1, which let the bug
 through; here we also cover K>2 and q, s > 1.
 """
@@ -21,13 +21,14 @@ from prg.classes.GSSParams import GSSParams
 from prg.classes.GSSSimulator import GSSSimulator
 from prg.classes.NoiseCovariance import GSSNoiseCovariance
 from prg.experiments.models_paper import get_params
+from prg.experiments.reference_filters import with_stationary_init
 from prg.experiments.run_simulations import _params_from_dict
 from prg.filter.gss_filter import GSSFilter
-from prg.utils.h5_constraint import apply_AB_constraint, h5_residual_max
+from prg.utils.ab_constraint import ab_residual_max, apply_AB_constraint
 
 
-def _random_h5_model(K: int, q: int, s: int, seed: int, scale: float = 0.3) -> GSSParams:
-    """Build a *stable*, (H5)-compatible (AB) GSSParams for arbitrary (K, q, s).
+def _random_ab_model(K: int, q: int, s: int, seed: int, scale: float = 0.3) -> GSSParams:
+    """Build a *stable*, AB-constrained GSSParams for arbitrary (K, q, s).
 
     Retries with incremented seeds until the spectral radius of every F(k) is
     < 0.95, so simulated trajectories stay bounded.
@@ -70,7 +71,7 @@ def _random_h5_model(K: int, q: int, s: int, seed: int, scale: float = 0.3) -> G
         rho = max(float(np.max(np.abs(np.linalg.eigvals(params.f_matrix.F(k))))) for k in range(K))
         if rho < 0.95:
             return params
-    raise RuntimeError(f"could not build a stable (H5) model for (K={K}, q={q}, s={s})")
+    raise RuntimeError(f"could not build a stable AB model for (K={K}, q={q}, s={s})")
 
 
 def _run(params: GSSParams, mode: str, n: int = 300, seed: int = 2):
@@ -86,24 +87,36 @@ def _run(params: GSSParams, mode: str, n: int = 300, seed: int = 2):
 
 
 def _assert_modes_agree(params: GSSParams) -> None:
-    pe, xe, le = _run(params, "h5_exact")
-    pg, xg, lg = _run(params, "imm_general")
+    """Both modes must agree on an AB model *at stationarity*.
+
+    The stationary initialisation is not incidental, it is ``ngh_kf``'s
+    precondition: that mode reads the state off pre-computed per-regime moments,
+    which are the true ones only once the chain sits at its stationary law.
+    ``gpb2`` instead starts from the model's stated p(Z_0 | r_0). On a model
+    initialised away from stationarity the two therefore disagree — by ~1e-1 on
+    M1--M3 — and that is not a bug: ``gpb2`` is the one honouring the stated
+    prior. (Before v0.10 this held silently, because the superseded
+    ``imm_general`` recursion also started from the stationary moments.)
+    """
+    params = with_stationary_init(params)
+    pe, xe, le = _run(params, "ngh_kf")
+    pg, xg, lg = _run(params, "gpb2")
     assert np.all(np.isfinite(pe)) and np.all(np.isfinite(pg))
     assert np.abs(pe - pg).max() < 1e-8, f"max|Δπ| = {np.abs(pe - pg).max():.2e}"
     assert np.abs(xe - xg).max() < 1e-8, f"max|ΔE_x| = {np.abs(xe - xg).max():.2e}"
     assert abs(le - lg) < 1e-6 * max(1.0, abs(le)), f"Δlog_lik = {abs(le - lg):.2e}"
 
 
-class TestModeEquivalenceUnderH5:
+class TestModeEquivalenceUnderAB:
     @pytest.mark.parametrize("name", ["M1", "M2", "M3"])
     def test_paper_models(self, name):
-        """h5_exact ≡ imm_general on the AB-constrained paper models (incl. M2: q=s=2)."""
+        """ngh_kf ≡ gpb2 on the AB-constrained paper models (incl. M2: q=s=2)."""
         _assert_modes_agree(_params_from_dict(get_params(name)))
 
     @pytest.mark.parametrize("K,q,s", [(3, 2, 2), (3, 2, 1), (4, 1, 1), (2, 3, 2)])
     def test_generated_models(self, K, q, s):
-        """h5_exact ≡ imm_general on freshly built (H5) models with K>2 and/or q,s>1."""
-        params = _random_h5_model(K, q, s, seed=1)
-        h5max, _ = h5_residual_max(params)
-        assert h5max < 1e-8, f"built model is not (H5)-compatible: {h5max:.2e}"
+        """ngh_kf ≡ gpb2 on freshly built AB models with K>2 and/or q,s>1."""
+        params = _random_ab_model(K, q, s, seed=1)
+        h5max, _ = ab_residual_max(params)
+        assert h5max < 1e-8, f"built model is not AB-constrained: {h5max:.2e}"
         _assert_modes_agree(params)

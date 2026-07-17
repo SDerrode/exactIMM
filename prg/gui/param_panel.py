@@ -9,9 +9,9 @@ Each tab (_StateTab) exposes:
   - Σ_W(k)   : MatrixTableWidget (SPD check enabled)
   - μ_z0(k), b_X(k), b_Y(k) : VectorWidgets
 
-(H5)-compatible AB constraint
+AB constraint
 ----------------------------------
-A single checkbox per regime enforces the closed-form (H5)-compatible
+A single checkbox per regime enforces the closed-form AB-constrained
 "AB constraint" parametrisation::
 
     A(k) = Δ(k) Σ_V(k)⁻¹ C(k),
@@ -23,7 +23,7 @@ on every edit of (C(k), D(k), Δ(k), Σ_V(k)). When unchecked, the previous
 
 The constraint is **checked by default** on every newly built tab, so a fresh
 model is a valid NGH-MSM out of the box (A, B derived, blocks greyed out).
-Uncheck it to edit A, B freely and explore general / non-(H5) models.
+Uncheck it to edit A, B freely and explore general / model violating ABs.
 
 Stability indicators
 --------------------
@@ -52,12 +52,12 @@ from PyQt6.QtWidgets import (
 )
 
 from prg.gui.matrix_widget import MatrixTableWidget, VectorWidget
-from prg.utils.h5_constraint import compute_AB, compute_h5_residual
+from prg.utils.ab_constraint import compute_AB, compute_ab_residual
 
-# Tolerance for the live (H5) residual badge — kept in sync with
-# prg.filter.gss_filter.H5_TOL so the GUI shows a green badge in
-# exactly the regime where mode='h5_exact' would not warn.
-_H5_BADGE_TOL = 1e-6
+# Tolerance for the live AB residual badge — kept in sync with
+# prg.filter.gss_filter.AB_TOL so the GUI shows a green badge in
+# exactly the regime where mode='ngh_kf' would not warn.
+_AB_BADGE_TOL = 1e-6
 
 # Pill style for constraint error messages (explicit background → readable on any theme)
 _CONSTRAINT_ERR_STYLE = (
@@ -76,7 +76,7 @@ _CONSTRAINT_OK_STYLE = "color: #155399; font-size: 10px;"
 
 class _StateTab(QWidget):
     """One tab: F(k), Σ_W(k), μ_z0(k), b_X(k), b_Y(k) side by side,
-    plus a (H5)-compatible AB constraint checkbox and stability badges."""
+    plus a AB constraint checkbox and stability badges."""
 
     validity_changed = pyqtSignal(bool)
     value_changed = pyqtSignal()  # emitted whenever any cell changes
@@ -115,10 +115,10 @@ class _StateTab(QWidget):
         self._constraint_AB_check = QCheckBox(f"AB constraint on (A({k}), B({k}))")
         self._constraint_AB_check.setToolTip(
             "Force A(k) = Δ(k) Σ_V(k)⁻¹ C(k) and B(k) = Δ(k) Σ_V(k)⁻¹ D(k).\n"
-            "This closed form is sufficient for (H5); when checked, the A and\n"
+            "This closed form is sufficient for AB; when checked, the A and\n"
             "B blocks of F(k) become read-only and are recomputed live as you\n"
-            "edit C, D, Δ or Σ_V. Other (H5)-compatible (A, B) may exist when\n"
-            "K·s < q+s; the live (H5) badge is the source of truth."
+            "edit C, D, Δ or Σ_V. Other AB-constrained (A, B) may exist when\n"
+            "K·s < q+s; the live AB badge is the source of truth."
         )
         self._constraint_AB_check.setStyleSheet(self._CHK_STYLE_AB)
         chk_row.addWidget(self._constraint_AB_check)
@@ -140,9 +140,9 @@ class _StateTab(QWidget):
         self._f_widget.set_matrix(np.eye(q + s) * 0.5)
 
         # Stability badges live in a sub-column directly below _f_widget.
-        # The (H5) residual badge — green when ‖F‖_F < _H5_BADGE_TOL,
+        # The AB residual badge — green when ‖F‖_F < _AB_BADGE_TOL,
         # amber otherwise — lives beside them so the user sees at a glance
-        # whether the current model is (H5)-compatible.
+        # whether the current model is AB-constrained.
         self._stab_F_badge = QLabel()
         self._stab_F_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._stab_F_badge.setFixedHeight(16)
@@ -152,13 +152,13 @@ class _StateTab(QWidget):
         self._stab_D_badge = QLabel()
         self._stab_D_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._stab_D_badge.setFixedHeight(16)
-        self._h5_badge = QLabel()
-        self._h5_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self._h5_badge.setFixedHeight(16)
-        self._h5_badge.setToolTip(
-            "Per-regime (k,k) residual — a NECESSARY but not sufficient (H5) check.\n"
-            "Full (H5) is over all K² regime pairs and is verified on the complete\n"
-            "model when you Filter (the 'exactIMM (H5 required)' mode validates it)."
+        self._ab_badge = QLabel()
+        self._ab_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._ab_badge.setFixedHeight(16)
+        self._ab_badge.setToolTip(
+            "Per-regime (k,k) residual — a NECESSARY but not sufficient AB check.\n"
+            "Full AB is over all K² regime pairs and is verified on the complete\n"
+            "model when you Filter (the 'NGH-MSM-KF' mode validates it)."
         )
 
         f_col = QVBoxLayout()
@@ -168,7 +168,7 @@ class _StateTab(QWidget):
         f_col.addWidget(self._stab_F_badge)
         f_col.addWidget(self._stab_A_badge)
         f_col.addWidget(self._stab_D_badge)
-        f_col.addWidget(self._h5_badge)
+        f_col.addWidget(self._ab_badge)
         f_col.addStretch()
         widgets_row.addLayout(f_col)
 
@@ -502,7 +502,7 @@ class _StateTab(QWidget):
     # ------------------------------------------------------------------
 
     def _update_stability_badges(self) -> None:
-        """Recompute ρ(F), ρ(A), ρ(D) and the (H5) residual; refresh all four badges."""
+        """Recompute ρ(F), ρ(A), ρ(D) and the AB residual; refresh all four badges."""
         F = self._f_widget.get_matrix()
         n = self._q + self._s
         self._set_badge(self._stab_F_badge, "ρ(F)", F, 0, n, 0, n)
@@ -510,13 +510,13 @@ class _StateTab(QWidget):
         self._set_badge(
             self._stab_D_badge, "ρ(D)", F, self._q, self._q + self._s, self._q, self._q + self._s
         )
-        self._update_h5_badge()
+        self._update_ab_badge()
 
-    def _update_h5_badge(self) -> None:
-        """Compute the (H5) Frobenius residual and style ``_h5_badge``.
+    def _update_ab_badge(self) -> None:
+        """Compute the AB Frobenius residual and style ``_ab_badge``.
 
-        Green ✓ when ‖F‖_F < ``_H5_BADGE_TOL`` (model is (H5)-compatible
-        and ``mode='h5_exact'`` is safe), amber ⚠ otherwise (filter would
+        Green ✓ when ‖F‖_F < ``_AB_BADGE_TOL`` (model is AB-constrained
+        and ``mode='ngh_kf'`` is safe), amber ⚠ otherwise (filter would
         emit a warning), grey ? when the residual cannot be evaluated
         (singular M, missing matrix data).
         """
@@ -527,13 +527,13 @@ class _StateTab(QWidget):
         F = self._f_widget.get_matrix()
         Sw = self._sigma_widget.get_matrix()
         if F is None or Sw is None:
-            self._h5_badge.setText("(H5) = ?")
-            self._h5_badge.setStyleSheet(_GREY)
+            self._ab_badge.setText("AB = ?")
+            self._ab_badge.setStyleSheet(_GREY)
             return
 
         q, s = self._q, self._s
         try:
-            res = compute_h5_residual(
+            res = compute_ab_residual(
                 A=F[:q, :q],
                 B=F[:q, q:],
                 C=F[q:, :q],
@@ -544,18 +544,18 @@ class _StateTab(QWidget):
             )
             res_norm = float(np.linalg.norm(res, "fro"))
         except np.linalg.LinAlgError, ValueError:
-            self._h5_badge.setText("(H5) = ?")
-            self._h5_badge.setStyleSheet(_GREY)
+            self._ab_badge.setText("AB = ?")
+            self._ab_badge.setStyleSheet(_GREY)
             return
 
-        if res_norm < _H5_BADGE_TOL:
+        if res_norm < _AB_BADGE_TOL:
             bg, fg, border = "#d4edda", "#155724", "#c3e6cb"
             icon = "✓"
         else:
             bg, fg, border = "#fff3cd", "#856404", "#ffc107"
             icon = "⚠"
-        self._h5_badge.setText(f"(H5) ‖F‖ = {res_norm:.2e} {icon}")
-        self._h5_badge.setStyleSheet(
+        self._ab_badge.setText(f"AB ‖F‖ = {res_norm:.2e} {icon}")
+        self._ab_badge.setStyleSheet(
             f"font-size: 10px; padding: 2px 8px; border-radius: 3px;"
             f"background: {bg}; color: {fg}; border: 1px solid {border};"
         )

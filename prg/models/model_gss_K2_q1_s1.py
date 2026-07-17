@@ -31,7 +31,7 @@ class ModelGssK2Q1S1(BaseGSSModel):
     # --- Dynamics: F(k) = [[A_k, B_k], [C_k, D_k]] ---
     # A_k, B_k are not stored: they are derived from (C, D, Δ, Σ_V) in
     # get_params() via the AB constraint (A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D),
-    # so the model satisfies (H5) — Markovianity of (R, Y) — by construction.
+    # so the model satisfies AB — Markovianity of (R, Y) — by construction.
     C_list: list[np.ndarray] = [np.array([[0.2]]),
      np.array([[0.1]])]
     D_list: list[np.ndarray] = [np.array([[0.7]]),

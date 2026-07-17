@@ -464,7 +464,7 @@ class PlotPanel(QWidget):
 class PredYPanel(QWidget):
     """Tab dedicated to the conditional distribution p(y_{n+1} | r_n=j, r_{n+1}=k, y_n).
 
-    Available after filtering in 'h5_exact' mode.  Contains two inner tabs:
+    Available after filtering in 'ngh_kf' mode.  Contains two inner tabs:
 
     • Trajectory — plots E[y_{n+1} | j, k, y_n] over the full simulation,
       with ±2σ envelope and the observed y_{n+1} overlay.
@@ -704,7 +704,7 @@ class PredYPanel(QWidget):
     # Sous-onglet 0 : Trajectoire
     # ------------------------------------------------------------------
 
-    _COL_SIG1 = "#1f77b4"  # blue   — signal 1 (H5 exact)
+    _COL_SIG1 = "#1f77b4"  # blue   — signal 1 (NGH-MSM-KF)
     _COL_SIG2 = "#ff7f0e"  # orange — signal 2 (exact Markov transition, éq. (f)/(h))
 
     def _refresh_traj(self) -> None:
@@ -712,7 +712,7 @@ class PredYPanel(QWidget):
 
         At each time step n:
 
-        Signal 1 (blue) — exact under (H5):
+        Signal 1 (blue) — exact under AB:
             E₁ = μ_Y_jk[j][k] + M_t[j][k] @ (y_n − μ_Y[j])    (varies with n)
             σ₁ = sqrt(diag(Γ(j,k)))                               (constant)
 
@@ -791,7 +791,7 @@ class PredYPanel(QWidget):
 
             # ── 2-column legend ──────────────────────────────────────────
             left_h = [line1]
-            left_l = [rf"$\mu_1/y^{i}_n$ (H5 exact)"]
+            left_l = [rf"$\mu_1/y^{i}_n$ (NGH-MSM-KF)"]
             right_h = [env1]
             right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
             if has_sig2:
@@ -823,7 +823,7 @@ class PredYPanel(QWidget):
             0.5,
             0.5,
             "Run the filter in\n"
-            "'Exact IMM – H5 required' mode\n"
+            "NGH-MSM-KF mode\n"
             "to display the trajectory\n"
             r"$\mathbb{E}[y_{n+1} \mid r_n,\; r_{n+1},\; y_n]$",
             transform=ax.transAxes,
@@ -843,7 +843,7 @@ class PredYPanel(QWidget):
     def _refresh_traj_raw(self) -> None:
         """Plot the same conditional signals as _refresh_traj but without normalisation.
 
-        Signal 1 (blue) — exact under (H5):
+        Signal 1 (blue) — exact under AB:
             E₁ = μ_Y_jk[j][k] + M_t[j][k] @ (y_n − μ_Y[j])    (varies with n)
             σ₁ = sqrt(diag(Γ(j,k)))                               (constant)
 
@@ -910,7 +910,7 @@ class PredYPanel(QWidget):
             )
 
             left_h = [line1]
-            left_l = [r"$\mu_1$ (H5 exact)"]
+            left_l = [r"$\mu_1$ (NGH-MSM-KF)"]
             right_h = [env1]
             right_l = [rf"$\pm 2\sigma_1={sig1_i:.3g}$"]
             if has_sig2:
@@ -942,7 +942,7 @@ class PredYPanel(QWidget):
             0.5,
             0.5,
             "Run the filter in\n"
-            "'Exact IMM – H5 required' mode\n"
+            "NGH-MSM-KF mode\n"
             "to display the trajectory\n"
             r"$\mathbb{E}[y_{n+1} \mid r_n,\; r_{n+1},\; y_n]$",
             transform=ax.transAxes,
@@ -967,7 +967,7 @@ class PredYPanel(QWidget):
         k = self._k_combo.currentIndex()
         y_n = self._get_yn()
 
-        # Signal 1 — exact under (H5)
+        # Signal 1 — exact under AB
         mu1 = self._mu_Y_jk[j][k] + self._M_t[j][k] @ (y_n - self._mu_Y[j])
         Gamma1 = self._Gamma[j][k]
 
@@ -1042,7 +1042,7 @@ class PredYPanel(QWidget):
 
         # ── Légende 2 colonnes (remplissage colonne par colonne) ────────────
         left_h = [line1]
-        left_l = [rf"$p_1$ H5 exact   $\mu_1={m1:.4g}$"]
+        left_l = [rf"$p_1$ NGH-MSM-KF   $\mu_1={m1:.4g}$"]
         right_h = [env1]
         right_l = [rf"$\pm 2\sigma_1={sig1:.4g}$"]
         if has2:
@@ -1307,7 +1307,7 @@ class PredYPanel(QWidget):
             0.5,
             0.5,
             "Run the filter in\n"
-            "'Exact IMM – H5 required' mode\n"
+            "NGH-MSM-KF mode\n"
             "to display\n"
             r"$p(y_{n+1} \mid r_n,\; r_{n+1},\; y_n)$",
             transform=ax.transAxes,

@@ -107,7 +107,7 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
 
         # ---- Table 2: M1 filter benchmark (N=500, 2000, 5000) --------
         for N, n_tag in [(500, "500"), (2000, "2000"), (5000, "5000")]:
-            for mode, m_tag in [("h5_exact", "h5"), ("imm_general", "imm")]:
+            for mode, m_tag in [("ngh_kf", "h5"), ("gpb2", "imm")]:
                 g = df[(df["model"] == "M1") & (df["N"] == N) & (df["mode"] == mode)]
                 if g.empty:
                     continue
@@ -123,25 +123,21 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
                 rep[f"CPU M1 {m_tag} N{n_tag}"] = _f(cpu_us, 1)
 
         # ---- RMSE gap M1 h5 vs imm at N=2000 (narrative) ---------------
-        h5 = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "h5_exact")][
-            "rmse"
-        ].mean()
-        imm = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "imm_general")][
-            "rmse"
-        ].mean()
+        h5 = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "ngh_kf")]["rmse"].mean()
+        imm = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "gpb2")]["rmse"].mean()
         if np.isfinite(h5) and np.isfinite(imm) and imm > 0:
             gap_pct = (imm - h5) / imm * 100
             rep["RMSE gap h5 vs imm M1 N2000 pct"] = _f(gap_pct, 1)
 
         # ---- NEES direction for narrative (above/below 1) ---------------
-        for mode, m_tag in [("h5_exact", "h5"), ("imm_general", "imm")]:
+        for mode, m_tag in [("ngh_kf", "h5"), ("gpb2", "imm")]:
             g = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == mode)]
             if not g.empty:
                 nees_val = g["nees"].mean()
                 rep[f"NEES M1 {m_tag} N2000"] = _f(nees_val, 3)
 
         # ---- LB reject rate for narrative --------------------------------
-        for mode, m_tag in [("h5_exact", "h5"), ("imm_general", "imm")]:
+        for mode, m_tag in [("ngh_kf", "h5"), ("gpb2", "imm")]:
             g = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == mode)]
             if not g.empty:
                 reject_pct = float((g["lb_pval"] < 0.05).mean() * 100)
@@ -149,7 +145,7 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
 
         # ---- Table 3: M2/M3 at N=2000 --------------------------------
         for model in ("M2", "M3"):
-            for mode, m_tag in [("h5_exact", "h5"), ("imm_general", "imm")]:
+            for mode, m_tag in [("ngh_kf", "h5"), ("gpb2", "imm")]:
                 g = df[(df["model"] == model) & (df["N"] == 2000) & (df["mode"] == mode)]
                 if g.empty:
                     continue
@@ -158,13 +154,13 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
                 rep[f"NEES {model} {m_tag}"] = _f(g["nees"].mean(), 3)
                 rep[f"LB {model} {m_tag}"] = _f(lb_pass_pct, 0)
 
-        # ---- BIC (K=2, true model, from h5_exact log-lik) ---------------
+        # ---- BIC (K=2, true model, from ngh_kf log-lik) ---------------
         # Note: proper BIC for K≠2 requires separate EM fits per K.
         # Here we only compute the K=2 BIC as a reference.
-        from prg.experiments.metrics import dof_h5
+        from prg.experiments.metrics import dof_ab
 
-        sub_bic = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "h5_exact")]
-        d2 = dof_h5(2, 1, 1)
+        sub_bic = df[(df["model"] == "M1") & (df["N"] == 2000) & (df["mode"] == "ngh_kf")]
+        d2 = dof_ab(2, 1, 1)
         bic2 = sub_bic["log_lik"].dropna().apply(lambda ll: d2 * np.log(2000) - 2.0 * ll).mean()
         rep["BIC K2 M1 N2000"] = _f(bic2, 1)
 
@@ -173,7 +169,7 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
     # ==================================================================
     df_sup = _load_csv(data_dir / "supervised_results.csv")
     if df_sup is not None:
-        for c in ("rel_err_F", "rel_err_b", "h5_residual", "rmse_estimated", "rmse_oracle"):
+        for c in ("rel_err_F", "rel_err_b", "ab_residual", "rmse_estimated", "rmse_oracle"):
             df_sup[c] = pd.to_numeric(df_sup[c], errors="coerce")
 
         for proj in ("none", "ab"):
@@ -189,8 +185,8 @@ def build_replacements(data_dir: pathlib.Path = DATA_DIR) -> dict[str, str]:
                 if len(rb) > 0:
                     rep[f"relb {proj} N{N}"] = _f(rb.mean())
 
-            # H5 residual at N=2000
-            g2k = sub[sub["N"] == 2000]["h5_residual"].dropna()
+            # AB residual at N=2000
+            g2k = sub[sub["N"] == 2000]["ab_residual"].dropna()
             if len(g2k) > 0:
                 rep[f"h5resid {proj} N2000"] = _sci(float(g2k.median()))
 

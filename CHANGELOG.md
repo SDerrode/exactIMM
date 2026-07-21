@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] — 2026-07-18
+
+Numbers, names and one experiment protocol — no API change.
+
+### Fixed
+
+- **The vehicle low-speed bias count was wrong and unverifiable.** The supplementary
+  claimed a residual bias "present in 18 of the 30 held-out files"; no routine in this
+  repo produced that number, and no natural definition reproduces it. The likely origin
+  is a transcription of the *largest* bias, 18.3 deg/s, into a file count. The real
+  figures, now computed by `_low_speed_bias()` in
+  `prg/experiments/make_vehicle_consigne_fig.py` under stated thresholds
+  (near-standstill = below 5 km/h, at least 50 such samples, biased if the mean signed
+  residual exceeds 1 deg/s): **10 of the 30** held-out files exercise the
+  near-standstill regime at all — the rest is motorway driving — and the plain read-out
+  is biased on **3** of them, by up to **18.3 deg/s**. The substantive claim is
+  unaffected and in fact strengthened: the `steering x speed` term removes that bias on
+  every one of those files (largest remaining 0.75 deg/s, none above threshold).
+  `main()` now returns and prints these counts, so the paper's numbers are reproducible.
+
+### Changed
+
+- **Cost experiment (`exp_speed`) reaches further in state dimension**: the sweep now
+  runs `q = s` up to 64 (was 24) at `N = 800` (was 3000), which is what makes the
+  GPB2-versus-constant-gain ratio visibly widen (0.93x at q=1, 1.32x at q=8, 6.45x at
+  q=64) instead of looking flat.
+- **`exp_speed` docstring corrected.** It claimed the per-step cost is "flat in q".
+  It is not: a ~140 us/step interpreter overhead dominates the arithmetic over the whole
+  reachable range, so no asymptotic exponent is observable from these timings. The
+  quadratic-versus-cubic gap is an operation count, not a measurement, and the docstring
+  now says so. It also no longer describes the (removed) legacy mode as "not timed here".
+- **Fifth author recorded**: Ugo Hubert-Almuzara, in `CITATION.cff` and the README
+  BibTeX entry, resolving the placeholders left in v2.0.0.
+
 ## [2.0.0] — 2026-07-17
 
 Breaking. The two filter modes are renamed, and the legacy general-purpose

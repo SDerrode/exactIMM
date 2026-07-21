@@ -457,9 +457,8 @@ logs            = "logs"
 If you use this code or the AB framework in your work, please cite:
 
 ```bibtex
-% Note: 5th author (Ugo, surname to be confirmed) to be added to the author list.
 @misc{derrode_exactIMM_2026,
-  author       = {Derrode, St{\'e}phane and Fernandes, Cl{\'e}ment and Lehmann, Fr{\'e}d{\'e}ric and Pieczynski, Wojciech},
+  author       = {Derrode, St{\'e}phane and Fernandes, Cl{\'e}ment and Lehmann, Fr{\'e}d{\'e}ric and Hubert-Almuzara, Ugo and Pieczynski, Wojciech},
   title        = {{Exact Constant-Gain Filtering in Gaussian Markov Switching Systems}},
   year         = {2026},
   howpublished = {\url{https://github.com/SDerrode/exactIMM}},

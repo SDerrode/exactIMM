@@ -34,7 +34,7 @@ keywords:
   - ENSO
   - signal processing
 license: AGPL-3.0
-version: "2.0.0"
+version: "2.0.1"
 date-released: "2026-07-07"
 preferred-citation:
   type: generic
@@ -46,8 +46,9 @@ preferred-citation:
       family-names: Fernandes
     - given-names: Frédéric
       family-names: Lehmann
+    - given-names: Ugo
+      family-names: Hubert-Almuzara
     - given-names: Wojciech
       family-names: Pieczynski
-  # NOTE: 5th author (given-names: Ugo) to be added once the surname is confirmed.
   year: 2026
   notes: "Preprint, accompanying this software."

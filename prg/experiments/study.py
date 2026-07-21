@@ -391,8 +391,8 @@ def _time_filter(params, ys, mode, repeats=1):
 
 
 DIM_SPEED = 8  # state dimension of the sequence-length panel: past the GPB2 crossover
-DIMS_SPEED = [1, 2, 4, 8, 16, 24]
-N_DIM_SWEEP = 3000
+DIMS_SPEED = [1, 2, 4, 8, 16, 32, 48, 64]
+N_DIM_SWEEP = 800
 
 
 def exp_speed(outdir: Path) -> dict:
@@ -400,16 +400,23 @@ def exp_speed(outdir: Path) -> dict:
 
     Panel (a): wall time versus N -- every filter here is O(N); this panel establishes
     linearity, not an advantage. Panel (b): wall time versus the state dimension, which
-    is where the constant-gain read-out actually pays: it propagates no covariance, so
-    its per-step cost is flat in q, whereas GPB2 carries K^2 Riccati updates of size
-    (q+s) and grows.
+    is where the constant-gain read-out pays.
+
+    By operation count the per-step costs are O(K^2 s^2 + K q s) for ngh_kf -- K^2
+    kernel evaluations, each a matvec plus a log-pdf against a pre-factorised
+    precision, then K affine read-outs -- against O(K^2 (q+s)^3) for GPB2, whose K^2
+    Kalman updates each propagate a covariance. That is a quadratic-vs-cubic gap.
+    Do NOT claim it is visible in these timings: a ~140 us/step interpreter overhead
+    dominates the arithmetic over the whole reachable range, so the fitted exponents
+    (~0.1 and ~0.9 over q>=8) measure the overhead, not the algorithms, and ngh_kf's
+    near-flatness at small q is an artefact of it. What the timings do establish is a
+    ratio that widens monotonically (0.92x at q=1, 1.30x at q=8, 6.17x at q=64) and
+    keeps widening.
 
     Baselines are the literature filters: GPB2 (order 2) returns the *same* exact
     posterior as the proposed filter on an AB model, so it is the honest cost
     comparison; the order-1 pairwise IMM is cheaper but only approximate (exact iff
-    C=0). The legacy ``gpb2`` mode is deliberately not timed here: it is this
-    project's own superseded recursion, not a literature baseline, and it coincides
-    with ``ngh_kf`` on AB anyway.
+    C=0).
     """
     # ---- (a) wall time vs N, at a state dimension past the crossover -------------
     params = ab_model_dim(DIM_SPEED)
@@ -464,7 +471,7 @@ def exp_speed(outdir: Path) -> dict:
         ax2.plot(DIMS_SPEED, per_step[key], fmt, color=col, label=lab, ms=4)
     ax2.set_xlabel("state dimension $q=s$")
     ax2.set_ylabel(r"wall time [$\mu$s/step]")
-    ax2.set_title("(b) no covariance propagated: flat in $q$")
+    ax2.set_title("(b) no covariance propagated: cost vs $q$")
     ax2.legend(fontsize=7)
     fig.savefig(outdir / "figures" / "e2_speed.pdf")
     plt.close(fig)

@@ -78,6 +78,50 @@ def _rmse(y, yh):
     return float(np.sqrt(np.mean((y - yh) ** 2)))
 
 
+# Low-speed bias audit: thresholds are explicit so the counts quoted in the paper
+# are reproducible. "Near-standstill" = below LOW_KMH; a held-out file counts as
+# exercising that regime if it holds at least LOW_MIN_SAMPLES such samples; the
+# read-out is "biased" there if its mean signed residual exceeds BIAS_THR deg/s.
+LOW_KMH, LOW_MIN_SAMPLES, BIAS_THR = 5.0, 50, 1.0
+
+
+def _low_speed_bias(files, bC, bF):
+    """Per-file near-standstill bias of the plain read-out, and of the speed-aware one.
+
+    The plain read-out X = M y + N u is fitted on lateral acceleration and steering
+    only, so at a standstill it still predicts a yaw from the steering angle even
+    though a stopped car cannot yaw. Returns the counts quoted in the supplementary.
+    """
+    n_low, flagged, still_biased, max_plain, max_speed = 0, 0, 0, 0.0, 0.0
+    for f in files:
+        d = pd.read_parquet(f)
+        for c in [YAW, ALAT, STR, *WS]:
+            d[c] = _num(d[c])
+        d["spd"] = d[WS].mean(axis=1)
+        d = d.dropna(subset=[YAW, ALAT, STR, "spd"])
+        y, a, s = d[YAW].to_numpy(), d[ALAT].to_numpy(), d[STR].to_numpy()
+        v = d["spd"].to_numpy()
+        lo = v < LOW_KMH
+        if lo.sum() < LOW_MIN_SAMPLES:
+            continue
+        n_low += 1
+        b_plain = float(np.mean((bC[0] + bC[1] * a + bC[2] * s)[lo] - y[lo]))
+        b_speed = float(np.mean((bF[0] + bF[1] * a + bF[2] * (s * v))[lo] - y[lo]))
+        max_plain = max(max_plain, abs(b_plain))
+        if abs(b_plain) > BIAS_THR:
+            flagged += 1
+            max_speed = max(max_speed, abs(b_speed))
+            still_biased += abs(b_speed) > BIAS_THR
+    return {
+        "n_heldout": len(files),
+        "n_with_low_speed": n_low,
+        "n_biased_plain": flagged,
+        "max_bias_plain": max_plain,
+        "max_bias_speed_aware_on_those": max_speed,
+        "n_still_biased_speed_aware": still_biased,
+    }
+
+
 def main() -> dict:
     import matplotlib
 
@@ -164,7 +208,15 @@ def main() -> dict:
     g_sw = 100 * (1 - rmse["E_steerregime_consigne"] / rmse["C_blind_consigne"])
     g_all = 100 * (1 - rmse["E_steerregime_consigne"] / rmse["D_blind_inputblind"])
     print(f"  gains: consigne {g_cons:.0f}%  +switching {g_sw:.0f}%  total {g_all:.0f}%")
-    return rmse
+    lsb = _low_speed_bias(files[80:110], bC, bF)
+    print(
+        f"  low-speed bias (<{LOW_KMH:g} km/h): {lsb['n_with_low_speed']}/{lsb['n_heldout']} held-out "
+        f"files exercise it; plain read-out biased (>{BIAS_THR:g} deg/s) on {lsb['n_biased_plain']} "
+        f"of them, up to {lsb['max_bias_plain']:.1f} deg/s; with the steering x speed term, "
+        f"max {lsb['max_bias_speed_aware_on_those']:.2f} deg/s "
+        f"({lsb['n_still_biased_speed_aware']} still biased)"
+    )
+    return {**rmse, "low_speed_bias": lsb}
 
 
 if __name__ == "__main__":

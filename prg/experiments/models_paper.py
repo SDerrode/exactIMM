@@ -2,7 +2,9 @@
 """
 prg/experiments/models_paper.py
 ================================
-Reference GSS models used in the simulation study (§6 of the paper).
+Reference GSS models used in the simulation study (§6 of the archived V1
+draft, docs/attic/semi-supervised_EM/ — local archive, not tracked by git).
+The § numbers below refer to that draft.
 
 Models
 ------
@@ -64,7 +66,7 @@ def get_params_M1() -> dict:
     Transition matrix
         P = [[0.97, 0.03], [0.02, 0.98]]
 
-    Per-regime parameters (regime index 0 = regime 1 in the paper)
+    Per-regime parameters (regime index 0 = regime 1 in the draft)
         C:   [0.2]   / [0.1]
         D:   [0.7]   / [0.6]
         Σ_U: [0.10]  / [0.20]
@@ -130,7 +132,7 @@ def get_params_M2() -> dict:
     Full 2×2 matrices per regime; A, B computed from the AB-constrained
     AB constraint A = Δ Σ_V⁻¹ C, B = Δ Σ_V⁻¹ D.
     No bias (b_r = 0) to isolate the cross-coupling effect.
-    See Table 1 in §6.1 of the paper.
+    See Table 1 in §6.1 of the archived V1 draft.
     """
     K, q, s = 2, 2, 2
 

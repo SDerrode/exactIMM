@@ -2,7 +2,9 @@
 """
 prg/experiments/run_simulations.py
 ===================================
-Monte-Carlo simulation study for the paper §6.
+Monte-Carlo filter benchmark (§6.2 of the archived V1 draft; the protocol
+reference is docs/attic/semi-supervised_EM/06_experiments.tex — local
+archive, not tracked by git).
 
 Protocol
 --------
@@ -349,7 +351,7 @@ def _parse_args(argv: list[str] | None = None):
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Run the Monte-Carlo simulation study (paper §6).",
+        description="Run the Monte-Carlo filter benchmark (archived V1 draft §6.2).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

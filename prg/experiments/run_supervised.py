@@ -2,7 +2,8 @@
 """
 prg/experiments/run_supervised.py
 ==================================
-Monte-Carlo evaluation of the supervised OLS estimator (paper §6.3).
+Monte-Carlo evaluation of the supervised OLS estimator (§6.3 of the archived
+V1 draft, docs/attic/semi-supervised_EM/ — local archive, not tracked by git).
 
 Protocol (model M1, 100 runs)
 ------------------------------
@@ -499,7 +500,7 @@ def _print_supervised_summary(df: pd.DataFrame) -> None:
 
 def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Run supervised estimation MC study (paper §6.3).",
+        description="Run supervised estimation MC study (archived V1 draft §6.3).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

@@ -2,12 +2,18 @@
 """
 prg/experiments/make_figures.py
 ================================
-Generate paper figures and LaTeX table fragments from the Monte-Carlo
+Generate the V1-draft figures and LaTeX table fragments from the Monte-Carlo
 results produced by :mod:`prg.experiments.run_simulations`.
 
+The § numbers below refer to the archived V1 draft in
+``docs/attic/semi-supervised_EM/`` (local archive, not tracked by git). Its
+``06_experiments.tex`` \\input's the generated tables from
+``figures/generated/`` relative to itself, hence the default output directory
+below (override with ``--fig-dir``); it is created if absent.
+
 Reads  ``data/experiments/mc_results.csv``
-Writes ``paper/figures/generated/*.pdf``  (one file per figure)
-       ``paper/figures/generated/*.tex``  (table rows for \\input{})
+Writes ``docs/attic/semi-supervised_EM/figures/generated/*.pdf``  (one per figure)
+       ``docs/attic/semi-supervised_EM/figures/generated/*.tex``  (table rows for \\input{})
 
 Figures produced
 ----------------
@@ -69,7 +75,10 @@ __all__ = [
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]  # → exactIMM/
 DEFAULT_IN = REPO_ROOT / "data" / "experiments" / "mc_results.csv"
-DEFAULT_FIG_DIR = REPO_ROOT / "paper" / "figures" / "generated"
+# The V1 draft (formerly paper/, then docs/semi-superved_EM/) is deleted; its
+# archived 06_experiments.tex expects these outputs in figures/generated/ next
+# to it. The attic is local and not tracked by git.
+DEFAULT_FIG_DIR = REPO_ROOT / "docs" / "attic" / "semi-supervised_EM" / "figures" / "generated"
 
 # ---------------------------------------------------------------------------
 # Colour / style constants
@@ -354,7 +363,7 @@ def make_fig_supervised_rmse(
 ) -> pathlib.Path | None:
     """
     Filter RMSE as a function of N_train for each projection choice,
-    plus the oracle (true-params) curve.  Paper Fig. 2 (§6.3).
+    plus the oracle (true-params) curve.  V1-draft Fig. 2 (§6.3).
     """
     if not _HAS_MPL:
         return None
@@ -527,7 +536,7 @@ def make_fig_em_convergence(
     n_curves: int = 5,
 ) -> pathlib.Path | None:
     """
-    LL convergence over EM iterations for PH vs GEM, paper Fig. 3.
+    LL convergence over EM iterations for PH vs GEM, V1-draft Fig. 3.
 
     Plots the first `n_curves` seeds (thin lines) plus the mean (thick).
     """
@@ -888,7 +897,7 @@ def make_all(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate paper figures from MC results.",
+        description="Generate the archived V1-draft figures from MC results.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

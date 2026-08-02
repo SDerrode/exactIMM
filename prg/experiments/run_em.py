@@ -3,7 +3,8 @@
 prg/experiments/run_em.py
 ==========================
 Monte-Carlo evaluation of the semi-supervised Baum-Welch EM estimator
-(paper §6.4).
+(§6.4 of the archived V1 draft, docs/attic/semi-supervised_EM/ — local
+archive, not tracked by git).
 
 Two EM variants are compared
 ------------------------------
@@ -67,7 +68,8 @@ logger = logging.getLogger("exactIMM.experiments.em")
 # ---------------------------------------------------------------------------
 
 DEFAULT_MODEL = "M1"
-# Protocol of paper §6.4 (matches the committed tab_em_* tables): the defaults
+# Protocol of the archived V1 draft §6.4 (matches the tab_em_* tables that
+# make_figures.py regenerates for the archived 06_experiments.tex): the defaults
 # below are what the documented reproduction command (run with no flags) uses.
 DEFAULT_N_LIST = (500, 2_000)
 DEFAULT_N_RUNS = 100
@@ -483,7 +485,7 @@ def _print_em_summary(df: pd.DataFrame) -> None:
 
 def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Run semi-supervised EM MC study (paper §6.4).",
+        description="Run semi-supervised EM MC study (archived V1 draft §6.4).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--models", nargs="+", default=[DEFAULT_MODEL], choices=["M1", "M2", "M3"])

@@ -1,7 +1,12 @@
 """
 prg/experiments
 ===============
-Monte-Carlo simulation study (§6 of the paper).
+Monte-Carlo simulation study (§6.2–6.4 of the archived V1 draft).
+
+The V1 draft this study was written for has been deleted; its useful extracts
+(including ``06_experiments.tex``, the §6.2–6.4 protocol reference) are archived
+in ``docs/attic/semi-supervised_EM/`` (local archive, not tracked by git — see
+its README.md). All § numbers below refer to that document.
 
 Sub-modules
 -----------
@@ -27,19 +32,23 @@ run_em           — §6.4: semi-supervised Baum-Welch EM MC study (PH vs GEM):
                      run_em_all             full study → em_results.csv +
                                              em_ll_history.csv
                    CLI: python -m prg.experiments.run_em [--help]
-make_figures     — post-processing: reads all *_results.csv files and writes
-                     paper/figures/generated/fig_rmse_vs_N.pdf        (§6.2)
-                     paper/figures/generated/fig_supervised_rmse.pdf   (§6.3)
-                     paper/figures/generated/fig_em_convergence.pdf    (§6.4)
-                     paper/figures/generated/tab_filter_M1.tex         (§6.2)
-                     paper/figures/generated/tab_filter_M2M3.tex       (§6.2)
-                     paper/figures/generated/tab_supervised_M1.tex     (§6.3)
-                     paper/figures/generated/tab_em_basin.tex          (§6.4)
-                     paper/figures/generated/tab_em_restarts.tex       (§6.4)
+make_figures     — post-processing: reads all *_results.csv files and writes,
+                   by default into docs/attic/semi-supervised_EM/figures/generated/
+                   (where the archived 06_experiments.tex \\input's them):
+                     fig_rmse_vs_N.pdf        (§6.2)
+                     fig_supervised_rmse.pdf  (§6.3)
+                     fig_em_convergence.pdf   (§6.4)
+                     tab_filter_M1.tex        (§6.2)
+                     tab_filter_M2M3.tex      (§6.2)
+                     tab_supervised_M1.tex    (§6.3)
+                     tab_em_basin.tex         (§6.4)
+                     tab_em_restarts.tex      (§6.4)
                    CLI: python -m prg.experiments.make_figures [--help]
-fill_placeholders — final step: fills \\ph{...} placeholders in
-                     paper/sections/06_experiments.tex with numerical values
-                     computed from the *_results.csv files.
+fill_placeholders — final step: fills \\ph{...} placeholders in the archived
+                     docs/attic/semi-supervised_EM/06_experiments.tex with
+                     numerical values computed from the *_results.csv files.
+                     (The archived copy is already filled; only the figure
+                     fallback captions remain as \\ph{}.)
                    CLI: python -m prg.experiments.fill_placeholders [--help]
                          python -m prg.experiments.fill_placeholders --dry-run
 

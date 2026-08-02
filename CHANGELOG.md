@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`prg/experiments/cns_exactness.py`** — the committed experiment suite behind the
+  numerical section of the companion *exactness-domains* paper (docs/CNS-exactness,
+  not tracked here). Eight experiments (E1–E8) against the exact `K^N` mixture filter:
+  machine-precision checks on the exactness domains of the IMM (`{C≡0}`), GPB2
+  (`{C≡0} ∪ {A≡MC}`, uniform across regimes) and the constant-gain filter (AB);
+  structural bias off the domains (mixed-branch models, `~η³` growth); sharpness of
+  the non-degeneracy assumption; and time profiles showing the off-domain error does
+  not accumulate. Metric: normalized sup-norm deviation, median `[min,max]` over
+  100 seeds off the domains, max on them.
+- **`prg/experiments/make_cns_figures.py`** — the two figures of the same paper:
+  per-condition violation sweeps with fitted log-log slopes (collapse filters fail
+  cubically in the slaving residual, the constant-gain filter linearly), and the
+  uniformity requirement stated (grid of per-regime choices) then measured
+  (GPB2 gap map over `(A_1, C_2)`, vanishing exactly on the uniform-family line).
+- **`.zenodo.json`** — deposition metadata so a Zenodo DOI can be minted for the
+  repository (enable the repo on Zenodo and publish a GitHub Release).
+
 ## [2.0.1] — 2026-07-18
 
 Numbers, names and one experiment protocol — no API change.

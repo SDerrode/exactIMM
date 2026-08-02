@@ -1,0 +1,38 @@
+{
+  "title": "exactIMM: Fast Optimal Filtering in Gaussian Switching Systems",
+  "description": "<p>Reference implementation of the AB-constrained Gaussian Switching System (GSS) framework: a fast constant-gain exact optimal filter under the AB structural assumption, with support for a known exogenous input (deterministic command), supervised and semi-supervised parameter estimation (Baum-Welch EM), and Monte-Carlo benchmarks including real-data studies (vehicle dynamics and NOAA ENSO indices).</p><p>The repository also contains the reference implementations (exact K^N mixture filter, order-1 IMM, GPB2) and the experiment script backing the numerical section of the companion paper on the exactness domains of the IMM and GPB2 filters.</p>",
+  "upload_type": "software",
+  "license": "AGPL-3.0-or-later",
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Derrode, Stéphane",
+      "affiliation": "École Centrale de Lyon, LIRIS (CNRS UMR 5205)",
+      "orcid": "0000-0002-3989-4540"
+    },
+    {
+      "name": "Pieczynski, Wojciech",
+      "affiliation": "Télécom SudParis, Institut Polytechnique de Paris"
+    }
+  ],
+  "keywords": [
+    "state-space model",
+    "Markov-switching",
+    "regime-switching",
+    "Kalman filter",
+    "IMM",
+    "GPB2",
+    "exact filtering",
+    "pairwise Markov models",
+    "Baum-Welch",
+    "EM algorithm",
+    "signal processing"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/SDerrode/exactIMM",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

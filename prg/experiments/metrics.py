@@ -2,7 +2,9 @@
 """
 prg/experiments/metrics.py
 ==========================
-Scalar performance metrics for the Monte-Carlo simulation study (§6).
+Scalar performance metrics for the Monte-Carlo simulation study (§6 of the
+archived V1 draft, docs/attic/semi-supervised_EM/ — local archive, not
+tracked by git).
 
 All functions operate on numpy arrays collected over one Monte-Carlo run
 (N time steps).  They are intentionally stateless and side-effect free so

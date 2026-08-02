@@ -2,7 +2,13 @@
 """
 prg/experiments/run_real_data.py
 =================================
-Real-data experiments on the NOAA ENSO dataset (§7).
+Real-data experiments on the NOAA ENSO dataset (§7 of the archived V1
+draft, docs/attic/semi-supervised_EM/ — local archive, not tracked by git).
+
+INVALIDATED STUDY — kept as a witness. The ONI-derived regime labels leaked
+future information (look-ahead; see commit 6491efc and the attic README).
+The tables below feed no current paper; the witness copies produced for the
+archived draft live in docs/attic/semi-supervised_EM/figures/.
 
 Inputs
 ------
@@ -27,10 +33,12 @@ Experiments
 Outputs
 -------
     results/enso/
-        e1_table.json / .tex     AB empirical test
-        e2_table.json / .tex     filter comparison
-        e3_table.json / .tex     EM variant comparison
+        e1_table.json             AB empirical test
+        e2_table.json             filter comparison
+        e3_table.json             EM variant comparison
         regime_trace.csv          test-period regime probs and predictions
+    docs/attic/semi-supervised_EM/figures/generated/      (--fig-dir)
+        tab_enso_ab_test.tex / tab_enso_filter.tex / tab_enso_em.tex
 
 CLI
 ---
@@ -72,7 +80,11 @@ from prg.learning.supervised import fit_supervised  # noqa: E402
 
 DEFAULT_CSV = ROOT / "data/real/enso_sst.csv"
 DEFAULT_OUT = ROOT / "results/enso"
-DEFAULT_FIG_DIR = ROOT / "paper" / "figures" / "generated"
+# The V1 draft (formerly paper/) is deleted; its archived 07_real_data.tex
+# expects the LaTeX tables in figures/generated/ next to it, same convention
+# as make_figures.py (the witness copies sit one level up, in figures/).
+# The attic is local and not tracked by git.
+DEFAULT_FIG_DIR = ROOT / "docs" / "attic" / "semi-supervised_EM" / "figures" / "generated"
 TRAIN_END = pd.Timestamp("2010-12-01")
 REGIME_NAMES = ("La Niña", "Neutral", "El Niño")
 
@@ -440,7 +452,7 @@ def emit_e3_tex(res, path):
 # ---------------------------------------------------------------------------
 def main():
     p = argparse.ArgumentParser(
-        description="Run §7 real-data experiments (ENSO).",
+        description="Run the ENSO real-data experiments (archived V1 draft §7).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--csv", type=Path, default=DEFAULT_CSV)
@@ -449,7 +461,7 @@ def main():
         "--fig-dir",
         type=Path,
         default=DEFAULT_FIG_DIR,
-        help="Where to write LaTeX tables for paper inclusion.",
+        help="Where to write the LaTeX tables (the archived 07_real_data.tex inputs them).",
     )
     p.add_argument("--K", type=int, default=3)
     p.add_argument("--n-inits", type=int, default=5)

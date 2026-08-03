@@ -646,24 +646,38 @@ def pair_rts_smoother(params, ys, with_residuals=False):
 # ---------------------------------------------------------------------------
 # S9: HBH-structure two-filter smoother, transcribed to the pair
 # ---------------------------------------------------------------------------
-def hbh_smoother(params, ys, diffuse=1e8):
-    """Two-filter smoother in the Helmick-Blair-Hoffman structure.
+def hbh_smoother(params, ys, diffuse=1e8, variant="pair"):
+    """The Helmick-Blair-Hoffman two-filter smoother on the pair.
+
+    Implemented from the original paper (IEEE Trans. Inf. Theory 41(6):
+    1845-1855, 1995; operation order and fusion formulas checked against
+    eqs. (42)-(90) on 2026-08-03).
 
     Forward pass: pairwise IMM bank (per-regime summaries and posteriors).
-    Backward pass: backward-time IMM on the inverted pair dynamics
-    z_n = F_k^{-1}(z_{n+1} - b_k - w), carrying per-mode Gaussian summaries
-    and log-masses; per-mode mixing over the arrival mode happens BEFORE the
-    (exact-y) measurement update, mirroring the forward IMM interaction.
-    The backward pass is initialized pseudo-diffusely (variance `diffuse` on
-    the x-block), which substitutes a normalizable posterior for the
-    non-normalizable likelihood -- the known approximation of the scheme.
-    Fusion: per-mode Fraser-Potter combination of the forward filtered
-    summary with the backward PREDICTED one (which excludes y_n), and
-    smoothed mode weights  mu_s(j) oc alpha_n(j) m_j N(z_f - z_bp; P_f+P_bp).
+    Backward pass (their Section II-B, verified order): per arrival mode,
+    backward-time prediction through the inverted pair dynamics
+    z_n = F_k^{-1}(z_{n+1} - b_k - w) (their (61)-(62)); THEN interaction
+    over the arrival mode conditioned on the departure mode (their
+    (63)-(66)); THEN the (exact-y) measurement update (their (48)-(53)).
+    Pseudo-diffuse initialization at n = N (their (38)-(41): the backward
+    ML estimates are Bayesian estimates under a diffuse prior).
 
-    Requires invertible F_r: on AB, det F_r = 0 structurally and the scheme
-    is inapplicable (raises np.linalg.LinAlgError).
-    Returns (Ex (N, q), mu_s (N, K)).
+    variant="pair" (their MAIN scheme, Section III, n^2 smoothers): per-pair
+    Fraser-Potter fusion of the forward filtered mode-j summary with the
+    UNMIXED backward predicted mode-k one (their (82)-(83)), pair matching
+    likelihoods Lam^{jk} = N(z_bp(k) - z_f(j); 0, P_f(j) + P_bp(k)) (their
+    (88)-(90)), pair weights oc p_jk Lam^{jk} (their (74)-(76)) and smoothed
+    mode weights mu_s(j) oc alpha_n(j) d_j with d_j = sum_k p_jk Lam^{jk}
+    (their (69)-(70)).
+    variant="mixed" (their ALTERNATE n-smoother scheme, Section V, with the
+    backward likelihood mass restored in the mode weights): fusion with the
+    backward MIXED predicted per departure mode, mu_s(j) oc alpha_n(j) m_j
+    N(z_f - z_bp; P_f + P_bp).
+
+    Requires invertible F_r -- an assumption the original states explicitly
+    ("attention is restricted to systems with invertible state transition
+    matrices"); on AB, det F_r = 0 structurally and the scheme is
+    inapplicable.  Returns (Ex (N, q), mu_s (N, K)).
     """
     K, q, s = params.K, params.q, params.s
     dim = q + s
@@ -718,15 +732,18 @@ def hbh_smoother(params, ys, diffuse=1e8):
     for k in range(K):
         zb[k, q:, 0] = ys_[N - 1]
         Pb[k][:q, :q] = diffuse * np.eye(q)
-    zbp_all = np.zeros((N, K, dim, 1))    # backward PREDICTED (excl. y_n)
+    zbp_all = np.zeros((N, K, dim, 1))    # mixed backward PREDICTED (per j)
     Pbp_all = np.zeros((N, K, dim, dim))
     lmp_all = np.full((N, K), -np.inf)
+    zpr_all = np.zeros((N, K, dim, 1))    # UNMIXED backward predicted (per k)
+    Ppr_all = np.zeros((N, K, dim, dim))
     for n in range(N - 2, -1, -1):
         # backward prediction per mode k (transition n->n+1 has mode r_{n+1}=k)
         zpr, Ppr = [], []
         for k in range(K):
             zpr.append(Fi[k] @ (zb[k] - b[k]))
             Ppr.append(Fi[k] @ (Pb[k] + SW[k]) @ Fi[k].T)
+            zpr_all[n, k], Ppr_all[n, k] = zpr[k], Ppr[k]
         # interaction over the arrival mode k -> per departure mode j, THEN
         # the exact-y measurement update with y_n (HBH order: mix first)
         nzb, nPb, nlm = np.zeros_like(zb), np.zeros_like(Pb), np.zeros(K)
@@ -756,14 +773,36 @@ def hbh_smoother(params, ys, diffuse=1e8):
     for n in range(N - 1):
         lwt = np.zeros(K)
         zsm = np.zeros((K, dim, 1))
-        for j in range(K):
-            Psum = Pf[n, j] + Pbp_all[n, j]
-            d = (zbp_all[n, j] - zf[n, j]).ravel()
-            sgn, logdet = np.linalg.slogdet(2 * np.pi * Psum)
-            lwt[j] = (np.log(alf[n, j] + 1e-300) + lmp_all[n, j]
-                      - 0.5 * (d @ np.linalg.solve(Psum, d) + logdet))
-            G = Pf[n, j] @ np.linalg.inv(Psum)
-            zsm[j] = zf[n, j] + G @ (zbp_all[n, j] - zf[n, j])
+        if variant == "pair":
+            # their main scheme: per-pair fusion (82)-(83), pair matching
+            # likelihoods (88)-(90), weights (69)-(70) and (74)-(76)
+            for j in range(K):
+                lw = np.zeros(K)
+                zpair = np.zeros((K, dim, 1))
+                for k in range(K):
+                    Djk = Pf[n, j] + Ppr_all[n, k]
+                    d = (zpr_all[n, k] - zf[n, j]).ravel()
+                    _, logdet = np.linalg.slogdet(2 * np.pi * Djk)
+                    lw[k] = (np.log(params.P[j, k] + 1e-300)
+                             - 0.5 * (d @ np.linalg.solve(Djk, d) + logdet))
+                    G = Pf[n, j] @ np.linalg.inv(Djk)
+                    zpair[k] = zf[n, j] + G @ (zpr_all[n, k] - zf[n, j])
+                mx = lw.max()
+                w = np.exp(lw - mx)
+                tot = w.sum()
+                zsm[j] = sum((w[k] / tot) * zpair[k] for k in range(K))
+                lwt[j] = np.log(alf[n, j] + 1e-300) + mx + np.log(tot)
+        else:
+            # their alternate n-smoother scheme (Section V), with the
+            # backward likelihood mass restored in the mode weights
+            for j in range(K):
+                Psum = Pf[n, j] + Pbp_all[n, j]
+                d = (zbp_all[n, j] - zf[n, j]).ravel()
+                _, logdet = np.linalg.slogdet(2 * np.pi * Psum)
+                lwt[j] = (np.log(alf[n, j] + 1e-300) + lmp_all[n, j]
+                          - 0.5 * (d @ np.linalg.solve(Psum, d) + logdet))
+                G = Pf[n, j] @ np.linalg.inv(Psum)
+                zsm[j] = zf[n, j] + G @ (zbp_all[n, j] - zf[n, j])
         w = np.exp(lwt - lwt.max())
         w /= w.sum()
         mu_s[n] = w
@@ -931,6 +970,13 @@ def exp_hbh(exact_c0, exact_A):
         print(f"  {label}: mean median {np.median(g_m):.2e}"
               f"  [{np.min(g_m):.0e},{np.max(g_m):.0e}]"
               f"   regime median {np.median(g_r):.2e}")
+    g_m = []
+    for sd in range(N_SEEDS):
+        ys, Ex_s, _, _ = exact_c0[sd]
+        Ex_h, _ = hbh_smoother(cgo_memory_model(), ys, variant="mixed")
+        g_m.append(_rel(Ex_h, Ex_s))
+    print(f"  {{C==0}}, alt. n-smoother variant (Sec. V): mean median"
+          f" {np.median(g_m):.2e}")
 
 
 def near_c0_model(eta):

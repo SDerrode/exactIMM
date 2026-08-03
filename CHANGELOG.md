@@ -38,13 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slaved branch, biased at `6.6e-2` on `{C≡0}` with state memory), and the off-domain
   separation of the three formulations (RTS/one-step slope `1.01` — an online
   diagnostic; `O(1)` disagreement with the reweighting flags the wrong branch).
-  Also (S9) the HBH-structure two-filter smoother transcribed to the pair
-  (backward-time IMM on the inverted dynamics, pseudo-diffuse init, Fraser–Potter
-  per-mode fusion): structurally inapplicable on AB (`det F_r = 0`), biased `0.53`
-  on the CGO gauge — dominated by the mode-dependent backward-Jacobian defect of
-  the posterior-for-likelihood substitution, isolated by an equal-dynamics control
-  (factor-8 drop) — and `6.3e-2` on `{A≡MC}\AB`; the reweighting smoother is its
-  correction, exact at `1e-15` with the same classical ingredients. And (S10)
+  Also (S9) the Helmick–Blair–Hoffman two-filter smoother implemented on the pair
+  **as published** (operation order and fusion formulas verified against the
+  original, IEEE Trans. Inf. Theory 41(6), 1995: backward-time IMM with prediction
+  per arrival mode → interaction → measurement update, diffuse-prior backward
+  pass, per-pair Fraser–Potter fusion with pair matching likelihoods):
+  structurally inapplicable on AB (`det F_r = 0` — violating the original's own
+  invertibility assumption), biased `0.86` on the CGO gauge, `0.36` under the
+  equal-dynamics control (Jacobian defect off — the dropped future mass dominates
+  the remainder), `0.50` on `{A≡MC}\AB`; a mass-corrected form of their alternate
+  n-smoother scheme (their Sec. V) reaches `0.53` / `6.7e-2`, reversing their
+  benchmark ranking. The reweighting smoother is the corrected two-filter, exact
+  at `1e-15` with the same classical ingredients. And (S10)
   mixed-family smoothing on the E4 gauge: exact at `A_1 = 0` (the model re-enters
   the uniform `{A≡MC}` family — uniformity is inherited at the smoothing level),
   biased beyond, with smoothed errors 30–140× the GPB2 *filtered* ones on the same

@@ -48,7 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mixed-family smoothing on the E4 gauge: exact at `A_1 = 0` (the model re-enters
   the uniform `{A≡MC}` family — uniformity is inherited at the smoothing level),
   biased beyond, with smoothed errors 30–140× the GPB2 *filtered* ones on the same
-  structural violation.
+  structural violation. And (S6b) the dual off-domain gauge (`C = η` at both
+  regimes, full state memory): the collapsed smoothed regime posterior degrades at
+  first order there too (slope `0.97`) — the first order is a property of
+  smoothing, direction-independent, whereas the filtered exponent depends on the
+  approach direction; smoothed state-mean slopes `1.17`/`1.01` on the slaved gauge
+  (S8); the pair-RTS stays pinned on the dual gauge at its on-domain bias
+  (S6b/S7 cross-check at `6.6e-2`).
 - **`.zenodo.json`** — deposition metadata so a Zenodo DOI can be minted for the
   repository (enable the repo on Zenodo and publish a GitHub Release).
 

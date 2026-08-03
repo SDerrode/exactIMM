@@ -23,7 +23,11 @@ S6  Off the union {C==0} u {A==MC}, the collapsed smoothed regime posterior
     (GPB2 forward + pair-likelihood backward) degrades at FIRST order in the
     violation eta (slope ~1.15) -- against third order for the filtered
     quantities (E3 of cns_exactness): smoothing pays structural
-    misspecification at first order.
+    misspecification at first order.  S6b extends the measurement to the
+    DUAL approach direction (C = eta at both regimes, full state memory:
+    toward the autonomy branch) and to the smoothed STATE MEAN (pair-RTS,
+    reweighting): the first order is direction-independent for smoothing,
+    whereas the filtered exponent depends on the approach direction.
 S7  The pair-RTS form and its gain degeneracy: the mode-matched RTS smoother
     run on the pair (GPB2 forward bank, backward mixing over the arrival
     regime with smoothed pair weights) has gains G^{jk} whose x-rows satisfy,
@@ -929,6 +933,42 @@ def exp_hbh(exact_c0, exact_A):
               f"   regime median {np.median(g_r):.2e}")
 
 
+def near_c0_model(eta):
+    """S6b gauge: the CGO gauge with the channel switched on -- C = eta at
+    both regimes, full state memory A = (0.7, 0.4) != MC: the dual approach
+    direction, toward the autonomy branch."""
+    return _params(A=[0.7, 0.4], B=[0.10, 0.10], C=[eta, eta],
+                   D=[0.50, 0.50], SU=[0.40, 0.35], Dt=[0.15, -0.20],
+                   SV=[0.20, 0.60], p_switch=0.10)
+
+
+def exp_off_domain2(etas=(0.02, 0.08, 0.3)):
+    """S6b: off-domain degradation on the dual gauge (toward autonomy):
+    smoothed regime posterior, pair-RTS state mean, reweighting state mean."""
+    print("S6b off-domain, dual gauge (C=eta at both regimes, memory"
+          " A=(0.7,0.4)):")
+    m_reg, m_rts, m_rw = [], [], []
+    for eta in etas:
+        p = near_c0_model(eta)
+        e_reg, e_rts, e_rw = [], [], []
+        for sd in range(N_SEEDS):
+            _, _, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
+            Ex_s, _, gam_ex = exact_path_smoother(p, ys)
+            e_reg.append(_rel(gpb2_regime_smoother(p, ys), gam_ex))
+            e_rts.append(_rel(pair_rts_smoother(p, ys), Ex_s))
+            E_rw, _ = reweight_smoother(p, ys, kernel_Q0(p, ys))
+            e_rw.append(_rel(E_rw, Ex_s))
+        m_reg.append(np.median(e_reg))
+        m_rts.append(np.median(e_rts))
+        m_rw.append(np.median(e_rw))
+        print(f"  eta={eta:<5} regime {m_reg[-1]:.2e}"
+              f"  RTS mean {m_rts[-1]:.2e}  reweight mean {m_rw[-1]:.2e}")
+    x = np.log10(etas)
+    sl = [np.polyfit(x, np.log10(v), 1)[0] for v in (m_reg, m_rts, m_rw)]
+    print(f"  slopes: regime {sl[0]:.2f}  RTS mean {sl[1]:.2f}"
+          f"  reweight mean {sl[2]:.2f}")
+
+
 def exp_mixed(A0s=(0.0, 0.4, 0.8), C1=0.7):
     """S10: mixed-family smoothing -- uniformity inherited, asymmetry too."""
     print(f"S10 mixed branches (r1: C=0, memory A0; r2: C1={C1}, A=MC,"
@@ -959,6 +999,7 @@ def exp_separation(etas=(0.02, 0.08, 0.3)):
     separations vanish with eta and need no ground truth (diagnostic)."""
     print("S8  off the union (C=0.4, A=MC+eta): separation of formulations")
     sep_rc, sep_rw, sep_cw = [], [], []
+    err_rts, err_cg, err_rw = [], [], []
     for eta in etas:
         p = off_union_model(0.4, eta)
         e_rts, e_cg, e_rw, s_rc, s_rw_, s_cw = [], [], [], [], [], []
@@ -978,15 +1019,21 @@ def exp_separation(etas=(0.02, 0.08, 0.3)):
         sep_rc.append(np.median(s_rc))
         sep_rw.append(np.median(s_rw_))
         sep_cw.append(np.median(s_cw))
-        print(f"  eta={eta:<5} err: RTS {np.median(e_rts):.2e}"
-              f"  one-step {np.median(e_cg):.2e}"
-              f"  reweight {np.median(e_rw):.2e}"
+        err_rts.append(np.median(e_rts))
+        err_cg.append(np.median(e_cg))
+        err_rw.append(np.median(e_rw))
+        print(f"  eta={eta:<5} err: RTS {err_rts[-1]:.2e}"
+              f"  one-step {err_cg[-1]:.2e}"
+              f"  reweight {err_rw[-1]:.2e}"
               f" | sep: RTS/1step {sep_rc[-1]:.2e}"
               f"  RTS/rw {sep_rw[-1]:.2e}  1step/rw {sep_cw[-1]:.2e}")
     x = np.log10(etas)
     sl = [np.polyfit(x, np.log10(v), 1)[0] for v in (sep_rc, sep_rw, sep_cw)]
     print(f"  separation slopes: RTS/1step {sl[0]:.2f}"
           f"  RTS/rw {sl[1]:.2f}  1step/rw {sl[2]:.2f}")
+    sle = [np.polyfit(x, np.log10(v), 1)[0] for v in (err_rts, err_cg, err_rw)]
+    print(f"  error slopes (state mean): RTS {sle[0]:.2f}"
+          f"  one-step {sle[1]:.2f}  reweight {sle[2]:.2f}")
 
 
 def exp_off_domain(etas=(0.02, 0.08, 0.3), n_seeds=20):
@@ -1018,6 +1065,8 @@ def main():
     exact_A = exp_lag1(exact_ab)
     print()
     exp_off_domain()
+    print()
+    exp_off_domain2()
     print()
     exp_rts(exact_ab, exact_c0, exact_A)
     print()

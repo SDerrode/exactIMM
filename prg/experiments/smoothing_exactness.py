@@ -38,6 +38,17 @@ S8  Off the union, the three formulations (pair-RTS, one-step correction,
     reweighting) genuinely separate; their pairwise separations vanish with
     the violation eta and are computable online (no ground truth): a
     measurable diagnostic of the structural violation.
+S9  The HBH-structure two-filter smoother (forward IMM + backward-time IMM
+    on the inverted pair dynamics, pseudo-diffuse init, Fraser-Potter
+    per-mode fusion), transcribed to the pair with exact observation.
+    Structural finding first: on AB the pair dynamics is SINGULAR
+    (det F_r = 0), so the backward-time filter -- hence the HBH scheme --
+    is inapplicable on the very family where the one-step smoother is
+    exact.  On {C==0} and on {A==MC}\\AB (where F_r is invertible), the
+    measurement quantifies how far the scheme is from realizing the exact
+    smoother: its backward pass substitutes a normalizable posterior for
+    the non-normalizable likelihood (a known approximation, cf. Li-Liu-
+    Yang-Mihaylova-Deng, FUSION 2021) and mixes modes before evaluating.
 
 Ground truth is the exact K^N path smoother: one conditional pair Kalman
 filter + RTS smoother per regime path, the paths weighted by their exact
@@ -56,6 +67,7 @@ import numpy as np
 from prg.experiments.cns_exactness import (
     N_STEPS,
     SEED0,
+    _params,
     _rel,
     ab_model,
     cgo_memory_model,
@@ -618,6 +630,134 @@ def pair_rts_smoother(params, ys, with_residuals=False):
 
 
 # ---------------------------------------------------------------------------
+# S9: HBH-structure two-filter smoother, transcribed to the pair
+# ---------------------------------------------------------------------------
+def hbh_smoother(params, ys, diffuse=1e8):
+    """Two-filter smoother in the Helmick-Blair-Hoffman structure.
+
+    Forward pass: pairwise IMM bank (per-regime summaries and posteriors).
+    Backward pass: backward-time IMM on the inverted pair dynamics
+    z_n = F_k^{-1}(z_{n+1} - b_k - w), carrying per-mode Gaussian summaries
+    and log-masses; per-mode mixing over the arrival mode happens BEFORE the
+    (exact-y) measurement update, mirroring the forward IMM interaction.
+    The backward pass is initialized pseudo-diffusely (variance `diffuse` on
+    the x-block), which substitutes a normalizable posterior for the
+    non-normalizable likelihood -- the known approximation of the scheme.
+    Fusion: per-mode Fraser-Potter combination of the forward filtered
+    summary with the backward PREDICTED one (which excludes y_n), and
+    smoothed mode weights  mu_s(j) oc alpha_n(j) m_j N(z_f - z_bp; P_f+P_bp).
+
+    Requires invertible F_r: on AB, det F_r = 0 structurally and the scheme
+    is inapplicable (raises np.linalg.LinAlgError).
+    Returns (Ex (N, q), mu_s (N, K)).
+    """
+    K, q, s = params.K, params.q, params.s
+    dim = q + s
+    ys_ = np.asarray(ys, float).reshape(-1, s)
+    N = ys_.shape[0]
+    F = [params.f_matrix.F(k) for k in range(K)]
+    Fi = [np.linalg.inv(Fk) for Fk in F]
+    b = [params.b(k).reshape(dim, 1) for k in range(K)]
+    SW = [params.noise_cov.Sigma_W(k) for k in range(K)]
+    H = _obs_matrix(q, s)
+
+    # ---- forward: pairwise IMM bank with per-regime PAIR summaries -------
+    zf = np.zeros((N, K, dim, 1))
+    Pf = np.zeros((N, K, dim, dim))
+    alf = np.zeros((N, K))
+    zs, Ps, la = [], [], np.zeros(K)
+    for k in range(K):
+        z, P, ll = _kalman_exact_y_update(
+            params.mu_z0(k).reshape(dim, 1), params.Sigma_z0(k),
+            ys_[0].reshape(s, 1), H)
+        zs.append(z)
+        Ps.append(P)
+        la[k] = np.log(params.pi0[k] + 1e-300) + ll
+    al = np.exp(la - la.max())
+    al /= al.sum()
+    zf[0], Pf[0], alf[0] = np.array(zs), np.array(Ps), al
+    for n in range(1, N):
+        y = ys_[n].reshape(s, 1)
+        nzs, nPs, nla = [], [], np.zeros(K)
+        for k in range(K):
+            w = np.array([params.P[j, k] * al[j] for j in range(K)])
+            cbar = w.sum()
+            w = w / cbar
+            z0 = sum(w[j] * zs[j] for j in range(K))
+            P0 = sum(w[j] * (Ps[j] + (zs[j] - z0) @ (zs[j] - z0).T)
+                     for j in range(K))
+            z, P, ll = _kalman_exact_y_update(
+                F[k] @ z0 + b[k], F[k] @ P0 @ F[k].T + SW[k], y, H)
+            nzs.append(z)
+            nPs.append(P)
+            nla[k] = np.log(cbar + 1e-300) + ll
+        zs, Ps = nzs, nPs
+        al = np.exp(nla - nla.max())
+        al /= al.sum()
+        zf[n], Pf[n], alf[n] = np.array(zs), np.array(Ps), al
+
+    # ---- backward-time IMM (pseudo-diffuse init at N) --------------------
+    # carrier per mode: summary (zb, Pb) of z_t given y_{t:N}, log-mass lm
+    zb = np.zeros((K, dim, 1))
+    Pb = np.zeros((K, dim, dim))
+    lm = np.zeros(K)
+    for k in range(K):
+        zb[k, q:, 0] = ys_[N - 1]
+        Pb[k][:q, :q] = diffuse * np.eye(q)
+    zbp_all = np.zeros((N, K, dim, 1))    # backward PREDICTED (excl. y_n)
+    Pbp_all = np.zeros((N, K, dim, dim))
+    lmp_all = np.full((N, K), -np.inf)
+    for n in range(N - 2, -1, -1):
+        # backward prediction per mode k (transition n->n+1 has mode r_{n+1}=k)
+        zpr, Ppr = [], []
+        for k in range(K):
+            zpr.append(Fi[k] @ (zb[k] - b[k]))
+            Ppr.append(Fi[k] @ (Pb[k] + SW[k]) @ Fi[k].T)
+        # interaction over the arrival mode k -> per departure mode j, THEN
+        # the exact-y measurement update with y_n (HBH order: mix first)
+        nzb, nPb, nlm = np.zeros_like(zb), np.zeros_like(Pb), np.zeros(K)
+        for j in range(K):
+            lw = np.array([np.log(params.P[j, k] + 1e-300) + lm[k]
+                           for k in range(K)])
+            mx = lw.max()
+            w = np.exp(lw - mx)
+            tot = w.sum()
+            w /= tot
+            z0 = sum(w[k] * zpr[k] for k in range(K))
+            P0 = sum(w[k] * (Ppr[k] + (zpr[k] - z0) @ (zpr[k] - z0).T)
+                     for k in range(K))
+            zbp_all[n, j], Pbp_all[n, j] = z0, P0
+            lmp = mx + np.log(tot)
+            lmp_all[n, j] = lmp
+            z, P, ll = _kalman_exact_y_update(z0, P0,
+                                              ys_[n].reshape(s, 1), H)
+            nzb[j], nPb[j], nlm[j] = z, P, lmp + ll
+        zb, Pb, lm = nzb, nPb, nlm - nlm.max()
+
+    # ---- fusion ----------------------------------------------------------
+    Ex = np.zeros((N, q))
+    mu_s = np.zeros((N, K))
+    Ex[N - 1] = alf[N - 1] @ zf[N - 1, :, :q, 0]
+    mu_s[N - 1] = alf[N - 1]
+    for n in range(N - 1):
+        lwt = np.zeros(K)
+        zsm = np.zeros((K, dim, 1))
+        for j in range(K):
+            Psum = Pf[n, j] + Pbp_all[n, j]
+            d = (zbp_all[n, j] - zf[n, j]).ravel()
+            sgn, logdet = np.linalg.slogdet(2 * np.pi * Psum)
+            lwt[j] = (np.log(alf[n, j] + 1e-300) + lmp_all[n, j]
+                      - 0.5 * (d @ np.linalg.solve(Psum, d) + logdet))
+            G = Pf[n, j] @ np.linalg.inv(Psum)
+            zsm[j] = zf[n, j] + G @ (zbp_all[n, j] - zf[n, j])
+        w = np.exp(lwt - lwt.max())
+        w /= w.sum()
+        mu_s[n] = w
+        Ex[n] = w @ zsm[:, :q, 0]
+    return Ex, mu_s
+
+
+# ---------------------------------------------------------------------------
 # experiments
 # ---------------------------------------------------------------------------
 def _med_max(vals):
@@ -740,6 +880,45 @@ def exp_rts(exact_ab, exact_c0, exact_A):
                   " is the k-conditional backward input)")
 
 
+def equal_dynamics_c0_model():
+    """S9 control: the CGO gauge with EQUAL state dynamics A_1 = A_2, which
+    switches off the mode-dependent backward-Jacobian defect of the
+    HBH-structure two-filter while keeping (G2) (SV contrast 0.20/0.60)."""
+    return _params(A=[0.55, 0.55], B=[0.10, 0.10], C=[0.0, 0.0],
+                   D=[0.50, 0.50], SU=[0.40, 0.35], Dt=[0.15, -0.20],
+                   SV=[0.20, 0.60], p_switch=0.10)
+
+
+def exp_hbh(exact_c0, exact_A):
+    """S9: the HBH-structure two-filter smoother -- structural inapplicability
+    on AB, measured gap to the exact smoother where it runs, and the
+    equal-dynamics control isolating the backward-Jacobian defect."""
+    print("S9  HBH-structure two-filter (backward-time IMM + fusion):")
+    pab = ab_model(0.4, dB=0.0)
+    dets = [float(np.linalg.det(pab.f_matrix.F(k))) for k in range(pab.K)]
+    print(f"  AB gauge          : det F_r = {dets[0]:.2e}, {dets[1]:.2e}"
+          "  -> backward-time filter inapplicable (F_r singular on AB)")
+    p_eq = equal_dynamics_c0_model()
+    exact_eq = {}
+    for sd in range(N_SEEDS):
+        _, _, ys = _simulate(p_eq, N_STEPS, seed=SEED0 + sd)
+        Ex_s, Vx_s, gam_ex = exact_path_smoother(p_eq, ys)
+        exact_eq[sd] = (ys, Ex_s, Vx_s, gam_ex)
+    for label, p, exact in (
+            ("{C==0} gauge      ", cgo_memory_model(), exact_c0),
+            ("{C==0}, equal A   ", p_eq, exact_eq),
+            ("{A==MC} \\ AB gauge", ab_model(0.4, dB=0.15), exact_A)):
+        g_m, g_r = [], []
+        for sd in range(N_SEEDS):
+            ys, Ex_s, _, gam_ex = exact[sd]
+            Ex_h, mu_h = hbh_smoother(p, ys)
+            g_m.append(_rel(Ex_h, Ex_s))
+            g_r.append(_rel(mu_h, gam_ex))
+        print(f"  {label}: mean median {np.median(g_m):.2e}"
+              f"  [{np.min(g_m):.0e},{np.max(g_m):.0e}]"
+              f"   regime median {np.median(g_r):.2e}")
+
+
 def exp_separation(etas=(0.02, 0.08, 0.3)):
     """S8: off the union, the three formulations separate; the pairwise
     separations vanish with eta and need no ground truth (diagnostic)."""
@@ -808,6 +987,8 @@ def main():
     exp_rts(exact_ab, exact_c0, exact_A)
     print()
     exp_separation()
+    print()
+    exp_hbh(exact_c0, exact_A)
 
 
 if __name__ == "__main__":

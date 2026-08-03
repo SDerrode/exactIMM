@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slaved branch, biased at `6.6e-2` on `{C≡0}` with state memory), and the off-domain
   separation of the three formulations (RTS/one-step slope `1.01` — an online
   diagnostic; `O(1)` disagreement with the reweighting flags the wrong branch).
+  Also (S9) the HBH-structure two-filter smoother transcribed to the pair
+  (backward-time IMM on the inverted dynamics, pseudo-diffuse init, Fraser–Potter
+  per-mode fusion): structurally inapplicable on AB (`det F_r = 0`), biased `0.53`
+  on the CGO gauge — dominated by the mode-dependent backward-Jacobian defect of
+  the posterior-for-likelihood substitution, isolated by an equal-dynamics control
+  (factor-8 drop) — and `6.3e-2` on `{A≡MC}\AB`; the reweighting smoother is its
+  correction, exact at `1e-15` with the same classical ingredients.
 - **`.zenodo.json`** — deposition metadata so a Zenodo DOI can be minted for the
   repository (enable the repo on Zenodo and publish a GitHub Release).
 

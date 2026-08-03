@@ -49,6 +49,14 @@ S9  The HBH-structure two-filter smoother (forward IMM + backward-time IMM
     smoother: its backward pass substitutes a normalizable posterior for
     the non-normalizable likelihood (a known approximation, cf. Li-Liu-
     Yang-Mihaylova-Deng, FUSION 2021) and mixes modes before evaluating.
+S10 Mixed families: on the E4 gauge of cns_exactness (regime 1: C=0 with
+    memory A0; regime 2: C1!=0 slaved, B broken), every collapsed smoother
+    is measurably biased as soon as A0 != 0, and the biases exceed the
+    GPB2 FILTERED bias on the same gauge by orders of magnitude -- the
+    filtering/smoothing asymmetry at a structural (non-small) violation.
+    At A0 = 0 the model re-enters the uniform family {A==MC} (both
+    conditions hold at regime 1) and the lag-1 smoother returns to
+    machine precision: smoothing inherits the uniformity requirement.
 
 Ground truth is the exact K^N path smoother: one conditional pair Kalman
 filter + RTS smoother per regime path, the paths weighted by their exact
@@ -71,12 +79,14 @@ from prg.experiments.cns_exactness import (
     _rel,
     ab_model,
     cgo_memory_model,
+    mixed_branch_model,
     off_union_model,
 )
 from prg.experiments.reference_filters import (
     _kalman_exact_y_update,
     _obs_matrix,
     exact_mixture_filter,
+    gpb2_filter,
 )
 from prg.experiments.study import _simulate
 
@@ -919,6 +929,31 @@ def exp_hbh(exact_c0, exact_A):
               f"   regime median {np.median(g_r):.2e}")
 
 
+def exp_mixed(A0s=(0.0, 0.4, 0.8), C1=0.7):
+    """S10: mixed-family smoothing -- uniformity inherited, asymmetry too."""
+    print(f"S10 mixed branches (r1: C=0, memory A0; r2: C1={C1}, A=MC,"
+          " B!=MD):")
+    for A0 in A0s:
+        p = mixed_branch_model(A0, C1)
+        e_lag, e_rts, e_reg, e_fm, e_fp = [], [], [], [], []
+        for sd in range(N_SEEDS):
+            _, _, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
+            Ex_s, _, gam_ex = exact_path_smoother(p, ys)
+            E_lag, _ = lag1_smoother(p, ys)
+            e_lag.append(_rel(E_lag, Ex_s))
+            e_rts.append(_rel(pair_rts_smoother(p, ys), Ex_s))
+            e_reg.append(_rel(gpb2_regime_smoother(p, ys), gam_ex))
+            Ex_f, _, pi_f = exact_mixture_filter(p, ys)
+            ex_g, _, pi_g, _ = gpb2_filter(p, ys)
+            e_fm.append(_rel(ex_g, Ex_f))
+            e_fp.append(_rel(pi_g, pi_f))
+        print(f"  A0={A0:<4} smoothed: lag-1 {np.median(e_lag):.1e}"
+              f"  pair-RTS {np.median(e_rts):.1e}"
+              f"  regime {np.median(e_reg):.1e}"
+              f" | GPB2 filtered: mean {np.median(e_fm):.1e}"
+              f"  post {np.median(e_fp):.1e}")
+
+
 def exp_separation(etas=(0.02, 0.08, 0.3)):
     """S8: off the union, the three formulations separate; the pairwise
     separations vanish with eta and need no ground truth (diagnostic)."""
@@ -989,6 +1024,8 @@ def main():
     exp_separation()
     print()
     exp_hbh(exact_c0, exact_A)
+    print()
+    exp_mixed()
 
 
 if __name__ == "__main__":

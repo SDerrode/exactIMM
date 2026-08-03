@@ -44,7 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the CGO gauge — dominated by the mode-dependent backward-Jacobian defect of
   the posterior-for-likelihood substitution, isolated by an equal-dynamics control
   (factor-8 drop) — and `6.3e-2` on `{A≡MC}\AB`; the reweighting smoother is its
-  correction, exact at `1e-15` with the same classical ingredients.
+  correction, exact at `1e-15` with the same classical ingredients. And (S10)
+  mixed-family smoothing on the E4 gauge: exact at `A_1 = 0` (the model re-enters
+  the uniform `{A≡MC}` family — uniformity is inherited at the smoothing level),
+  biased beyond, with smoothed errors 30–140× the GPB2 *filtered* ones on the same
+  structural violation.
 - **`.zenodo.json`** — deposition metadata so a Zenodo DOI can be minted for the
   repository (enable the repo on Zenodo and publish a GitHub Release).
 

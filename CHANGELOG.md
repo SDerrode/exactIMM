@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cubically in the slaving residual, the constant-gain filter linearly), and the
   uniformity requirement stated (grid of per-regime choices) then measured
   (GPB2 gap map over `(A_1, C_2)`, vanishing exactly on the uniform-family line).
+- **`prg/experiments/smoothing_exactness.py`** — the committed experiment suite behind
+  the numerical section of the *exact-smoothing* paper (docs/exact-smoothing, not
+  tracked here). Six experiments (S1–S6) against the exact `K^N` path smoother
+  (conditional Kalman + RTS per regime path): machine-precision checks of the three
+  exact `O(NK²)` smoothers — reweighting on `{C≡0}` (mean and variance), constant-gain
+  one-step ξ-correction on AB (mean **and** variance, confirming the conditional-law
+  statement), lag-1 on `{A≡MC}` — plus the two `O(1)` cross-family failures (naive
+  smoothed read-out, reweighting on the wrong branch, both `0.38` vs a smoothing gain
+  of `1.06`) and the off-domain first-order degradation of the collapsed smoothed
+  regime posterior (slope `1.15`, against `~3` for filtering).
 - **`.zenodo.json`** — deposition metadata so a Zenodo DOI can be minted for the
   repository (enable the repo on Zenodo and publish a GitHub Release).
 

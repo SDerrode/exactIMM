@@ -24,6 +24,20 @@ S6  Off the union {C==0} u {A==MC}, the collapsed smoothed regime posterior
     violation eta (slope ~1.15) -- against third order for the filtered
     quantities (E3 of cns_exactness): smoothing pays structural
     misspecification at first order.
+S7  The pair-RTS form and its gain degeneracy: the mode-matched RTS smoother
+    run on the pair (GPB2 forward bank, backward mixing over the arrival
+    regime with smoothed pair weights) has gains G^{jk} whose x-rows satisfy,
+    identically, G_x == 0 and G_y == W_jk on {A==MC} (the backward state
+    input is multiplied by zero: RTS collapses to the one-step correction),
+    and G_y == -G_x M_k on {C==0} (the correction against pair-conditional
+    backward means annihilates: RTS collapses to the reweighting).  The
+    naive mode-matched RTS -- which feeds the k-conditional backward mean
+    where the pair-conditional one is required -- is therefore exact on the
+    whole slaved branch but BIASED on {C==0} with state memory.
+S8  Off the union, the three formulations (pair-RTS, one-step correction,
+    reweighting) genuinely separate; their pairwise separations vanish with
+    the violation eta and are computable online (no ground truth): a
+    measurable diagnostic of the structural violation.
 
 Ground truth is the exact K^N path smoother: one conditional pair Kalman
 filter + RTS smoother per regime path, the paths weighted by their exact
@@ -459,10 +473,12 @@ def exact_regime_smoother(params, ys):
     return gam
 
 
-def gpb2_regime_smoother(params, ys):
-    """Collapsed smoothed regime posterior: GPB2 forward pass (per-regime
-    collapsed summaries, pair likelihoods Lam^{jk}) + backward recursion on
-    a_n(j,k) = p_jk Lam^{jk}.  Exact on the union, biased off it (S6)."""
+def gpb2_bank(params, ys):
+    """GPB2 forward pass keeping the per-regime merged PAIR summaries.
+
+    Returns zs (N, K, dim, 1), Ps (N, K, dim, dim), alpha (N, K) and the
+    backward-kernel matrices A_n (N-1, K, K) with a_n(j,k) = p_jk Lam^{jk}.
+    """
     K, q, s = params.K, params.q, params.s
     dim = q + s
     ys = np.asarray(ys, float).reshape(-1, s)
@@ -471,27 +487,26 @@ def gpb2_regime_smoother(params, ys):
     F = [params.f_matrix.F(k) for k in range(K)]
     b = [params.b(k).reshape(dim, 1) for k in range(K)]
     SW = [params.noise_cov.Sigma_W(k) for k in range(K)]
-    zs, Ps, la = [], [], np.zeros(K)
+    zs = np.zeros((N, K, dim, 1))
+    Ps = np.zeros((N, K, dim, dim))
+    alpha = np.zeros((N, K))
+    la = np.zeros(K)
     for k in range(K):
         z, P, ll = _kalman_exact_y_update(
             params.mu_z0(k).reshape(dim, 1), params.Sigma_z0(k),
             ys[0].reshape(s, 1), H)
-        zs.append(z)
-        Ps.append(P)
+        zs[0, k], Ps[0, k] = z, P
         la[k] = np.log(params.pi0[k] + 1e-300) + ll
-    al = np.exp(la - la.max())
-    al /= al.sum()
-    alpha = np.zeros((N, K))
-    alpha[0] = al
+    alpha[0] = np.exp(la - la.max())
+    alpha[0] /= alpha[0].sum()
     A_n = np.zeros((N - 1, K, K))  # a_n(j,k) = p_jk Lam^{jk}
     for n in range(1, N):
         y = ys[n].reshape(s, 1)
-        nzs, nPs = [None] * K, [None] * K
         for k in range(K):
             upd = []
             for j in range(K):
-                zpr = F[k] @ zs[j] + b[k]
-                Ppr = F[k] @ Ps[j] @ F[k].T + SW[k]
+                zpr = F[k] @ zs[n - 1, j] + b[k]
+                Ppr = F[k] @ Ps[n - 1, j] @ F[k].T + SW[k]
                 z, P, ll = _kalman_exact_y_update(zpr, Ppr, y, H)
                 A_n[n - 1, j, k] = params.P[j, k] * np.exp(ll)
                 upd.append((z, P))
@@ -502,11 +517,19 @@ def gpb2_regime_smoother(params, ys):
             Pbar = sum(w[j] * (upd[j][1]
                                + (upd[j][0] - zbar) @ (upd[j][0] - zbar).T)
                        for j in range(K))
-            nzs[k], nPs[k] = zbar, Pbar
-        zs, Ps = nzs, nPs
+            zs[n, k], Ps[n, k] = zbar, Pbar
         un = alpha[n - 1] @ A_n[n - 1]
         alpha[n] = un / un.sum()
-    beta = np.zeros((N, K))
+    return zs, Ps, alpha, A_n
+
+
+def gpb2_regime_smoother(params, ys):
+    """Collapsed smoothed regime posterior: GPB2 forward pass (per-regime
+    collapsed summaries, pair likelihoods Lam^{jk}) + backward recursion on
+    a_n(j,k) = p_jk Lam^{jk}.  Exact on the union, biased off it (S6)."""
+    _, _, alpha, A_n = gpb2_bank(params, ys)
+    N = alpha.shape[0]
+    beta = np.zeros_like(alpha)
     beta[N - 1] = 1.0
     for n in range(N - 2, -1, -1):
         beta[n] = A_n[n] @ beta[n + 1]
@@ -514,6 +537,84 @@ def gpb2_regime_smoother(params, ys):
     gam = alpha * beta
     gam /= gam.sum(axis=1, keepdims=True)
     return gam
+
+
+# ---------------------------------------------------------------------------
+# S7/S8: the pair-RTS form -- gain degeneracy and off-domain separation
+# ---------------------------------------------------------------------------
+def pair_rts_smoother(params, ys, with_residuals=False):
+    """Mode-matched pair-RTS smoother run on the pair (RTS-IMM style).
+
+    Forward: GPB2 bank (per-regime merged pair summaries).  Backward: the
+    per-regime smoothed pair means are mixed over the ARRIVAL regime with the
+    smoothed pair weights, with the classical RTS pair gains
+        G^{jk} = P_n(j) F_k^T (F_k P_n(j) F_k^T + SW_k)^{-1} .
+    This is the naive collapse: the backward input is the k-conditional
+    smoothed summary where the exact recursion calls for the pair-conditional
+    one.  On {A==MC} the x-rows of G^{jk} are [0, W_jk] identically, so the
+    mismatch is multiplied by zero and the smoother is exact; on {C==0} with
+    state memory it is genuinely biased (S7).
+
+    Returns the smoothed state mean (N, q); with_residuals=True also returns
+    the max residuals of the two gain identities along the run:
+    ('gx', |G_x| / |G_y|)   -- zero on {A==MC}, where G == [0, W_jk];
+    ('w',  |G_y - W_jk| / |W_jk|)          -- same identity, gain part;
+    ('c0', |G_y + G_x M_k| / |G_x M_k|)    -- zero on {C==0}.
+    """
+    K, q, s = params.K, params.q, params.s
+    dim = q + s
+    ys_ = np.asarray(ys, float).reshape(-1, s)
+    N = ys_.shape[0]
+    F = [params.f_matrix.F(k) for k in range(K)]
+    b = [params.b(k).reshape(dim, 1) for k in range(K)]
+    SW = [params.noise_cov.Sigma_W(k) for k in range(K)]
+    M, Gam, _ = _slaving(params)
+    C = [params.f_matrix.C(k) for k in range(K)]
+    SV = [params.noise_cov.Sigma_V(k) for k in range(K)]
+    W = [[Gam[j] @ C[k].T @ np.linalg.inv(C[k] @ Gam[j] @ C[k].T + SV[k])
+          for k in range(K)] for j in range(K)]
+    zs, Ps, alpha, A_n = gpb2_bank(params, ys_)
+    beta = np.zeros((N, K))
+    beta[N - 1] = 1.0
+    for n in range(N - 2, -1, -1):
+        beta[n] = A_n[n] @ beta[n + 1]
+        beta[n] /= beta[n].max()
+    gam = alpha * beta
+    gam /= gam.sum(axis=1, keepdims=True)
+
+    res = {"gx": 0.0, "w": 0.0, "c0": 0.0}
+    Ex = np.zeros((N, q))
+    zsm = zs[N - 1].copy()  # (K, dim, 1) smoothed per-regime pair means
+    Ex[N - 1] = gam[N - 1] @ zsm[:, :q, 0]
+    for n in range(N - 2, -1, -1):
+        xi = (alpha[n][:, None] * A_n[n]) * beta[n + 1][None, :]
+        xi /= xi.sum()
+        new = np.zeros_like(zsm)
+        for j in range(K):
+            wkj = xi[j, :] / max(xi[j, :].sum(), 1e-300)
+            corr = np.zeros((dim, 1))
+            for k in range(K):
+                Ppred = F[k] @ Ps[n, j] @ F[k].T + SW[k]
+                G = Ps[n, j] @ F[k].T @ np.linalg.inv(Ppred)
+                zpred = F[k] @ zs[n, j] + b[k]
+                corr += wkj[k] * (G @ (zsm[k] - zpred))
+                if with_residuals:
+                    Gx, Gy = G[:q, :q], G[:q, q:]
+                    nGy = np.max(np.abs(Gy)) + 1e-300
+                    res["gx"] = max(res["gx"], np.max(np.abs(Gx)) / nGy)
+                    if n >= 1:
+                        # at n=0 the bank covariance is the (updated) initial
+                        # law, not Gamma_j, so G_y = W_jk(P_0) != W_jk there
+                        res["w"] = max(res["w"],
+                                       np.max(np.abs(Gy - W[j][k])) / nGy)
+                    GxM = Gx @ M[k]
+                    nGxM = np.max(np.abs(GxM)) + 1e-300
+                    res["c0"] = max(res["c0"],
+                                    np.max(np.abs(Gy + GxM)) / nGxM)
+            new[j] = zs[n, j] + corr
+        zsm = new
+        Ex[n] = gam[n] @ zsm[:, :q, 0]
+    return (Ex, res) if with_residuals else Ex
 
 
 # ---------------------------------------------------------------------------
@@ -567,9 +668,11 @@ def exp_c0_gauge():
     """S1({C==0}) and S2, on the CGO-MSM gauge with state memory."""
     p = cgo_memory_model()
     g_reg, g_m, g_v = [], [], []
+    exact_by_seed = {}
     for sd in range(N_SEEDS):
         _, _, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
         Ex_s, Vx_s, gam_ex = exact_path_smoother(p, ys)
+        exact_by_seed[sd] = (ys, Ex_s, Vx_s, gam_ex)
         Ker = kernel_Q0(p, ys)
         gam_h, _ = _forward_backward(_alpha1(p, ys), Ker)
         g_reg.append(_rel(gam_h, gam_ex))
@@ -580,6 +683,7 @@ def exp_c0_gauge():
     print(f"  S1  (R,Y) FB regime smoother, kernel Q0: {_med_max(g_reg)}")
     print(f"  S2  reweighting smoother, mean         : {_med_max(g_m)}")
     print(f"  S2  reweighting smoother, variance     : {_med_max(g_v)}")
+    return exact_by_seed
 
 
 def exp_lag1(exact_ab):
@@ -587,9 +691,11 @@ def exp_lag1(exact_ab):
     pA = ab_model(0.4, dB=0.15)
     pab = ab_model(0.4, dB=0.0)
     g_m, g_v, g_abm, g_abv = [], [], [], []
+    exact_by_seed = {}
     for sd in range(N_SEEDS):
         _, _, ys = _simulate(pA, N_STEPS, seed=SEED0 + sd)
-        Ex_s, Vx_s, _ = exact_path_smoother(pA, ys)
+        Ex_s, Vx_s, gam_ex = exact_path_smoother(pA, ys)
+        exact_by_seed[sd] = (ys, Ex_s, Vx_s, gam_ex)
         Ex_l, Vx_l = lag1_smoother(pA, ys)
         g_m.append(_rel(Ex_l, Ex_s))
         g_v.append(_rel(Vx_l, Vx_s))
@@ -602,6 +708,71 @@ def exp_lag1(exact_ab):
     print(f"  S5  lag-1 smoother, variance           : {_med_max(g_v)}")
     print(f"  S5  reduction on AB, mean              : {_med_max(g_abm)}")
     print(f"  S5  reduction on AB, variance          : {_med_max(g_abv)}")
+    return exact_by_seed
+
+
+def exp_rts(exact_ab, exact_c0, exact_A):
+    """S7: pair-RTS gain degeneracy and asymmetric exactness."""
+    print("S7  pair-RTS (mode-matched, GPB2 forward bank):")
+    gauges = [
+        ("AB gauge          ", ab_model(0.4, dB=0.0), exact_ab, "slaved"),
+        ("{A==MC} \\ AB gauge", ab_model(0.4, dB=0.15), exact_A, "slaved"),
+        ("{C==0} gauge      ", cgo_memory_model(), exact_c0, "c0"),
+    ]
+    for label, p, exact, branch in gauges:
+        errs, r_gx, r_w, r_c0 = [], [], [], []
+        for sd in range(N_SEEDS):
+            ys, Ex_s, _, _ = exact[sd]
+            Ex_r, res = pair_rts_smoother(p, ys, with_residuals=True)
+            errs.append(_rel(Ex_r, Ex_s))
+            r_gx.append(res["gx"])
+            r_w.append(res["w"])
+            r_c0.append(res["c0"])
+        if branch == "slaved":
+            print(f"  {label}: mean {_med_max(errs)}")
+            print(f"      gain identity G==[0,W_jk]: |G_x|/|G_y| max"
+                  f" {np.max(r_gx):.1e}, |G_y-W|/|W| max {np.max(r_w):.1e}")
+        else:
+            print(f"  {label}: mean median {np.median(errs):.2e}"
+                  f"  [{np.min(errs):.0e},{np.max(errs):.0e}]  <- BIASED")
+            print(f"      gain identity G_y==-G_x M_k: residual max"
+                  f" {np.max(r_c0):.1e}  (the gain is degenerate; the bias"
+                  " is the k-conditional backward input)")
+
+
+def exp_separation(etas=(0.02, 0.08, 0.3)):
+    """S8: off the union, the three formulations separate; the pairwise
+    separations vanish with eta and need no ground truth (diagnostic)."""
+    print("S8  off the union (C=0.4, A=MC+eta): separation of formulations")
+    sep_rc, sep_rw, sep_cw = [], [], []
+    for eta in etas:
+        p = off_union_model(0.4, eta)
+        e_rts, e_cg, e_rw, s_rc, s_rw_, s_cw = [], [], [], [], [], []
+        for sd in range(N_SEEDS):
+            _, _, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
+            Ex_s, _, _ = exact_path_smoother(p, ys)
+            scale = np.max(np.abs(Ex_s)) + 1e-12
+            E_rts = pair_rts_smoother(p, ys)
+            E_cg, _ = cg_smoother(p, ys)
+            E_rw, _ = reweight_smoother(p, ys, kernel_Qab(p, ys))
+            e_rts.append(_rel(E_rts, Ex_s))
+            e_cg.append(_rel(E_cg, Ex_s))
+            e_rw.append(_rel(E_rw, Ex_s))
+            s_rc.append(float(np.max(np.abs(E_rts - E_cg)) / scale))
+            s_rw_.append(float(np.max(np.abs(E_rts - E_rw)) / scale))
+            s_cw.append(float(np.max(np.abs(E_cg - E_rw)) / scale))
+        sep_rc.append(np.median(s_rc))
+        sep_rw.append(np.median(s_rw_))
+        sep_cw.append(np.median(s_cw))
+        print(f"  eta={eta:<5} err: RTS {np.median(e_rts):.2e}"
+              f"  one-step {np.median(e_cg):.2e}"
+              f"  reweight {np.median(e_rw):.2e}"
+              f" | sep: RTS/1step {sep_rc[-1]:.2e}"
+              f"  RTS/rw {sep_rw[-1]:.2e}  1step/rw {sep_cw[-1]:.2e}")
+    x = np.log10(etas)
+    sl = [np.polyfit(x, np.log10(v), 1)[0] for v in (sep_rc, sep_rw, sep_cw)]
+    print(f"  separation slopes: RTS/1step {sl[0]:.2f}"
+          f"  RTS/rw {sl[1]:.2f}  1step/rw {sl[2]:.2f}")
 
 
 def exp_off_domain(etas=(0.02, 0.08, 0.3), n_seeds=20):
@@ -628,11 +799,15 @@ def main():
           f" ground truth K^N path smoother\n")
     exact_ab = exp_ab_gauge()
     print()
-    exp_c0_gauge()
+    exact_c0 = exp_c0_gauge()
     print()
-    exp_lag1(exact_ab)
+    exact_A = exp_lag1(exact_ab)
     print()
     exp_off_domain()
+    print()
+    exp_rts(exact_ab, exact_c0, exact_A)
+    print()
+    exp_separation()
 
 
 if __name__ == "__main__":

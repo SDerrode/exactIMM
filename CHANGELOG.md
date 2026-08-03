@@ -25,14 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (GPB2 gap map over `(A_1, C_2)`, vanishing exactly on the uniform-family line).
 - **`prg/experiments/smoothing_exactness.py`** — the committed experiment suite behind
   the numerical section of the *exact-smoothing* paper (docs/exact-smoothing, not
-  tracked here). Six experiments (S1–S6) against the exact `K^N` path smoother
+  tracked here). Eight experiments (S1–S8) against the exact `K^N` path smoother
   (conditional Kalman + RTS per regime path): machine-precision checks of the three
   exact `O(NK²)` smoothers — reweighting on `{C≡0}` (mean and variance), constant-gain
   one-step ξ-correction on AB (mean **and** variance, confirming the conditional-law
-  statement), lag-1 on `{A≡MC}` — plus the two `O(1)` cross-family failures (naive
+  statement), lag-1 on `{A≡MC}` — the two `O(1)` cross-family failures (naive
   smoothed read-out, reweighting on the wrong branch, both `0.38` vs a smoothing gain
-  of `1.06`) and the off-domain first-order degradation of the collapsed smoothed
-  regime posterior (slope `1.15`, against `~3` for filtering).
+  of `1.06`), the off-domain first-order degradation of the collapsed smoothed
+  regime posterior (slope `1.15`, against `~3` for filtering), and the pair-RTS form:
+  its gain identities (`G = [0, W_jk]` on `{A≡MC}`; `G_y = −G_x M_k` on `{C≡0}`, both
+  ≤ `6e-16`), the asymmetric exactness of the naive mode-matched RTS (exact on the
+  slaved branch, biased at `6.6e-2` on `{C≡0}` with state memory), and the off-domain
+  separation of the three formulations (RTS/one-step slope `1.01` — an online
+  diagnostic; `O(1)` disagreement with the reweighting flags the wrong branch).
 - **`.zenodo.json`** — deposition metadata so a Zenodo DOI can be minted for the
   repository (enable the repo on Zenodo and publish a GitHub Release).
 

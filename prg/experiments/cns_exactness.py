@@ -1,6 +1,6 @@
 """Machine-precision checks of the IMM/GPB2 exactness domains (TSP paper).
 
-Eight experiments back the numbers quoted in the exactness-domains paper
+Nine experiments back the numbers quoted in the exactness-domains paper
 (docs/CNS-exactness):
 
 E1  IMM realizes the CGO-MSM exact filter: on a genuine CGO-MSM (C=0, state
@@ -25,9 +25,15 @@ E7  Beyond the scalar two-regime case: a q=2 instance where A=MC genuinely
     requirement.
 E8  Sharpness of the non-degeneracy assumption (G2): regime-free observation
     row + i.i.d. regime -> the IMM is exact although C != 0.
+E9  (G3) and the initialization quantifier: a model outside the union whose
+    second-order blocks (A, C, SU, Delta, SV) do not switch, so that the
+    trajectory-level covariance spread (G3) fails under a regime-common
+    initialization -- GPB2 is nevertheless measurably biased there; with
+    regime-dependent initial covariances (admissible initializations of the
+    paper's Sec. II-D) (G3) holds automatically and the bias grows.
 
-Numbering follows the order of the paper's Section VI (E1-E7) and Remark
-'(G2) is sharp' (E8); before 2026-09-03 the time profiles were E8 and
+Numbering follows the order of the paper's Section VI (E1-E7), Remark
+'(G2) is sharp' (E8) and Remark '(G3) and the initialization quantifier' (E9); before 2026-09-03 the time profiles were E8 and
 E4-E7 were shifted down by one.
 
 Ground truth is the exact K^N mixture filter on short horizons; errors are
@@ -218,6 +224,30 @@ def g2_degenerate_model(C=0.5):
     p = _params(A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV,
                 p_switch=0.5)            # identical rows: i.i.d. regime
     return p
+
+
+def constant_second_order_model(p_switch=0.10):
+    """E9: outside the union (C=0.4, A=0.5 != M*C = 0.4/3) with *constant*
+    second-order blocks A, C, SU, Delta, SV -- only B and D switch (the regime
+    is identifiable through D). Under a regime-common initialization every
+    per-history covariance is the same, so (G3) fails at the trajectory level
+    and Theorem 2's necessity half is silent; GPB2 is biased nonetheless."""
+    return _params(A=[0.5, 0.5], B=[0.10, 0.30], C=[0.4, 0.4], D=[0.2, 0.6],
+                   SU=[0.30, 0.30], Dt=[0.10, 0.10], SV=[0.30, 0.30],
+                   p_switch=p_switch)
+
+
+def _with_init(params, mu_list, Sigma_list):
+    """Copy of ``params`` with the given per-regime initial laws for Z_1."""
+    K = params.K
+    return GSSParams(
+        K=K, q=params.q, s=params.s, P=params.P, f_matrix=params.f_matrix,
+        noise_cov=params.noise_cov, pi0=params.pi0,
+        mu_z0_list=[np.array(m, dtype=float) for m in mu_list],
+        Sigma_z0_list=[0.5 * (np.array(S) + np.array(S).T) for S in Sigma_list],
+        b_list=[params.b(k) for k in range(K)],
+        G_list=[params.G(k) for k in range(K)] if params.p > 0 else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +453,31 @@ def exp4_time_profile(n_steps=13, n_seeds=25, p_fast=0.2):
     return out
 
 
+def exp9_g3_initialization():
+    """E9: (G3) versus the quantifier over admissible initializations.
+    (a) regime-common initial law (stationary moments averaged over regimes):
+        (G3) fails, yet GPB2 is not exact (necessity carried by the
+        likelihood step, which the gain step cannot see);
+    (b) same means, initial covariances scaled by 0.5 / 2.0 per regime: (G3)
+        holds automatically off {A==MC}, and the bias grows."""
+    print("E9  (G3) and the initialization quantifier (constant 2nd-order"
+          " blocks, C=0.4, A=0.5 != MC):")
+    p = constant_second_order_model()
+    K = p.K
+    mu0 = sum(p.mu_z0(k) for k in range(K)) / K
+    S0 = sum(p.Sigma_z0(k) for k in range(K)) / K
+    out = {}
+    pa = _with_init(p, [mu0] * K, [S0] * K)
+    out["common"] = gaps(pa)
+    print(f"    (a) common init, (G3) fails  GPB2 E_x {out['common']['gpb2'][0]}"
+          f"  post {out['common']['gpb2'][2]}| IMM E_x {out['common']['imm'][0]}")
+    pb = _with_init(p, [mu0] * K, [0.5 * S0, 2.0 * S0])
+    out["spread"] = gaps(pb)
+    print(f"    (b) Sigma0(r) x0.5/x2, (G3) holds  GPB2 E_x {out['spread']['gpb2'][0]}"
+          f"  post {out['spread']['gpb2'][2]}| IMM E_x {out['spread']['imm'][0]}")
+    return out
+
+
 def main():
     print(f"Exactness-domain checks -- ground truth: exact K^N mixture filter "
           f"(N={N_STEPS}, {N_SEEDS} seeds), normalized sup-norm gaps:\nmedian [min,max] off the domains; a single number = machine precision (max over all runs).\n")
@@ -441,6 +496,8 @@ def main():
     exp7_beyond_scalar()
     print()
     exp8_g2_sharpness()
+    print()
+    exp9_g3_initialization()
 
 
 if __name__ == "__main__":

@@ -74,10 +74,13 @@ SEED0 = 100
 # ---------------------------------------------------------------------------
 # model builders (K=2, q=s=1 throughout; scalar blocks wrapped as 1x1)
 # ---------------------------------------------------------------------------
-def _params(A, B, C, D, SU, Dt, SV, p_switch):
-    """Assemble a K=2, q=s=1 GSSParams from per-regime scalar block lists."""
+def _params(A, B, C, D, SU, Dt, SV, p_switch, P=None):
+    """Assemble a K=2, q=s=1 GSSParams from per-regime scalar block lists.
+    ``P`` overrides the symmetric transition matrix built from ``p_switch``."""
     K, q, s = 2, 1, 1
-    P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
+    if P is None:
+        P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
+    P = np.asarray(P, dtype=float)
     as_mat = lambda v: [np.array([[x]], dtype=float) for x in v]
     fm = FMatrix(K, q, s, as_mat(A), as_mat(B), as_mat(C), as_mat(D))
     nc = GSSNoiseCovariance(K, q, s, as_mat(SU), as_mat(Dt), as_mat(SV))
@@ -215,22 +218,26 @@ def three_regime_mixed_model(A0, C1):
     return with_stationary_init(p)
 
 
-def g2_degenerate_model(C=0.5):
+def g2_degenerate_model(C=0.5, distinct_rows=False):
     """E8 (sharpness of (G2), Remark 'Assumption (G2) is sharp'): the whole
     observation row is regime-free (common C, D, b^Y, SV) and the regime is
     i.i.d. (identical transition rows), so the one-step predictive law of Y
     does not depend on the arrival regime -- (G2) fails.  Condition (A) holds
     at both regimes (A_r = M_r C), so the state gain is component-independent;
     the IMM is then exact with C != 0, showing the 'only if' of Theorem 1
-    cannot survive without (G2)."""
+    cannot survive without (G2).  With ``distinct_rows=True`` the transition
+    matrix gets distinct rows ([[.9,.1],[.2,.8]]) while the observation row
+    stays regime-free: the second half of (G2) alone restores the theorem
+    (the IMM regime posterior is biased again)."""
     SV = [0.30, 0.30]                    # common observation noise
     M = [0.6, -0.5]
     D = [0.50, 0.50]                     # common D
     Dt = [M[k] * SV[k] for k in range(2)]
     A = [M[k] * C for k in range(2)]     # condition (A) at both regimes
     B = [0.10, 0.40]                     # state rows DO differ across regimes
+    P = [[0.9, 0.1], [0.2, 0.8]] if distinct_rows else None
     p = _params(A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV,
-                p_switch=0.5)            # identical rows: i.i.d. regime
+                p_switch=0.5, P=P)       # p_switch=0.5: identical rows (i.i.d.)
     return p
 
 
@@ -449,9 +456,13 @@ def exp8_g2_sharpness():
     print("E8  sharpness of (G2) (regime-free observation row, i.i.d. regime,"
           " C=0.5):")
     g = gaps(g2_degenerate_model())
-    print(f"    IMM  E_x {g['imm'][0]}   post {g['imm'][2]}"
+    print(f"    (G2) fails:  IMM  E_x {g['imm'][0]}   post {g['imm'][2]}"
           f"   (GPB2 E_x {g['gpb2'][0]})")
-    return g
+    g2 = gaps(g2_degenerate_model(distinct_rows=True))
+    print(f"    rows distinct, observation row still regime-free:"
+          f"  IMM  E_x {g2['imm'][0]}   post {g2['imm'][2]}"
+          f"   (GPB2 E_x {g2['gpb2'][0]})")
+    return g, g2
 
 
 def exp4_time_profile(n_steps=13, n_seeds=25, p_fast=0.2):

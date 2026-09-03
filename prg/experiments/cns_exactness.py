@@ -10,21 +10,25 @@ E2  Slaving-(A)-only models (A=MC, C!=0, B!=MD): GPB2 stays exact (~1e-15)
     while the order-1 IMM drifts, with an error growing with the coupling C.
 E3  Outside {C==0} U {A==MC} (perturb A = MC + eta at C!=0): GPB2 itself is
     biased, with an error growing as roughly eta^3.
-E4  Mixed-branch models (paper indices: regime 1 has C=0 with memory A_1,
+E4  Time profiles on fast-mixing gauges: off-domain errors settle after a
+    short transient (stationary/transient ratios < 1) -- the degradation is
+    uniform in time, not accumulating.
+E5  Mixed-branch models (paper indices: regime 1 has C=0 with memory A_1,
     regime 2 has C_2 != 0 with A_2 = M_2 C_2; the code uses the 0-indexed
     names A0/C1 for the same blocks): each regime passes the per-regime
     disjunction, yet GPB2 is biased as soon as the memory is nonzero -- the
     exactness domain is the union of the two *uniform* families.
-E5  The constant-gain (NGH-MSM) filter: exact on AB, loses half the signal
+E6  The constant-gain (NGH-MSM) filter: exact on AB, loses half the signal
     one step off AB (B = MD + 0.15) while GPB2 stays at machine precision.
-E6  Beyond the scalar two-regime case: a q=2 instance where A=MC genuinely
+E7  Beyond the scalar two-regime case: a q=2 instance where A=MC genuinely
     constrains the rank, and a K=3 mixed-branch instance of the uniformity
     requirement.
-E7  Sharpness of the non-degeneracy assumption (G2): regime-free observation
+E8  Sharpness of the non-degeneracy assumption (G2): regime-free observation
     row + i.i.d. regime -> the IMM is exact although C != 0.
-E8  Time profiles on fast-mixing gauges: off-domain errors settle after a
-    short transient (stationary/transient ratios < 1) -- the degradation is
-    uniform in time, not accumulating.
+
+Numbering follows the order of the paper's Section VI (E1-E7) and Remark
+'(G2) is sharp' (E8); before 2026-09-03 the time profiles were E8 and
+E4-E7 were shifted down by one.
 
 Ground truth is the exact K^N mixture filter on short horizons; errors are
 normalized sup-norm deviations of the state mean, state variance and regime
@@ -113,7 +117,7 @@ def off_union_model(C, eps, p_switch=0.02):
 
 
 def mixed_branch_model(A0, C1):
-    """E4: regime 0 satisfies C=0 (with memory A0, so (A) fails there as soon
+    """E5: regime 0 satisfies C=0 (with memory A0, so (A) fails there as soon
     as A0 != 0); regime 1 satisfies (A) with an active channel (C1 != 0,
     A1 = M1*C1, volet B broken). Per-regime disjunction holds for any A0."""
     SV, M = [0.30, 0.40], [0.50, -0.50]
@@ -129,7 +133,7 @@ def mixed_branch_model(A0, C1):
 # error metric
 # ---------------------------------------------------------------------------
 def ab_model(C, dB=0.0):
-    """E5: same blocks as slaving_A_model but with condition (B) controlled by
+    """E6: same blocks as slaving_A_model but with condition (B) controlled by
     dB: dB=0 gives a full-AB model (the constant-gain filter is exact there),
     dB!=0 leaves the model in {A==MC} but outside AB."""
     return slaving_A_model(C, dB=dB)
@@ -166,7 +170,7 @@ def matrix_slaving_model(C_row=(0.5, 0.2), p_switch=0.02):
 
 
 def three_regime_mixed_model(A0, C1):
-    """E4-bis: K=3 mixed-branch model -- regime 0 has C=0 with memory A0, the
+    """E5-bis: K=3 mixed-branch model -- regime 0 has C=0 with memory A0, the
     other two satisfy A_r = M_r C_r with C_r != 0. Shows the uniformity
     requirement is not a two-regime artifact."""
     from prg.classes.FMatrix import FMatrix as _FM
@@ -198,7 +202,7 @@ def three_regime_mixed_model(A0, C1):
 
 
 def g2_degenerate_model(C=0.5):
-    """E7 (sharpness of (G2), Remark 'Assumption (G2) is sharp'): the whole
+    """E8 (sharpness of (G2), Remark 'Assumption (G2) is sharp'): the whole
     observation row is regime-free (common C, D, b^Y, SV) and the regime is
     i.i.d. (identical transition rows), so the one-step predictive law of Y
     does not depend on the arrival regime -- (G2) fails.  Condition (A) holds
@@ -325,8 +329,8 @@ def exp3_off_union(C=0.4, epss=(0.05, 0.2, 0.5)):
     return out
 
 
-def exp4_mixed_branch(A0s=(0.0, 0.4, 0.8), C1s=(0.3, 0.7)):
-    print("E4  mixed branches (r0: C=0 memory A0; r1: C1!=0, A1=M1*C1):")
+def exp5_mixed_branch(A0s=(0.0, 0.4, 0.8), C1s=(0.3, 0.7)):
+    print("E5  mixed branches (r0: C=0 memory A0; r1: C1!=0, A1=M1*C1):")
     out = {}
     for A0 in A0s:
         for C1 in C1s:
@@ -337,9 +341,9 @@ def exp4_mixed_branch(A0s=(0.0, 0.4, 0.8), C1s=(0.3, 0.7)):
     return out
 
 
-def exp5_constant_gain(Cs=(0.4, 0.55)):
+def exp6_constant_gain(Cs=(0.4, 0.55)):
     """The third filter of the map: exact on AB, biased on {A==MC}\\AB."""
-    print("E5  constant-gain filter (AB row: dB=0; off-AB row: dB=0.15):")
+    print("E6  constant-gain filter (AB row: dB=0; off-AB row: dB=0.15):")
     out = {}
     for C in Cs:
         for dB in (0.0, 0.15):
@@ -351,9 +355,9 @@ def exp5_constant_gain(Cs=(0.4, 0.55)):
     return out
 
 
-def exp6_beyond_scalar():
-    """Dimension and regime-count generalizations of E2 and E4."""
-    print("E6  beyond the scalar two-regime case:")
+def exp7_beyond_scalar():
+    """Dimension and regime-count generalizations of E2 and E5."""
+    print("E7  beyond the scalar two-regime case:")
     g = gaps(matrix_slaving_model())
     print(f"    q=2,s=1 {{A=MC}} (rank(A)<=s)  GPB2 {g['gpb2'][0]:<12}"
           f"| IMM {g['imm'][0]}")
@@ -366,10 +370,10 @@ def exp6_beyond_scalar():
     return out
 
 
-def exp7_g2_sharpness():
+def exp8_g2_sharpness():
     """Sharpness of (G2): with the observation row regime-free and an i.i.d.
     regime, the IMM is exact although C != 0 (Remark 'G2 is sharp')."""
-    print("E7  sharpness of (G2) (regime-free observation row, i.i.d. regime,"
+    print("E8  sharpness of (G2) (regime-free observation row, i.i.d. regime,"
           " C=0.5):")
     g = gaps(g2_degenerate_model())
     print(f"    IMM  E_x {g['imm'][0]}   post {g['imm'][2]}"
@@ -377,8 +381,8 @@ def exp7_g2_sharpness():
     return g
 
 
-def exp8_time_profile(n_steps=13, n_seeds=25, p_fast=0.2):
-    """E8: per-time error profiles on fast-mixing gauges -- does the error
+def exp4_time_profile(n_steps=13, n_seeds=25, p_fast=0.2):
+    """E4: per-time error profiles on fast-mixing gauges -- does the error
     accumulate over time, or settle after the transient?  Reported: the ratio
     of the second-half to first-half median error levels (ratio < 1 means the
     stationary level sits below the transient peak: no accumulation)."""
@@ -400,7 +404,7 @@ def exp8_time_profile(n_steps=13, n_seeds=25, p_fast=0.2):
     r_imm = lambda p, ys: imm_filter(p, ys)[0]
     r_cg = lambda p, ys: _run(p, ys, "ngh_kf")[0]
 
-    print(f"E8  time profiles (fast mixing p={p_fast}, N={n_steps}):"
+    print(f"E4  time profiles (fast mixing p={p_fast}, N={n_steps}):"
           " stationary/transient ratios")
     out = {}
     for eta in (0.1, 0.3):
@@ -428,15 +432,15 @@ def main():
     print()
     exp3_off_union()
     print()
-    exp4_mixed_branch()
+    exp4_time_profile()
     print()
-    exp5_constant_gain()
+    exp5_mixed_branch()
     print()
-    exp6_beyond_scalar()
+    exp6_constant_gain()
     print()
-    exp7_g2_sharpness()
+    exp7_beyond_scalar()
     print()
-    exp8_time_profile()
+    exp8_g2_sharpness()
 
 
 if __name__ == "__main__":

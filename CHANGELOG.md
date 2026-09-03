@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   n-smoother scheme (their Sec. V) reaches `0.53` / `6.7e-2`, reversing their
   benchmark ranking. The reweighting smoother is the corrected two-filter, exact
   at `1e-15` with the same classical ingredients. And (S10)
-  mixed-family smoothing on the E4 gauge: exact at `A_1 = 0` (the model re-enters
+  mixed-family smoothing on the mixed-branch gauge of `cns_exactness` (E5; E4 before the 2026-09-03 renumbering): exact at `A_1 = 0` (the model re-enters
   the uniform `{A≡MC}` family — uniformity is inherited at the smoothing level),
   biased beyond, with smoothed errors 30–140× the GPB2 *filtered* ones on the same
   structural violation. And (S6b) the dual off-domain gauge (`C = η` at both

@@ -53,7 +53,7 @@ S9  The HBH-structure two-filter smoother (forward IMM + backward-time IMM
     smoother: its backward pass substitutes a normalizable posterior for
     the non-normalizable likelihood (a known approximation, cf. Li-Liu-
     Yang-Mihaylova-Deng, FUSION 2021) and mixes modes before evaluating.
-S10 Mixed families: on the E4 gauge of cns_exactness (regime 1: C=0 with
+S10 Mixed families: on the E5 gauge of cns_exactness (regime 1: C=0 with
     memory A0; regime 2: C1!=0 slaved, B broken), every collapsed smoother
     is measurably biased as soon as A0 != 0, and the biases exceed the
     GPB2 FILTERED bias on the same gauge by orders of magnitude -- the

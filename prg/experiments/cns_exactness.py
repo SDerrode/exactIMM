@@ -1,6 +1,6 @@
 """Machine-precision checks of the IMM/GPB2 exactness domains (TSP paper).
 
-Nine experiments back the numbers quoted in the exactness-domains paper
+Ten experiments back the numbers quoted in the exactness-domains paper
 (docs/CNS-exactness):
 
 E1  IMM realizes the CGO-MSM exact filter: on a genuine CGO-MSM (C=0, state
@@ -32,6 +32,13 @@ E9  (G3) and the initialization quantifier: a model outside the union whose
     measurably biased (the likelihood step carries a constraint of its own);
     with regime-dependent initial covariances (Lemma 'Reachable covariances'
     of the paper) the covariances spread and the bias grows.
+E10 The matrix case (q=2, s=1): cross-annihilation C_k (A_j - M_j C_j) = 0
+    for all regime pairs, with every memory A_j - M_j C_j singular and
+    nonzero and every C_k nonzero -- outside {C==0} U {A==MC}, yet GPB2 is
+    exact (the memory lives in the common kernel of the observation rows);
+    rotating the observation rows out of that kernel (same memories)
+    restores a measurable bias. The GPB2 domain is the cross-annihilation
+    family, which reduces to the union of the two uniform families at q=1.
 
 Numbering follows the order of the paper's Section VI (E1-E7), Remark
 '(G2) is sharp' (E8) and Remark '(G3) and the initialization quantifier' (E9); before 2026-09-03 the time profiles were E8 and
@@ -236,6 +243,41 @@ def constant_second_order_model(p_switch=0.10):
     return _params(A=[0.5, 0.5], B=[0.10, 0.30], C=[0.4, 0.4], D=[0.2, 0.6],
                    SU=[0.30, 0.30], Dt=[0.10, 0.10], SV=[0.30, 0.30],
                    p_switch=p_switch)
+
+
+def cross_annihilation_model(annihilate=True, p_switch=0.10):
+    """E10: q=2, s=1, K=2. Memories N_j = A_j - M_j C_j = e_2 v_j^T (rank 1,
+    nonzero) at both regimes. With ``annihilate=True`` the observation rows
+    are C_k = [c_k, 0], so C_k N_j = 0 for every pair (j, k): the model is
+    outside {C==0} U {A==MC} but inside the cross-annihilation family. With
+    ``annihilate=False`` the rows become C_k = [c_k, 0.3] (same memories):
+    C_k N_j != 0 and GPB2 is biased."""
+    from prg.classes.FMatrix import FMatrix as _FM
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance as _NC
+
+    K, q, s = 2, 2, 1
+    P = np.array([[1 - p_switch, p_switch], [p_switch, 1 - p_switch]])
+    SV = [np.array([[0.20]]), np.array([[0.60]])]
+    M = [np.array([[0.6], [-0.3]]), np.array([[-0.5], [0.4]])]
+    D = [np.array([[0.50]]), np.array([[0.50]])]
+    c2 = 0.0 if annihilate else 0.3
+    C = [np.array([[0.5, c2]]), np.array([[0.3, c2]])]
+    N = [np.array([[0.0, 0.0], [0.4, 0.5]]), np.array([[0.0, 0.0], [-0.3, 0.6]])]
+    A = [M[k] @ C[k] + N[k] for k in range(K)]
+    B = [M[k] @ D[k] + 0.15 for k in range(K)]
+    Dt = [M[k] @ SV[k] for k in range(K)]
+    Gam = [np.diag([0.25, 0.30]), np.diag([0.30, 0.20])]
+    SU = [Gam[k] + M[k] @ SV[k] @ M[k].T for k in range(K)]
+    fm = _FM(K, q, s, A, B, C, D)
+    nc = _NC(K, q, s, SU, Dt, SV)
+    p = GSSParams(
+        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
+    )
+    rho = max(max(abs(np.linalg.eigvals(fm.F(k)))) for k in range(K))
+    assert rho < 1.0, f"unstable model (rho={rho:.3f})"
+    return with_stationary_init(p)
 
 
 def _with_init(params, mu_list, Sigma_list):
@@ -479,6 +521,21 @@ def exp9_g3_initialization():
     return out
 
 
+def exp10_cross_annihilation():
+    """E10: the matrix case -- GPB2 exact on the cross-annihilation family
+    outside the union, biased once the observation rows leave the kernel of
+    the memories."""
+    print("E10 matrix case q=2: cross-annihilation C_k N_j = 0 (all memories"
+          " singular, nonzero; C_k != 0):")
+    out = {}
+    for tag, ann in (("C_k N_j = 0 ", True), ("C_k N_j != 0", False)):
+        g = gaps(cross_annihilation_model(annihilate=ann))
+        out[ann] = g
+        print(f"    {tag}  GPB2 E_x {g['gpb2'][0]:<22} var {g['gpb2'][1]:<22}"
+              f" post {g['gpb2'][2]:<22}| IMM E_x {g['imm'][0]}")
+    return out
+
+
 def main():
     print(f"Exactness-domain checks -- ground truth: exact K^N mixture filter "
           f"(N={N_STEPS}, {N_SEEDS} seeds), normalized sup-norm gaps:\nmedian [min,max] off the domains; a single number = machine precision (max over all runs).\n")
@@ -499,6 +556,8 @@ def main():
     exp8_g2_sharpness()
     print()
     exp9_g3_initialization()
+    print()
+    exp10_cross_annihilation()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """Machine-precision checks of the exact fixed-interval smoothers (smoothing paper).
 
-Six experiments back the numbers quoted in the exact-smoothing paper
+Eleven experiments back the numbers quoted in the exact-smoothing paper
 (docs/exact-smoothing):
 
 S1  Smoothed regime posterior, exact and O(N K^2) on both families: the HMM
@@ -61,6 +61,15 @@ S10 Mixed families: on the E5 gauge of cns_exactness (regime 1: C=0 with
     At A0 = 0 the model re-enters the uniform family {A==MC} (both
     conditions hold at regime 1) and the lag-1 smoother returns to
     machine precision: smoothing inherits the uniformity requirement.
+S11 The matrix case (E10 gauge of cns_exactness, q=2): on the cross-
+    annihilation family C_k (A_j - M_j C_j) = 0 outside the union -- where
+    the GPB2 FILTER is exact -- the collapsed smoothed regime posterior
+    (GPB2 forward + pair-likelihood backward) is exact too, but no collapsed
+    STATE smoother of this paper is (reweighting, lag-1, pair-RTS all
+    biased): the smoothed state genuinely needs the history that the
+    filtered state does not.  For q>1 the smoothing state domains covered
+    here ({C==0} u {A==MC}) are strictly smaller than the GPB2 filtering
+    domain.
 
 Ground truth is the exact K^N path smoother: one conditional pair Kalman
 filter + RTS smoother per regime path, the paths weighted by their exact
@@ -83,6 +92,7 @@ from prg.experiments.cns_exactness import (
     _rel,
     ab_model,
     cgo_memory_model,
+    cross_annihilation_model,
     mixed_branch_model,
     off_union_model,
 )
@@ -1040,6 +1050,33 @@ def exp_mixed(A0s=(0.0, 0.4, 0.8), C1=0.7):
               f"  post {np.median(e_fp):.1e}")
 
 
+def exp_matrix_cross_annihilation():
+    """S11: matrix cross-annihilation gauge -- regime smoother exact, no state
+    smoother of this paper exact, GPB2 filter exact (baseline)."""
+    print("S11 matrix case q=2 (E10 gauge): cross-annihilation C_k N_j = 0 vs"
+          " rotated rows (C_k N_j != 0):")
+    out = {}
+    for tag, ann in (("C_k N_j = 0 ", True), ("C_k N_j != 0", False)):
+        p = cross_annihilation_model(annihilate=ann)
+        e = {k: [] for k in ("regime", "rts", "lag1", "reweight", "filt")}
+        for sd in range(N_SEEDS):
+            _, _, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
+            Ex_s, _, gam_ex = exact_path_smoother(p, ys)
+            e["regime"].append(_rel(gpb2_regime_smoother(p, ys), gam_ex))
+            e["rts"].append(_rel(pair_rts_smoother(p, ys), Ex_s))
+            e["lag1"].append(_rel(lag1_smoother(p, ys)[0], Ex_s))
+            e["reweight"].append(_rel(reweight_smoother(p, ys, kernel_Q0(p, ys))[0], Ex_s))
+            Ex_f, _, _ = exact_mixture_filter(p, ys)
+            e["filt"].append(_rel(gpb2_filter(p, ys)[0], Ex_f))
+        out[ann] = {k: _med_max(v) for k, v in e.items()}
+        print(f"  {tag}  smoothed regime {np.median(e['regime']):.1e}"
+              f" | smoothed mean: pair-RTS {np.median(e['rts']):.1e}"
+              f"  lag-1 {np.median(e['lag1']):.1e}"
+              f"  reweighting {np.median(e['reweight']):.1e}"
+              f" | GPB2 filtered mean {np.median(e['filt']):.1e}")
+    return out
+
+
 def exp_separation(etas=(0.02, 0.08, 0.3)):
     """S8: off the union, the three formulations separate; the pairwise
     separations vanish with eta and need no ground truth (diagnostic)."""
@@ -1121,6 +1158,8 @@ def main():
     exp_hbh(exact_c0, exact_A)
     print()
     exp_mixed()
+    print()
+    exp_matrix_cross_annihilation()
 
 
 if __name__ == "__main__":

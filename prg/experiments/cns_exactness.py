@@ -26,11 +26,12 @@ E7  Beyond the scalar two-regime case: a q=2 instance where A=MC genuinely
 E8  Sharpness of the non-degeneracy assumption (G2): regime-free observation
     row + i.i.d. regime -> the IMM is exact although C != 0.
 E9  (G3) and the initialization quantifier: a model outside the union whose
-    second-order blocks (A, C, SU, Delta, SV) do not switch, so that the
-    trajectory-level covariance spread (G3) fails under a regime-common
-    initialization -- GPB2 is nevertheless measurably biased there; with
-    regime-dependent initial covariances (admissible initializations of the
-    paper's Sec. II-D) (G3) holds automatically and the bias grows.
+    second-order blocks (A, C, SU, Delta, SV) do not switch. Under a
+    regime-common initialization every per-history covariance is equal and
+    the gain step of the necessity proof is empty -- GPB2 is nevertheless
+    measurably biased (the likelihood step carries a constraint of its own);
+    with regime-dependent initial covariances (Lemma 'Reachable covariances'
+    of the paper) the covariances spread and the bias grows.
 
 Numbering follows the order of the paper's Section VI (E1-E7), Remark
 '(G2) is sharp' (E8) and Remark '(G3) and the initialization quantifier' (E9); before 2026-09-03 the time profiles were E8 and
@@ -230,8 +231,8 @@ def constant_second_order_model(p_switch=0.10):
     """E9: outside the union (C=0.4, A=0.5 != M*C = 0.4/3) with *constant*
     second-order blocks A, C, SU, Delta, SV -- only B and D switch (the regime
     is identifiable through D). Under a regime-common initialization every
-    per-history covariance is the same, so (G3) fails at the trajectory level
-    and Theorem 2's necessity half is silent; GPB2 is biased nonetheless."""
+    per-history covariance is the same and the gain step of the necessity
+    proof is empty; GPB2 is biased nonetheless (likelihood step)."""
     return _params(A=[0.5, 0.5], B=[0.10, 0.30], C=[0.4, 0.4], D=[0.2, 0.6],
                    SU=[0.30, 0.30], Dt=[0.10, 0.10], SV=[0.30, 0.30],
                    p_switch=p_switch)
@@ -456,10 +457,10 @@ def exp4_time_profile(n_steps=13, n_seeds=25, p_fast=0.2):
 def exp9_g3_initialization():
     """E9: (G3) versus the quantifier over admissible initializations.
     (a) regime-common initial law (stationary moments averaged over regimes):
-        (G3) fails, yet GPB2 is not exact (necessity carried by the
-        likelihood step, which the gain step cannot see);
-    (b) same means, initial covariances scaled by 0.5 / 2.0 per regime: (G3)
-        holds automatically off {A==MC}, and the bias grows."""
+        all per-history covariances equal, gain step empty, yet GPB2 is not
+        exact (necessity carried by the likelihood step);
+    (b) same means, initial covariances scaled by 0.5 / 2.0 per regime: the
+        covariances spread (Lemma 'Reachable covariances'), the bias grows."""
     print("E9  (G3) and the initialization quantifier (constant 2nd-order"
           " blocks, C=0.4, A=0.5 != MC):")
     p = constant_second_order_model()
@@ -469,11 +470,11 @@ def exp9_g3_initialization():
     out = {}
     pa = _with_init(p, [mu0] * K, [S0] * K)
     out["common"] = gaps(pa)
-    print(f"    (a) common init, (G3) fails  GPB2 E_x {out['common']['gpb2'][0]}"
+    print(f"    (a) common init, gain step empty  GPB2 E_x {out['common']['gpb2'][0]}"
           f"  post {out['common']['gpb2'][2]}| IMM E_x {out['common']['imm'][0]}")
     pb = _with_init(p, [mu0] * K, [0.5 * S0, 2.0 * S0])
     out["spread"] = gaps(pb)
-    print(f"    (b) Sigma0(r) x0.5/x2, (G3) holds  GPB2 E_x {out['spread']['gpb2'][0]}"
+    print(f"    (b) Sigma0(r) x0.5/x2, spread  GPB2 E_x {out['spread']['gpb2'][0]}"
           f"  post {out['spread']['gpb2'][2]}| IMM E_x {out['spread']['imm'][0]}")
     return out
 

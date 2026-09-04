@@ -24,7 +24,14 @@ E7  Beyond the scalar two-regime case: a q=2 instance where A=MC genuinely
     constrains the rank, and a K=3 mixed-branch instance of the uniformity
     requirement.
 E8  Sharpness of the non-degeneracy assumption (G2): regime-free observation
-    row + i.i.d. regime -> the IMM is exact although C != 0.
+    row + i.i.d. regime -> the IMM is exact although C != 0. Second line:
+    distinct transition rows alone restore the theorem. Third line (vector
+    observation, s=2): the regime is carried by an observation component the
+    state never enters, the state-informed part of the observation row
+    (Sigma_V^-1 C, C^T Sigma_V^-1 C, C^T Sigma_V^-1 D, C^T Sigma_V^-1 b) being
+    regime-free -- the IMM is exact although the observation row itself is
+    regime-dependent; coupling that component into the state-informed one
+    (D_12 regime-dependent) restores the bias.
 E9  (G3) and the initialization quantifier: a model outside the union whose
     second-order blocks (A, C, SU, Delta, SV) do not switch. Under a
     regime-common initialization every per-history covariance is equal and
@@ -239,6 +246,41 @@ def g2_degenerate_model(C=0.5, distinct_rows=False):
     p = _params(A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV,
                 p_switch=0.5, P=P)       # p_switch=0.5: identical rows (i.i.d.)
     return p
+
+
+def g2_vector_model(couple=False):
+    """E8, vector case (q=1, s=2): the state enters y1 only (C=[c,0]^T,
+    Sigma_V=I, first row of D and b regime-free), the regime is carried by the
+    autonomous second component y2 (D_22 = 0.3 / -0.6), transition rows
+    identical, A_r = M_r C_r. The observation row IS regime-dependent, but its
+    state-informed part is not: the IMM regime posterior is exact. With
+    ``couple=True`` D_12 becomes regime-dependent (0.2 / -0.3): y2 feeds y1,
+    C^T Sigma_V^-1 D depends on the regime, and the IMM is biased."""
+    from prg.classes.FMatrix import FMatrix as _FM
+    from prg.classes.NoiseCovariance import GSSNoiseCovariance as _NC
+
+    K, q, s = 2, 1, 2
+    P = np.full((K, K), 0.5)
+    SV = [np.eye(2), np.eye(2)]
+    M = [np.array([[0.6, 0.3]]), np.array([[-0.5, 0.2]])]
+    C = [np.array([[0.5], [0.0]]) for _ in range(K)]
+    e = (0.2, -0.3) if couple else (0.0, 0.0)
+    D = [np.array([[0.5, e[k]], [0.0, (0.3, -0.6)[k]]]) for k in range(K)]
+    A = [M[k] @ C[k] for k in range(K)]
+    B = [np.array([[0.10, 0.20]]), np.array([[0.30, -0.10]])]
+    Dt = [M[k] @ SV[k] for k in range(K)]
+    Gam = [0.25, 0.30]
+    SU = [np.array([[Gam[k]]]) + M[k] @ SV[k] @ M[k].T for k in range(K)]
+    fm = _FM(K, q, s, A, B, C, D)
+    nc = _NC(K, q, s, SU, Dt, SV)
+    p = GSSParams(
+        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
+        Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
+    )
+    rho = max(max(abs(np.linalg.eigvals(fm.F(k)))) for k in range(K))
+    assert rho < 1.0, f"unstable model (rho={rho:.3f})"
+    return with_stationary_init(p)
 
 
 def constant_second_order_model(p_switch=0.10):
@@ -462,7 +504,15 @@ def exp8_g2_sharpness():
     print(f"    rows distinct, observation row still regime-free:"
           f"  IMM  E_x {g2['imm'][0]}   post {g2['imm'][2]}"
           f"   (GPB2 E_x {g2['gpb2'][0]})")
-    return g, g2
+    g3 = gaps(g2_vector_model())
+    print(f"    s=2, regime in the state-blind component y2, i.i.d. rows:"
+          f"  IMM  E_x {g3['imm'][0]}   post {g3['imm'][2]}"
+          f"   (GPB2 E_x {g3['gpb2'][0]})")
+    g4 = gaps(g2_vector_model(couple=True))
+    print(f"    s=2, y2 coupled into y1 (D_12 regime-dependent):"
+          f"  IMM  E_x {g4['imm'][0]}   post {g4['imm'][2]}"
+          f"   (GPB2 E_x {g4['gpb2'][0]})")
+    return g, g2, g3, g4
 
 
 def exp4_time_profile(n_steps=13, n_seeds=25, p_fast=0.2):

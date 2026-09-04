@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`prg/utils/exactness.py`** — block-level exactness-domain residuals for the
+  three classical filters, following the companion paper's final statements:
+  `imm_domain_residual` (`C ≡ 0`), `cross_annihilation_residual` /
+  `gpb2_domain_residual` (`C_k (A_j − M_j C_j) = 0` for every ordered regime pair —
+  the GPB2 domain, equal to `{C≡0} ∪ {A≡MC}` for a scalar state and strictly
+  larger otherwise) and `exactness_domains` (the three booleans, the constant-gain
+  one delegating to `ab_residual_max`). Tests in `tests/test_exactness_domains.py`
+  check the residuals against the committed gauges and the exact mixture filter.
 - **`prg/experiments/cns_exactness.py`** — the committed experiment suite behind the
   numerical section of the companion *exactness-domains* paper (docs/CNS-exactness,
-  not tracked here). Eight experiments (E1–E8) against the exact `K^N` mixture filter:
+  not tracked here). Ten experiments (E1–E10) against the exact `K^N` mixture filter:
   machine-precision checks on the exactness domains of the IMM (`{C≡0}`), GPB2
-  (`{C≡0} ∪ {A≡MC}`, uniform across regimes) and the constant-gain filter (AB);
+  (cross-annihilation `C_k (A_j − M_j C_j) = 0`, i.e. `{C≡0} ∪ {A≡MC}` for a scalar
+  state — E10 exhibits the strictly larger matrix domain) and the constant-gain filter (AB);
   structural bias off the domains (mixed-branch models, `~η³` growth); sharpness of
   the non-degeneracy assumption; and time profiles showing the off-domain error does
   not accumulate. Metric: normalized sup-norm deviation, median `[min,max]` over

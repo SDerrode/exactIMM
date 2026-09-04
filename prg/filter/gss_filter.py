@@ -749,8 +749,10 @@ class GSSFilter:
     # Keeps one Gaussian per current regime; each step expands to the K^2
     # regime pairs (previous, current), runs K^2 exact-observation Kalman
     # updates, then collapses back to K by merging over the previous regime.
-    # Exact whenever C_r = 0 or A_r = M_r C_r; elsewhere the depth-2 collapse
-    # is an approximation. This mirrors, step for step, the batch reference
+    # Exact iff C_k (A_j - M_j C_j) = 0 for every ordered regime pair (j, k)
+    # (cross-annihilation; see prg.utils.exactness) -- for a scalar state this
+    # is "C = 0 at every regime, or A = M C at every regime"; elsewhere the
+    # depth-2 collapse is an approximation. This mirrors, step for step, the batch reference
     # implementation in prg.experiments.reference_filters.gpb2_filter (which
     # cannot be imported here: it already imports GSSFilter).
     # ------------------------------------------------------------------

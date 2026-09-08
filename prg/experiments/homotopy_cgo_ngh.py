@@ -8,6 +8,13 @@ hence M and Gamma) being shared:
 
     C(eps) = eps C_1,   A(eps) = (1-eps) A_0 + eps M C_1,   B(eps) = (1-eps) B_0 + eps M D.
 
+Two further paths share the endpoints and separate the two effects at play:
+"c_first"  -- the channel opens on [0, 1/2] (C: 0 -> C_1, A = A_0, B = B_0 kept),
+              then the state row slaves itself on [1/2, 1] (A -> M C_1, B -> M D);
+"ab_first" -- the state row slaves itself on [0, 1/2] with the channel still
+              closed (the model stays a CGO model with C = 0), then the channel
+              opens on [1/2, 1].
+
 Data are simulated with the model at epsilon.  Two exact filters are run with
 FROZEN parameters, each on its own family's model:
 
@@ -68,18 +75,33 @@ C1 = [0.5, 0.5]              # NGH endpoint: active channel
 P_SWITCH = 0.10
 
 
-def path_blocks(eps: float) -> dict:
-    """Blocks of the model at epsilon (K=2, q=s=1)."""
-    A = [(1 - eps) * A0[k] + eps * M[k] * C1[k] for k in range(2)]
-    B = [(1 - eps) * B0[k] + eps * M[k] * D[k] for k in range(2)]
-    C = [eps * C1[k] for k in range(2)]
+PATHS = ("straight", "c_first", "ab_first")
+
+
+def _stage(eps: float, kind: str) -> tuple[float, float]:
+    """(fraction of the channel opened, fraction of the state row slaved)."""
+    if kind == "straight":
+        return eps, eps
+    if kind == "c_first":
+        return min(1.0, 2 * eps), max(0.0, 2 * eps - 1)
+    if kind == "ab_first":
+        return max(0.0, 2 * eps - 1), min(1.0, 2 * eps)
+    raise ValueError(kind)
+
+
+def path_blocks(eps: float, kind: str = "straight") -> dict:
+    """Blocks of the model at epsilon on the given path (K=2, q=s=1)."""
+    c, a = _stage(eps, kind)
+    A = [(1 - a) * A0[k] + a * M[k] * C1[k] for k in range(2)]
+    B = [(1 - a) * B0[k] + a * M[k] * D[k] for k in range(2)]
+    C = [c * C1[k] for k in range(2)]
     Dt = [M[k] * SV[k] for k in range(2)]
     SU = [GAM[k] + M[k] * SV[k] * M[k] for k in range(2)]
     return dict(A=A, B=B, C=C, D=list(D), SU=SU, Dt=Dt, SV=list(SV))
 
 
-def model(eps: float) -> GSSParams:
-    b = path_blocks(eps)
+def model(eps: float, kind: str = "straight") -> GSSParams:
+    b = path_blocks(eps, kind)
     K, q, s = 2, 1, 1
     P = np.array([[1 - P_SWITCH, P_SWITCH], [P_SWITCH, 1 - P_SWITCH]])
     as_mat = lambda v: [np.array([[x]], dtype=float) for x in v]
@@ -95,8 +117,8 @@ def model(eps: float) -> GSSParams:
     return with_stationary_init(p)
 
 
-def spectral_radius(eps: float) -> float:
-    b = path_blocks(eps)
+def spectral_radius(eps: float, kind: str = "straight") -> float:
+    b = path_blocks(eps, kind)
     return max(
         max(abs(np.linalg.eigvals(np.array([[b["A"][k], b["B"][k]], [b["C"][k], b["D"][k]]]))))
         for k in range(2)
@@ -108,9 +130,9 @@ def _rel(a, b):
     return float(np.max(np.abs(a - b)) / (np.max(np.abs(b)) + 1e-12))
 
 
-def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int) -> dict:
+def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = "straight") -> dict:
     """Pooled RMSE (vs simulated state) and median gap-to-exact for each filter."""
-    p = model(eps)
+    p = model(eps, kind)
     se = {k: 0.0 for k in ("exact", "cgo", "ngh", "gpb2")}
     d2 = {k: 0.0 for k in ("cgo", "ngh", "gpb2")}     # sum (f - e)^2
     cross = {k: 0.0 for k in ("cgo", "ngh", "gpb2")}  # sum (f - e)(e - x): orthogonality check
@@ -135,7 +157,7 @@ def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int) -> dict:
         n_tot += len(x)
     rmse = {k: float(np.sqrt(v / n_tot)) for k, v in se.items()}
     post_var = var_e / n_tot
-    out = {"eps": eps, "rho": spectral_radius(eps), "rmse": rmse, "posterior_var": post_var,
+    out = {"eps": eps, "path": kind, "rho": spectral_radius(eps, kind), "rmse": rmse, "posterior_var": post_var,
            "excess_mse": {k: d2[k] / n_tot for k in d2},
            "excess": {k: (d2[k] / n_tot) / post_var for k in d2},
            "cross_term": {k: cross[k] / n_tot for k in cross},
@@ -190,35 +212,80 @@ def plot(results: Path, figdir: Path) -> None:
     print(f"[homotopy] figure -> {out}   crossing eps* = {xc:.3f}")
 
 
+def plot_compare(results_list, figdir: Path) -> None:
+    """One panel per path: relative excess MSE of the two frozen filters."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figdir.mkdir(parents=True, exist_ok=True)
+    col = {"cgo": "#1f5f8b", "ngh": "#b8451f", "gpb2": "#5f7d3a"}
+    title = {"straight": "(a) straight path: $C$, $A$, $B$ move together",
+             "c_first": "(b) channel first, then slaving",
+             "ab_first": "(c) slaving first, then channel"}
+    fig, axes = plt.subplots(1, len(results_list), figsize=(3.6 * len(results_list), 3.7), sharey=True)
+    axes = np.atleast_1d(axes)
+    for ax, rp in zip(axes, results_list):
+        res = json.loads(Path(rp).read_text()); rows = res["rows"]; kind = res.get("path", "straight")
+        eps = [r["eps"] for r in rows]
+        for k, lab in (("cgo", r"CGO filter (frozen $\varepsilon{=}0$)"),
+                       ("ngh", r"NGH filter (frozen $\varepsilon{=}1$)"), ("gpb2", "GPB2, true model")):
+            ax.plot(eps, [r["excess"][k] for r in rows], "o-", ms=3.5, color=col[k], label=lab)
+        xc = crossing(rows)
+        if np.isfinite(xc):
+            ax.axvline(xc, color="k", ls=":", lw=1)
+            ax.text(xc + 0.02, 0.55 * ax.get_ylim()[1] if ax.get_ylim()[1] > 0 else 0.05,
+                    rf"$\varepsilon^\ast\approx{xc:.2f}$", fontsize=8, ha="left")
+        if kind != "straight":
+            ax.axvline(0.5, color="gray", lw=0.8, alpha=.6)
+        ax.set_title(title.get(kind, kind), fontsize=9.5); ax.grid(alpha=.3)
+        ax.set_xlabel(r"$\varepsilon$")
+    axes[0].set_ylabel(r"relative excess MSE  $\mathbb{E}(f-e)^2/\mathrm{Var}[X\mid y]$")
+    axes[0].legend(fontsize=7.5, loc="upper left")
+    fig.tight_layout()
+    out = figdir / "homotopy_paths.pdf"
+    fig.savefig(out); fig.savefig(out.with_suffix(".png"), dpi=160)
+    print(f"[homotopy] comparison figure -> {out}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=200)
     ap.add_argument("--out", type=Path, default=Path("data/experiments/homotopy_cgo_ngh"))
     ap.add_argument("--grid", type=str, default="0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0")
+    ap.add_argument("--path", choices=PATHS, default="straight")
     ap.add_argument("--plot-only", type=Path, default=None,
                     help="skip the sweep; plot this results.json into --figdir")
+    ap.add_argument("--compare", type=Path, nargs="*", default=None,
+                    help="plot several results.json side by side into --figdir")
     ap.add_argument("--figdir", type=Path, default=None)
     args = ap.parse_args()
     if args.plot_only is not None:
         plot(args.plot_only, args.figdir or args.plot_only.parent)
         return
+    if args.compare:
+        plot_compare(args.compare, args.figdir or args.compare[0].parent)
+        return
+    kind = args.path
+    if kind != "straight" and args.out == Path("data/experiments/homotopy_cgo_ngh"):
+        args.out = args.out / kind
     args.out.mkdir(parents=True, exist_ok=True)
     warnings.filterwarnings("ignore")
     p0, p1 = model(0.0), model(1.0)
-    print(f"[homotopy] N={N_STEPS}, {args.seeds} seeds; rho(F) along the path: "
-          + ", ".join(f"{spectral_radius(e):.3f}" for e in (0, 0.25, 0.5, 0.75, 1)))
+    print(f"[homotopy] path={kind} N={N_STEPS}, {args.seeds} seeds; rho(F) along the path: "
+          + ", ".join(f"{spectral_radius(e, kind):.3f}" for e in (0, 0.25, 0.5, 0.75, 1)))
     print(f"{'eps':>5} {'rmse_ex':>8} {'postvar':>8} | {'xs_cgo':>8} {'xs_ngh':>8} {'xs_gpb2':>8} | "
           f"{'gap_cgo':>8} {'gap_ngh':>8} {'gap_gpb2':>8} | {'cross_c':>8} {'cross_n':>8}")
     rows = []
     for eps in [float(e) for e in args.grid.split(",")]:
-        r = run_eps(eps, p0, p1, args.seeds)
+        r = run_eps(eps, p0, p1, args.seeds, kind)
         rows.append(r)
         rm, xs, gp, cr = r["rmse"], r["excess"], r["gap_median"], r["cross_term"]
         print(f"{eps:5.2f} {rm['exact']:8.4f} {r['posterior_var']:8.4f} | "
               f"{xs['cgo']:8.4f} {xs['ngh']:8.4f} {xs['gpb2']:8.1e} | "
               f"{gp['cgo']:8.1e} {gp['ngh']:8.1e} {gp['gpb2']:8.1e} | {cr['cgo']:8.1e} {cr['ngh']:8.1e}", flush=True)
     (args.out / "results.json").write_text(json.dumps(
-        {"N": N_STEPS, "seeds": args.seeds, "blocks": {"A0": A0, "B0": B0, "C1": C1, "D": D,
+        {"N": N_STEPS, "seeds": args.seeds, "path": kind, "blocks": {"A0": A0, "B0": B0, "C1": C1, "D": D,
          "SV": SV, "M": M, "Gamma": GAM, "p_switch": P_SWITCH}, "rows": rows}, indent=1))
     print(f"[homotopy] results -> {args.out/'results.json'}")
     plot(args.out / "results.json", args.figdir or args.out)

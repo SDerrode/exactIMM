@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`prg/experiments/homotopy_cgo_ngh.py`** — CGO → NGH homotopy: a straight path in
+  the blocks joins a genuine CGO model (`C = 0`, state memory) to a genuine NGH model
+  (`AB` with an active channel); data are simulated at each `ε` and the two exact
+  filters are run with *frozen* endpoint parameters (CGO filter at `ε = 0`, constant
+  gain at `ε = 1`), GPB2 with the true model as reference. Excess MSE over the Bayes
+  filter measured through the orthogonality principle (mean-square distance to the
+  exact conditional mean, relative to the exact posterior variance). Backs the
+  independent report `docs/rapport_homotopie_cgo_ngh` (not tracked here).
 - **`prg/utils/exactness.py`** — block-level exactness-domain residuals for the
   three classical filters, following the companion paper's final statements:
   `imm_domain_residual` (`C ≡ 0`), `cross_annihilation_residual` /

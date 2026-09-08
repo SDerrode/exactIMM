@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filters are run with *frozen* endpoint parameters (CGO filter at `ε = 0`, constant
   gain at `ε = 1`), GPB2 with the true model as reference. Excess MSE over the Bayes
   filter measured through the orthogonality principle (mean-square distance to the
-  exact conditional mean, relative to the exact posterior variance). Backs the
+  exact conditional mean, relative to the exact posterior variance). Three paths
+  (`--path straight|c_first|ab_first`) and three ways of filtering with a family
+  (frozen endpoint, block projection, closed-form KL projection). Backs the
   independent report `docs/rapport_homotopie_cgo_ngh` (not tracked here).
 - **`prg/utils/exactness.py`** — block-level exactness-domain residuals for the
   three classical filters, following the companion paper's final statements:

@@ -23,7 +23,22 @@ FROZEN parameters, each on its own family's model:
 * the NGH constant-gain filter -- fed the epsilon = 1 model.
 
 Both are therefore misspecified in A, B, C by an amount linear in their
-distance to their endpoint.  The Bayes-optimal filter at epsilon (exact K^N
+distance to their endpoint.  Two other ways of "filtering with a family" off
+the family are run alongside:
+
+* block projection ("blk") -- each filter is fed the TRUE blocks of the model
+  at epsilon wherever its family allows, and only the forbidden blocks are
+  replaced: the CGO filter gets A(eps), B(eps), D, Sigma_W with C := 0; the NGH
+  filter gets C(eps), D, Sigma_W with A := M C(eps), B := M D.  Each filter is
+  then wrong only in what its family cannot represent.
+* KL projection ("kl") -- the member of each family closest to the true model
+  in the Kullback-Leibler sense: the transition kernel N(F z + b, Sigma_W) of
+  arrival regime k is approximated by N(F' z + b, Sigma_W) with F' in the
+  family's linear subspace (C' = 0 for CGO; A' = M C', B' = M D' for NGH),
+  minimizing E[(F - F') z]^T Sigma_W^-1 [(F - F') z] under the stationary law
+  of the true model (departure regimes weighted by pi_j p_jk).  This is the
+  weighted least-squares regression that Petetin & Desbouvries' criterion
+  reduces to for Gaussian kernels with a common covariance.  The Bayes-optimal filter at epsilon (exact K^N
 mixture, short horizon) gives the irreducible error; GPB2 with the TRUE
 parameters is the collapsed reference, exact at both ends.
 
@@ -100,8 +115,8 @@ def path_blocks(eps: float, kind: str = "straight") -> dict:
     return dict(A=A, B=B, C=C, D=list(D), SU=SU, Dt=Dt, SV=list(SV))
 
 
-def model(eps: float, kind: str = "straight") -> GSSParams:
-    b = path_blocks(eps, kind)
+def _build(b: dict) -> GSSParams:
+    """GSSParams (stationary init) from a block dict of K=2, q=s=1 scalars."""
     K, q, s = 2, 1, 1
     P = np.array([[1 - P_SWITCH, P_SWITCH], [P_SWITCH, 1 - P_SWITCH]])
     as_mat = lambda v: [np.array([[x]], dtype=float) for x in v]
@@ -113,8 +128,55 @@ def model(eps: float, kind: str = "straight") -> GSSParams:
         Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
     )
     rho = max(max(abs(np.linalg.eigvals(fm.F(k)))) for k in range(K))
-    assert rho < 1.0, f"unstable model at eps={eps} (rho={rho:.3f})"
+    assert rho < 1.0, f"unstable model (rho={rho:.3f}): {b}"
     return with_stationary_init(p)
+
+
+def model(eps: float, kind: str = "straight") -> GSSParams:
+    return _build(path_blocks(eps, kind))
+
+
+def project_blocks(eps: float, kind: str, family: str) -> GSSParams:
+    """Block projection of the model at epsilon onto a family."""
+    b = path_blocks(eps, kind)
+    if family == "cgo":
+        b["C"] = [0.0, 0.0]
+    elif family == "ngh":
+        b["A"] = [M[k] * b["C"][k] for k in range(2)]
+        b["B"] = [M[k] * b["D"][k] for k in range(2)]
+    else:
+        raise ValueError(family)
+    return _build(b)
+
+
+def project_kl(eps: float, kind: str, family: str) -> GSSParams:
+    """KL projection of the model at epsilon onto a family (see module doc)."""
+    from prg.experiments.reference_filters import stationary_moments
+
+    p = model(eps, kind)
+    b = path_blocks(eps, kind)
+    mu, Sig = stationary_moments(p)
+    S_j = [Sig[j] + mu[j] @ mu[j].T for j in range(2)]          # E[z z^T | r=j]
+    pi = np.asarray(p.pi0).ravel()
+    P = np.asarray(p.P)
+    new = {k: list(v) for k, v in b.items()}
+    for k in range(2):
+        w = pi * P[:, k]; w = w / w.sum()
+        S = sum(w[j] * S_j[j] for j in range(2))                # departure law reaching k
+        F = np.array([[b["A"][k], b["B"][k]], [b["C"][k], b["D"][k]]])
+        W = np.linalg.inv(np.array([[b["SU"][k], b["Dt"][k]], [b["Dt"][k], b["SV"][k]]]))
+        if family == "cgo":     # F' = a E1 + bb E2 + d E3, C' = 0
+            basis = [np.array([[1, 0], [0, 0]]), np.array([[0, 1], [0, 0]]), np.array([[0, 0], [0, 1]])]
+        elif family == "ngh":   # F' = c [[M,0],[1,0]] + d [[0,M],[0,1]]
+            basis = [np.array([[M[k], 0], [1, 0]]), np.array([[0, M[k]], [0, 1]])]
+        else:
+            raise ValueError(family)
+        G = np.array([[np.trace(W @ Ei @ S @ El.T) for El in basis] for Ei in basis])
+        r = np.array([np.trace(W @ F @ S @ Ei.T) for Ei in basis])
+        theta = np.linalg.solve(G, r)
+        Fp = sum(th * Ei for th, Ei in zip(theta, basis))
+        new["A"][k], new["B"][k], new["C"][k], new["D"][k] = Fp[0, 0], Fp[0, 1], Fp[1, 0], Fp[1, 1]
+    return _build(new)
 
 
 def spectral_radius(eps: float, kind: str = "straight") -> float:
@@ -133,11 +195,14 @@ def _rel(a, b):
 def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = "straight") -> dict:
     """Pooled RMSE (vs simulated state) and median gap-to-exact for each filter."""
     p = model(eps, kind)
-    se = {k: 0.0 for k in ("exact", "cgo", "ngh", "gpb2")}
-    d2 = {k: 0.0 for k in ("cgo", "ngh", "gpb2")}     # sum (f - e)^2
-    cross = {k: 0.0 for k in ("cgo", "ngh", "gpb2")}  # sum (f - e)(e - x): orthogonality check
-    var_e = 0.0                                       # sum of exact posterior variances
-    gap = {k: [] for k in ("cgo", "ngh", "gpb2")}
+    pc_blk, pn_blk = project_blocks(eps, kind, "cgo"), project_blocks(eps, kind, "ngh")
+    pc_kl, pn_kl = project_kl(eps, kind, "cgo"), project_kl(eps, kind, "ngh")
+    keys = ("cgo", "ngh", "cgo_blk", "ngh_blk", "cgo_kl", "ngh_kl", "gpb2")
+    se = {k: 0.0 for k in ("exact",) + keys}
+    d2 = {k: 0.0 for k in keys}      # sum (f - e)^2
+    cross = {k: 0.0 for k in keys}   # sum (f - e)(e - x): orthogonality check
+    var_e = 0.0                      # sum of exact posterior variances
+    gap = {k: [] for k in keys}
     n_tot = 0
     for sd in range(n_seeds):
         _, xs, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
@@ -147,10 +212,12 @@ def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = 
         ex_c, _, _ = imm_filter(p0, ys)[:3]          # CGO exact filter, frozen at eps=0
         ex_n, _, _ = _run(p1, ys, "ngh_kf")           # NGH constant gain, frozen at eps=1
         ex_g, _, _ = gpb2_filter(p, ys)[:3]           # GPB2, true parameters
-        est = {"exact": ex_e[:, 0], "cgo": ex_c[:, 0], "ngh": ex_n[:, 0], "gpb2": ex_g[:, 0]}
+        est = {"exact": ex_e[:, 0], "cgo": ex_c[:, 0], "ngh": ex_n[:, 0], "gpb2": ex_g[:, 0],
+               "cgo_blk": imm_filter(pc_blk, ys)[0][:, 0], "ngh_blk": _run(pn_blk, ys, "ngh_kf")[0][:, 0],
+               "cgo_kl": imm_filter(pc_kl, ys)[0][:, 0], "ngh_kl": _run(pn_kl, ys, "ngh_kf")[0][:, 0]}
         for k, v in est.items():
             se[k] += float(np.sum((v - x) ** 2))
-        for k in ("cgo", "ngh", "gpb2"):
+        for k in keys:
             gap[k].append(_rel(est[k], est["exact"]))
             d2[k] += float(np.sum((est[k] - est["exact"]) ** 2))
             cross[k] += float(np.sum((est[k] - est["exact"]) * (est["exact"] - x)))
@@ -161,9 +228,16 @@ def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = 
            "excess_mse": {k: d2[k] / n_tot for k in d2},
            "excess": {k: (d2[k] / n_tot) / post_var for k in d2},
            "cross_term": {k: cross[k] / n_tot for k in cross},
-           "excess_rmse_raw": {k: rmse[k] / rmse["exact"] - 1.0 for k in ("cgo", "ngh", "gpb2")},
-           "gap_median": {k: float(np.median(v)) for k, v in gap.items()}}
+           "excess_rmse_raw": {k: rmse[k] / rmse["exact"] - 1.0 for k in keys},
+           "gap_median": {k: float(np.median(v)) for k, v in gap.items()},
+           }
+    out["kl_blocks"] = {"cgo": _blocks_of(pc_kl), "ngh": _blocks_of(pn_kl)}
     return out
+
+
+def _blocks_of(p: GSSParams) -> dict:
+    fm = p.f_matrix
+    return {name: [float(getattr(fm, name)(k)[0, 0]) for k in range(p.K)] for name in ("A", "B", "C", "D")}
 
 
 def crossing(rows, key_a="cgo", key_b="ngh", field="excess"):
@@ -225,12 +299,19 @@ def plot_compare(results_list, figdir: Path) -> None:
              "ab_first": "(c) slaving first, then channel"}
     fig, axes = plt.subplots(1, len(results_list), figsize=(3.6 * len(results_list), 3.7), sharey=True)
     axes = np.atleast_1d(axes)
+    style = {"": "o-", "_blk": "s--", "_kl": "^:"}
+    vlab = {"": "frozen endpoint", "_blk": "block projection", "_kl": "KL projection"}
     for ax, rp in zip(axes, results_list):
         res = json.loads(Path(rp).read_text()); rows = res["rows"]; kind = res.get("path", "straight")
         eps = [r["eps"] for r in rows]
-        for k, lab in (("cgo", r"CGO filter (frozen $\varepsilon{=}0$)"),
-                       ("ngh", r"NGH filter (frozen $\varepsilon{=}1$)"), ("gpb2", "GPB2, true model")):
-            ax.plot(eps, [r["excess"][k] for r in rows], "o-", ms=3.5, color=col[k], label=lab)
+        for fam, name in (("cgo", "CGO"), ("ngh", "NGH")):
+            for suf, st in style.items():
+                key = fam + suf
+                if key not in rows[0]["excess"]:
+                    continue
+                ax.plot(eps, [r["excess"][key] for r in rows], st, ms=3.2, lw=1.2, color=col[fam],
+                        label=f"{name} filter, {vlab[suf]}")
+        ax.plot(eps, [r["excess"]["gpb2"] for r in rows], "o-", ms=3, color=col["gpb2"], label="GPB2, true model")
         xc = crossing(rows)
         if np.isfinite(xc):
             ax.axvline(xc, color="k", ls=":", lw=1)
@@ -241,7 +322,7 @@ def plot_compare(results_list, figdir: Path) -> None:
         ax.set_title(title.get(kind, kind), fontsize=9.5); ax.grid(alpha=.3)
         ax.set_xlabel(r"$\varepsilon$")
     axes[0].set_ylabel(r"relative excess MSE  $\mathbb{E}(f-e)^2/\mathrm{Var}[X\mid y]$")
-    axes[0].legend(fontsize=7.5, loc="upper left")
+    axes[0].legend(fontsize=6.5, loc="upper left")
     fig.tight_layout()
     out = figdir / "homotopy_paths.pdf"
     fig.savefig(out); fig.savefig(out.with_suffix(".png"), dpi=160)
@@ -274,16 +355,15 @@ def main():
     p0, p1 = model(0.0), model(1.0)
     print(f"[homotopy] path={kind} N={N_STEPS}, {args.seeds} seeds; rho(F) along the path: "
           + ", ".join(f"{spectral_radius(e, kind):.3f}" for e in (0, 0.25, 0.5, 0.75, 1)))
-    print(f"{'eps':>5} {'rmse_ex':>8} {'postvar':>8} | {'xs_cgo':>8} {'xs_ngh':>8} {'xs_gpb2':>8} | "
-          f"{'gap_cgo':>8} {'gap_ngh':>8} {'gap_gpb2':>8} | {'cross_c':>8} {'cross_n':>8}")
+    print(f"{'eps':>5} {'postvar':>8} | {'cgo':>8} {'cgo_blk':>8} {'cgo_kl':>8} | "
+          f"{'ngh':>8} {'ngh_blk':>8} {'ngh_kl':>8} | {'gpb2':>8}")
     rows = []
     for eps in [float(e) for e in args.grid.split(",")]:
         r = run_eps(eps, p0, p1, args.seeds, kind)
         rows.append(r)
-        rm, xs, gp, cr = r["rmse"], r["excess"], r["gap_median"], r["cross_term"]
-        print(f"{eps:5.2f} {rm['exact']:8.4f} {r['posterior_var']:8.4f} | "
-              f"{xs['cgo']:8.4f} {xs['ngh']:8.4f} {xs['gpb2']:8.1e} | "
-              f"{gp['cgo']:8.1e} {gp['ngh']:8.1e} {gp['gpb2']:8.1e} | {cr['cgo']:8.1e} {cr['ngh']:8.1e}", flush=True)
+        xs = r["excess"]
+        print(f"{eps:5.2f} {r['posterior_var']:8.4f} | {xs['cgo']:8.4f} {xs['cgo_blk']:8.4f} {xs['cgo_kl']:8.4f} | "
+              f"{xs['ngh']:8.4f} {xs['ngh_blk']:8.4f} {xs['ngh_kl']:8.4f} | {xs['gpb2']:8.1e}", flush=True)
     (args.out / "results.json").write_text(json.dumps(
         {"N": N_STEPS, "seeds": args.seeds, "path": kind, "blocks": {"A0": A0, "B0": B0, "C1": C1, "D": D,
          "SV": SV, "M": M, "Gamma": GAM, "p_switch": P_SWITCH}, "rows": rows}, indent=1))

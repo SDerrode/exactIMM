@@ -177,11 +177,11 @@ def plot(results: Path, figdir: Path) -> None:
     xc = crossing(rows)
     if np.isfinite(xc):
         a1.axvline(xc, color="k", ls=":", lw=1)
-        a1.text(xc, a1.get_ylim()[1] * 0.92, rf"crossing $\varepsilon^\ast\approx{xc:.2f}$", ha="center", fontsize=8)
+        a1.text(xc + 0.02, 0.5 * a1.get_ylim()[1], rf"crossing $\varepsilon^\ast\approx{xc:.2f}$", ha="left", va="center", fontsize=8)
     a1.set_xlabel(r"$\varepsilon$  (0 = CGO model, 1 = NGH model)")
     a1.set_ylabel(r"relative excess MSE  $\mathbb{E}(f-e)^2\,/\,\mathrm{Var}[X\mid y]$")
     a1.set_title("(a) excess over the Bayes filter", fontsize=10)
-    a1.grid(alpha=.3); a1.legend(fontsize=7.5, loc="upper center")
+    a1.grid(alpha=.3); a1.legend(fontsize=7.5, loc="upper left")
     a2.set_xlabel(r"$\varepsilon$"); a2.set_ylabel("median normalized sup-norm gap to exact")
     a2.set_title("(b) gap to the exact filter (log)", fontsize=10); a2.grid(alpha=.3, which="both")
     fig.tight_layout()

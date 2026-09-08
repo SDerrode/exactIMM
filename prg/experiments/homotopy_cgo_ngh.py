@@ -240,6 +240,31 @@ def _blocks_of(p: GSSParams) -> dict:
     return {name: [float(getattr(fm, name)(k)[0, 0]) for k in range(p.K)] for name in ("A", "B", "C", "D")}
 
 
+def endpoint_sensitivity(eps0: float, kind: str = "straight", delta: float = 0.02,
+                         n_seeds: int = 200) -> float:
+    """Relative mean-square sensitivity s^2 of the Bayes filter to the path at eps0.
+
+    A filter frozen at endpoint eps0 and run under P_eps satisfies
+    f - e_eps = -(eps - eps0) d_eps e + O((eps-eps0)^2), so its relative excess is
+    (eps-eps0)^2 s^2 to leading order, with s^2 = E[(d_eps e)^2] / Var[X|y] under
+    P_eps0.  Hence the crossing of the two frozen curves is, to this order,
+    eps* = s1 / (s0 + s1).  The Bayes filter is tangent to GPB2 at the endpoints
+    (GPB2 - e = O(eps^3) by the cubic law), so d_eps e is taken as the central
+    finite difference of the GPB2 recursion along the path.
+    """
+    p = model(eps0, kind)
+    lo, hi = max(0.0, eps0 - delta), min(1.0, eps0 + delta)
+    plo, phi = model(lo, kind), model(hi, kind)
+    num = den = 0.0
+    for sd in range(n_seeds):
+        _, _, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
+        d = (gpb2_filter(phi, ys)[0][:, 0] - gpb2_filter(plo, ys)[0][:, 0]) / (hi - lo)
+        _, var, _ = exact_mixture_filter(p, ys)
+        num += float(np.sum(d ** 2))
+        den += float(np.sum(np.asarray(var).reshape(len(d), -1)[:, 0]))
+    return num / den
+
+
 def crossing(rows, key_a="cgo", key_b="ngh", field="excess"):
     """Linear-interpolated epsilon where excess[key_a] == excess[key_b]."""
     e = np.array([r["eps"] for r in rows])

@@ -197,7 +197,7 @@ def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = 
     p = model(eps, kind)
     pc_blk, pn_blk = project_blocks(eps, kind, "cgo"), project_blocks(eps, kind, "ngh")
     pc_kl, pn_kl = project_kl(eps, kind, "cgo"), project_kl(eps, kind, "ngh")
-    keys = ("cgo", "ngh", "cgo_blk", "ngh_blk", "cgo_kl", "ngh_kl", "gpb2")
+    keys = ("cgo", "ngh", "cgo_blk", "ngh_blk", "cgo_kl", "ngh_kl", "gpb2", "imm")
     se = {k: 0.0 for k in ("exact",) + keys}
     d2 = {k: 0.0 for k in keys}      # sum (f - e)^2
     cross = {k: 0.0 for k in keys}   # sum (f - e)(e - x): orthogonality check
@@ -212,7 +212,8 @@ def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = 
         ex_c, _, _ = imm_filter(p0, ys)[:3]          # CGO exact filter, frozen at eps=0
         ex_n, _, _ = _run(p1, ys, "ngh_kf")           # NGH constant gain, frozen at eps=1
         ex_g, _, _ = gpb2_filter(p, ys)[:3]           # GPB2, true parameters
-        est = {"exact": ex_e[:, 0], "cgo": ex_c[:, 0], "ngh": ex_n[:, 0], "gpb2": ex_g[:, 0],
+        ex_i, _, _ = imm_filter(p, ys)[:3]            # pairwise IMM, true parameters (approximate off C=0)
+        est = {"exact": ex_e[:, 0], "cgo": ex_c[:, 0], "ngh": ex_n[:, 0], "gpb2": ex_g[:, 0], "imm": ex_i[:, 0],
                "cgo_blk": imm_filter(pc_blk, ys)[0][:, 0], "ngh_blk": _run(pn_blk, ys, "ngh_kf")[0][:, 0],
                "cgo_kl": imm_filter(pc_kl, ys)[0][:, 0], "ngh_kl": _run(pn_kl, ys, "ngh_kf")[0][:, 0]}
         for k, v in est.items():
@@ -287,14 +288,18 @@ def plot(results: Path, figdir: Path) -> None:
     rows = res["rows"]
     eps = np.array([r["eps"] for r in rows])
     figdir.mkdir(parents=True, exist_ok=True)
-    col = {"cgo": "#1f5f8b", "ngh": "#b8451f", "gpb2": "#5f7d3a"}
+    col = {"cgo": "#1f5f8b", "ngh": "#b8451f", "gpb2": "#5f7d3a", "imm": "#8a6d1f"}
     lab = {"cgo": r"CGO exact filter, frozen at $\varepsilon=0$",
            "ngh": r"NGH constant-gain filter, frozen at $\varepsilon=1$",
-           "gpb2": "GPB2, true parameters (reference)"}
+           "gpb2": "GPB2, true parameters (reference)",
+           "imm": "IMM, true parameters"}
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 3.9))
-    for k in ("cgo", "ngh", "gpb2"):
-        a1.plot(eps, [r["excess"][k] for r in rows], "o-", ms=4, color=col[k], label=lab[k])
-        a2.semilogy(eps, [max(r["gap_median"][k], 1e-16) for r in rows], "o-", ms=4, color=col[k])
+    for k in ("cgo", "ngh", "gpb2", "imm"):
+        if k == "imm" and "imm" not in rows[0]["excess"]:
+            continue
+        st = "s--" if k == "imm" else "o-"
+        a1.plot(eps, [r["excess"][k] for r in rows], st, ms=4, color=col[k], label=lab[k])
+        a2.semilogy(eps, [max(r["gap_median"][k], 1e-16) for r in rows], st, ms=4, color=col[k])
     xc = crossing(rows)
     if np.isfinite(xc):
         a1.axvline(xc, color="k", ls=":", lw=1)
@@ -381,14 +386,14 @@ def main():
     print(f"[homotopy] path={kind} N={N_STEPS}, {args.seeds} seeds; rho(F) along the path: "
           + ", ".join(f"{spectral_radius(e, kind):.3f}" for e in (0, 0.25, 0.5, 0.75, 1)))
     print(f"{'eps':>5} {'postvar':>8} | {'cgo':>8} {'cgo_blk':>8} {'cgo_kl':>8} | "
-          f"{'ngh':>8} {'ngh_blk':>8} {'ngh_kl':>8} | {'gpb2':>8}")
+          f"{'ngh':>8} {'ngh_blk':>8} {'ngh_kl':>8} | {'gpb2':>8} {'imm':>8}")
     rows = []
     for eps in [float(e) for e in args.grid.split(",")]:
         r = run_eps(eps, p0, p1, args.seeds, kind)
         rows.append(r)
         xs = r["excess"]
         print(f"{eps:5.2f} {r['posterior_var']:8.4f} | {xs['cgo']:8.4f} {xs['cgo_blk']:8.4f} {xs['cgo_kl']:8.4f} | "
-              f"{xs['ngh']:8.4f} {xs['ngh_blk']:8.4f} {xs['ngh_kl']:8.4f} | {xs['gpb2']:8.1e}", flush=True)
+              f"{xs['ngh']:8.4f} {xs['ngh_blk']:8.4f} {xs['ngh_kl']:8.4f} | {xs['gpb2']:8.1e} {xs['imm']:8.1e}", flush=True)
     (args.out / "results.json").write_text(json.dumps(
         {"N": N_STEPS, "seeds": args.seeds, "path": kind, "blocks": {"A0": A0, "B0": B0, "C1": C1, "D": D,
          "SV": SV, "M": M, "Gamma": GAM, "p_switch": P_SWITCH}, "rows": rows}, indent=1))

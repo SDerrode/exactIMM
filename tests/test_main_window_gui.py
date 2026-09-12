@@ -152,3 +152,27 @@ class TestMainWindow:
         assert win._ngh_kf_blockers(valid) == []
         issues = win._ngh_kf_blockers(invalid)
         assert issues and any("AB" in m for m in issues)
+
+    def test_exactness_notes_report_assumption_g_and_gpb2_domain(self, qtbot):
+        """Notes flag (G2) failures and off-domain GPB2 use; silent on a CGO model."""
+        from prg.experiments.cns_exactness import (
+            cgo_memory_model,
+            g2_degenerate_model,
+            off_union_model,
+        )
+
+        win = GSSMainWindow(K=2, q=1, s=1, P=_P)
+        qtbot.addWidget(win)
+        win._mode_combo.setCurrentIndex(win._mode_combo.findData("gpb2"))
+        assert win._exactness_notes(None) == []
+        # genuine CGO-MSM: (G) holds, GPB2 exact -> nothing to say
+        assert win._exactness_notes(cgo_memory_model()) == []
+        # E8 family: (G2) fails
+        notes = win._exactness_notes(g2_degenerate_model(0.5, distinct_rows=False))
+        assert any("(G2)" in n for n in notes)
+        # outside the union: GPB2 approximate, residual reported
+        notes = win._exactness_notes(off_union_model(0.4, 0.2))
+        assert any("GPB2 is approximate" in n for n in notes)
+        # in ngh_kf mode the GPB2 note disappears (AB is reported by the blockers)
+        win._mode_combo.setCurrentIndex(win._mode_combo.findData("ngh_kf"))
+        assert not any("GPB2" in n for n in win._exactness_notes(off_union_model(0.4, 0.2)))

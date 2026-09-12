@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transition rows not all identical or regime-dependent state-informed part of the
   observation row (`Σ_V⁻¹C`, `CᵀΣ_V⁻¹C`, `CᵀΣ_V⁻¹D`, `CᵀΣ_V⁻¹bʸ`). `exactness_domains`
   now reports `assumption_g` alongside the three domain flags. Tests on the E8 family.
+- **GUI** — `GSSMainWindow._exactness_notes`: at Filter time the status bar flags a violated
+  Assumption (G) and, in GPB2 mode, a model outside the cross-annihilation domain (with the
+  residual). The GPB2 tooltip now states the exactness domain of the paper (cross-annihilation;
+  per-regime disjunction only for scalar states) instead of "C = 0 or A = MC".
 
 - **`prg/experiments/homotopy_cgo_ngh.py`** — CGO → NGH homotopy: a straight path in
   the blocks joins a genuine CGO model (`C = 0`, state memory) to a genuine NGH model

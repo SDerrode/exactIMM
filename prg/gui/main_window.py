@@ -269,9 +269,11 @@ class GSSMainWindow(QMainWindow):
         self._mode_combo.addItem("NGH-MSM-KF (constant gain) - AB required", "ngh_kf")
         self._mode_combo.setToolTip(
             "GPB2 (order 2) — K² regime-pair Kalman updates per step, then a\n"
-            "               collapse back to K. Exact when C = 0 or A = Δ Σ_V⁻¹ C;\n"
-            "               a good approximation otherwise. Use it on any model\n"
-            "               that violates the AB constraint.\n"
+            "               collapse back to K. Exact iff every observation row\n"
+            "               annihilates every residual memory, C_k (A_j − M_j C_j) = 0\n"
+            "               for all regime pairs (for a scalar state: C = 0 at every\n"
+            "               regime, or A = M C at every regime); a good approximation\n"
+            "               otherwise. Use it on any model that violates AB.\n"
             "NGH-MSM-KF   — stationary pre-computed moments, no covariance\n"
             "               recursion, so its cost does not grow with the state\n"
             "               dimension. Exact only under the AB constraint\n"
@@ -844,6 +846,49 @@ class GSSMainWindow(QMainWindow):
 
         return validate_ngh_msm(params)
 
+    def _exactness_notes(self, params) -> list[str]:
+        """Non-blocking notes on the exactness of the selected filter for ``params``.
+
+        * Assumption (G) of the exactness theorems: (G1) full support of the
+          transition matrix, (G2) observational separation of the regime. Off
+          (G) the regime posterior of a collapse filter can agree with the exact
+          one for reasons unrelated to its collapse rule, so exactness claims
+          are vacuous (experiment E8 of the exactness paper).
+        * In ``"gpb2"`` mode, whether the model lies in the GPB2 exactness
+          domain (cross-annihilation ``C_k (A_j - M_j C_j) = 0`` for every pair
+          of regimes); if not, the size of the residual.
+
+        Pure logic (no UI); the ``ngh_kf`` AB violations are reported separately
+        by :meth:`_ngh_kf_blockers`.
+        """
+        if params is None:
+            return []
+        from prg.utils.exactness import assumption_g, cross_annihilation_residual
+
+        notes: list[str] = []
+        try:
+            g = assumption_g(params)
+        except (np.linalg.LinAlgError, ValueError):
+            return notes
+        if not g["g1"]:
+            notes.append(
+                f"(G1) fails: a transition probability is zero (min p_jk = {g['g1_min_p']:.2e}); "
+                "the collapse has nothing to merge and exactness is vacuous"
+            )
+        if not g["g2"]:
+            notes.append(
+                "(G2) fails: identical transition rows and a regime-free state-informed "
+                "observation row; the regime posterior is exact for any filter, whatever C"
+            )
+        if self._mode_combo.currentData() == "gpb2":
+            r, (j, k) = cross_annihilation_residual(params)
+            if r > 1e-10:
+                notes.append(
+                    f"GPB2 is approximate on this model: relative cross-annihilation residual "
+                    f"‖C_{k} N_{j}‖ = {r:.2e} (exact iff 0)"
+                )
+        return notes
+
     def _on_filter(self) -> None:
         if not self._state.can_filter():
             return
@@ -891,6 +936,8 @@ class GSSMainWindow(QMainWindow):
         msg = f"Filtering  N = {len(ys)}…"
         if params_drifted:
             msg += "  ⚠ using parameters captured at last Simulate (GUI values differ)"
+        for note in self._exactness_notes(self._state.params):
+            msg += f"  ⚠ {note}"
         self.statusBar().showMessage(msg)
 
         self._wait_dlg = _WaitDialog("Filtering…", on_cancel=self._on_reset, parent=self)

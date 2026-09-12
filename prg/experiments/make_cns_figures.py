@@ -69,7 +69,7 @@ def _panel(ax, xs, series, xlabel, title):
         ax.plot(xs, series[name], ms=3.0, lw=1.1, **STYLE[name])
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_ylim(3e-16, 3e-1)
+    ax.set_ylim(3e-16, 3.0)   # the normalized gap reaches 0.7 off AB; keep the curve inside
     ax.set_xlabel(xlabel, fontsize=8)
     ax.set_title(title, fontsize=8.5, pad=4)
     ax.tick_params(labelsize=7)

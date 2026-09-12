@@ -10,11 +10,14 @@ from prg.experiments.cns_exactness import (
     ab_model,
     cgo_memory_model,
     cross_annihilation_model,
+    g2_degenerate_model,
+    g2_vector_model,
     mixed_branch_model,
     off_union_model,
     slaving_A_model,
 )
 from prg.utils.exactness import (
+    assumption_g,
     cross_annihilation_residual,
     exactness_domains,
     gpb2_domain_residual,
@@ -72,3 +75,33 @@ def test_gpb2_domain_matches_exact_filter():
     g_out = gaps(cross_annihilation_model(False), n_seeds=5)
     assert g_in["gpb2"][0].hi < 1e-12
     assert g_out["gpb2"][0].med > 1e-5
+
+
+def test_assumption_g_holds_on_the_suite_models():
+    for p in (cgo_memory_model(), slaving_A_model(0.4), ab_model(0.4),
+              off_union_model(0.4, 0.2), mixed_branch_model(0.8, 0.7),
+              cross_annihilation_model(True)):
+        g = assumption_g(p)
+        assert g["g1"] and g["g2"] and g["g"], g
+        assert exactness_domains(p)["assumption_g"]
+
+
+def test_assumption_g2_fails_on_the_e8_family_and_is_restored_by_distinct_rows():
+    # E8: regime-free observation row and i.i.d. regime -> (G2) fails
+    g = assumption_g(g2_degenerate_model(0.5, distinct_rows=False))
+    assert g["g1"] and not g["g2"] and not g["g"]
+    assert g["g2_rows"] < 1e-12 and g["g2_channel"] < 1e-12
+    # distinct transition rows alone restore (G2)
+    g = assumption_g(g2_degenerate_model(0.5, distinct_rows=True))
+    assert g["g2"] and g["g2_rows"] > 0.1
+
+
+def test_assumption_g2_reads_the_state_informed_part_not_the_whole_row():
+    # E8 vector case: the observation row is regime-dependent through an
+    # autonomous component (D_22), yet its state-informed part is regime-free
+    g = assumption_g(g2_vector_model(couple=False))
+    assert not g["g2"], g
+    # coupling y2 into y1 through a regime-dependent D_12 makes C^T SV^-1 D
+    # regime-dependent and restores (G2)
+    g = assumption_g(g2_vector_model(couple=True))
+    assert g["g2"] and g["g2_channel"] > 1e-3, g

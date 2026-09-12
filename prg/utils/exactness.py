@@ -38,6 +38,7 @@ __all__ = [
     "imm_domain_residual",
     "gpb2_domain_residual",
     "exactness_domains",
+    "assumption_g",
 ]
 
 
@@ -96,15 +97,79 @@ def gpb2_domain_residual(params: GSSParams, *, relative: bool = True) -> float:
 
 
 def exactness_domains(params: GSSParams, *, tol: float = 1e-10) -> dict[str, bool]:
-    """Which classical filters are exact on ``params`` (under assumption (G)).
+    """Which classical filters are exact on ``params``, and whether the
+    non-degeneracy Assumption (G) under which the theorems hold is satisfied.
 
-    Returns ``{"imm": ..., "gpb2": ..., "constant_gain": ...}``; the residuals
-    behind the booleans are :func:`imm_domain_residual`,
-    :func:`gpb2_domain_residual` and
-    :func:`prg.utils.ab_constraint.ab_residual_max`.
+    Returns ``{"imm": ..., "gpb2": ..., "constant_gain": ..., "assumption_g": ...}``;
+    the residuals behind the booleans are :func:`imm_domain_residual`,
+    :func:`gpb2_domain_residual`, :func:`prg.utils.ab_constraint.ab_residual_max`
+    and :func:`assumption_g`. When ``assumption_g`` is False the three domain
+    flags are still the block conditions of the theorems, but their *necessity*
+    is no longer guaranteed (a filter may be exact off its domain).
     """
     return {
         "imm": imm_domain_residual(params) <= tol,
         "gpb2": gpb2_domain_residual(params) <= tol,
         "constant_gain": ab_residual_max(params)[0] <= tol,
+        "assumption_g": assumption_g(params)["g"],
+    }
+
+
+def assumption_g(params: GSSParams, *, tol: float = 1e-12) -> dict:
+    """Non-degeneracy Assumption (G) of the exactness paper, checked on the blocks.
+
+    * **(G1) full support** -- ``p_jk > 0`` for every pair of regimes.
+    * **(G2) observational separation of the regime** -- the rows of the
+      transition matrix are not all identical, *or* the state-informed part of
+      the observation row, i.e. the four quantities ``Sigma_V^-1 C``,
+      ``C^T Sigma_V^-1 C``, ``C^T Sigma_V^-1 D`` and ``C^T Sigma_V^-1 b^Y``,
+      depends on the regime.
+
+    Returns a dict with the residuals ``g1_min_p`` (smallest transition
+    probability), ``g2_rows`` (largest relative difference between two rows of
+    ``P``), ``g2_channel`` (largest relative difference, over regime pairs, of
+    the four state-informed quantities), and the booleans ``g1``, ``g2``,
+    ``g`` (= ``g1 and g2``). Both theorems of the paper are stated under (G);
+    off it, a collapse filter can be exact for reasons unrelated to its
+    collapse rule (Remark "Assumption (G2) is sharp", experiment E8).
+
+    Note: the paper reads (G2) on classes of *observational twins*; this check
+    is the plain, per-regime version, which is what the experiments of the
+    committed suite rely on.
+    """
+    K, q = params.K, params.q
+    P = np.asarray(params.P, dtype=float)
+    g1_min_p = float(P.min())
+    # (G2a) rows of P
+    row_diff = 0.0
+    for j in range(K):
+        for jp in range(j + 1, K):
+            row_diff = max(row_diff, float(np.max(np.abs(P[j] - P[jp]))))
+    g2_rows = row_diff  # rows are probability vectors: already a relative scale
+    # (G2b) state-informed part of the observation row
+    fm, nc = params.f_matrix, params.noise_cov
+    quantities = []
+    for r in range(K):
+        C, D = fm.C(r), fm.D(r)
+        SVi = np.linalg.inv(nc.Sigma_V(r))
+        bY = np.asarray(params.b(r), dtype=float).reshape(-1)[q:]
+        quantities.append([SVi @ C, C.T @ SVi @ C, C.T @ SVi @ D, C.T @ SVi @ bY])
+    g2_channel = 0.0
+    for idx in range(4):
+        scale = max(float(np.linalg.norm(quantities[r][idx])) for r in range(K))
+        if scale == 0.0:
+            continue
+        for r in range(K):
+            for rp in range(r + 1, K):
+                d = float(np.linalg.norm(quantities[r][idx] - quantities[rp][idx])) / scale
+                g2_channel = max(g2_channel, d)
+    g1 = g1_min_p > tol
+    g2 = (g2_rows > tol) or (g2_channel > tol)
+    return {
+        "g1_min_p": g1_min_p,
+        "g2_rows": g2_rows,
+        "g2_channel": g2_channel,
+        "g1": g1,
+        "g2": g2,
+        "g": g1 and g2,
     }

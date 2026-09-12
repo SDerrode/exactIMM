@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`prg.utils.exactness.assumption_g`** — checks the non-degeneracy Assumption (G) of the
+  exactness paper on the blocks: (G1) full support of the transition matrix, (G2)
+  transition rows not all identical or regime-dependent state-informed part of the
+  observation row (`Σ_V⁻¹C`, `CᵀΣ_V⁻¹C`, `CᵀΣ_V⁻¹D`, `CᵀΣ_V⁻¹bʸ`). `exactness_domains`
+  now reports `assumption_g` alongside the three domain flags. Tests on the E8 family.
+
 - **`prg/experiments/homotopy_cgo_ngh.py`** — CGO → NGH homotopy: a straight path in
   the blocks joins a genuine CGO model (`C = 0`, state memory) to a genuine NGH model
   (`AB` with an active channel); data are simulated at each `ε` and the two exact

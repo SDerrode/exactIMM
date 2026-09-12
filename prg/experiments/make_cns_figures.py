@@ -94,7 +94,10 @@ def _slope_guide(ax, xs, ys, lo, hi, below=8.0):
     p, c, rng = _fit_slope(xs, ys, lo, hi)
     if p is None:
         return None
-    xg = np.array(rng)
+    # draw the guide over the fit window itself, not over the data range it
+    # happens to contain, so that guides with the same window have the same
+    # length across panels and equal slopes look equal
+    xg = np.array([lo, hi], float)
     yg = c * xg ** p
     ax.plot(xg, yg / below, color="0.3", ls="--", lw=0.9, zorder=1)
     xm = float(np.sqrt(xg[0] * xg[1]))

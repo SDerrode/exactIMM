@@ -130,8 +130,7 @@ def exact_path_smoother(params, ys):
     logws, store = [], []
     for path in product(range(K), repeat=N):
         k0 = path[0]
-        z, P, ll = _kalman_exact_y_update(mu0[k0], S0[k0],
-                                          ys[0].reshape(s, 1), H)
+        z, P, ll = _kalman_exact_y_update(mu0[k0], S0[k0], ys[0].reshape(s, 1), H)
         lw = float(np.log(params.pi0[k0] + 1e-300) + ll)
         zf, Pf, zp, Pp = [z], [P], [None], [None]
         for n in range(1, N):
@@ -192,8 +191,7 @@ def _slaving(params):
 def _gauss(x, m, S):
     r = np.atleast_1d(np.asarray(x, float).ravel() - np.asarray(m).ravel())
     S = np.atleast_2d(S)
-    return float(np.exp(-0.5 * r @ np.linalg.solve(S, r))
-                 / np.sqrt(np.linalg.det(2 * np.pi * S)))
+    return float(np.exp(-0.5 * r @ np.linalg.solve(S, r)) / np.sqrt(np.linalg.det(2 * np.pi * S)))
 
 
 def _alpha1(params, ys):
@@ -206,9 +204,9 @@ def _alpha1(params, ys):
         mY = (H @ params.mu_z0(k).reshape(q + s, 1)).ravel()
         SY = H @ params.Sigma_z0(k) @ H.T
         r = y1 - mY
-        la[k] = (np.log(params.pi0[k] + 1e-300)
-                 - 0.5 * (r @ np.linalg.solve(SY, r)
-                          + np.log(np.linalg.det(2 * np.pi * SY))))
+        la[k] = np.log(params.pi0[k] + 1e-300) - 0.5 * (
+            r @ np.linalg.solve(SY, r) + np.log(np.linalg.det(2 * np.pi * SY))
+        )
     a = np.exp(la - la.max())
     return a / a.sum()
 
@@ -299,8 +297,8 @@ def pairwise_imm_bank(params, ys):
     zs, Ps, la = [], [], np.zeros(K)
     for k in range(K):
         z, P, ll = _kalman_exact_y_update(
-            params.mu_z0(k).reshape(dim, 1), params.Sigma_z0(k),
-            ys[0].reshape(s, 1), H)
+            params.mu_z0(k).reshape(dim, 1), params.Sigma_z0(k), ys[0].reshape(s, 1), H
+        )
         zs.append(z)
         Ps.append(P)
         la[k] = np.log(params.pi0[k] + 1e-300) + ll
@@ -319,8 +317,7 @@ def pairwise_imm_bank(params, ys):
             cbar = w.sum()
             w = w / cbar
             z0 = sum(w[j] * zs[j] for j in range(K))
-            P0 = sum(w[j] * (Ps[j] + (zs[j] - z0) @ (zs[j] - z0).T)
-                     for j in range(K))
+            P0 = sum(w[j] * (Ps[j] + (zs[j] - z0) @ (zs[j] - z0).T) for j in range(K))
             zpr = F[k] @ z0 + b[k]
             Ppr = F[k] @ P0 @ F[k].T + SW[k]
             z, P, ll = _kalman_exact_y_update(zpr, Ppr, y, H)
@@ -368,12 +365,12 @@ def cg_smoother(params, ys):
     D = [params.f_matrix.D(k) for k in range(K)]
     SV = [params.noise_cov.Sigma_V(k) for k in range(K)]
     bY = [params.b(k).reshape(q + s, 1)[q:] for k in range(K)]
-    W = [[Gam[j] @ C[k].T @ np.linalg.inv(C[k] @ Gam[j] @ C[k].T + SV[k])
-          for k in range(K)] for j in range(K)]
-    Vpair = [[Gam[j] - W[j][k] @ C[k] @ Gam[j] for k in range(K)]
-             for j in range(K)]
-    gam, gampair = _forward_backward(_alpha1(params, ys_),
-                                     kernel_Qab(params, ys_))
+    W = [
+        [Gam[j] @ C[k].T @ np.linalg.inv(C[k] @ Gam[j] @ C[k].T + SV[k]) for k in range(K)]
+        for j in range(K)
+    ]
+    Vpair = [[Gam[j] - W[j][k] @ C[k] @ Gam[j] for k in range(K)] for j in range(K)]
+    gam, gampair = _forward_backward(_alpha1(params, ys_), kernel_Qab(params, ys_))
     Ex = np.zeros((N, q))
     Vx = np.zeros((N, q, q))
     for n in range(N - 1):
@@ -383,8 +380,7 @@ def cg_smoother(params, ys):
         for j in range(K):
             for k in range(K):
                 m_jk = (C[k] @ M[j] + D[k]) @ y0 + C[k] @ c[j] + bY[k]
-                means[j, k] = (M[j] @ y0 + c[j]
-                               + W[j][k] @ (y1 - m_jk)).ravel()
+                means[j, k] = (M[j] @ y0 + c[j] + W[j][k] @ (y1 - m_jk)).ravel()
                 Ex[n] += gampair[n, j, k] * means[j, k]
         for j in range(K):
             for k in range(K):
@@ -424,8 +420,8 @@ def lag1_smoother(params, ys):
     P_read = np.zeros((N, K, q, q))
     for j in range(K):
         z, P, _ = _kalman_exact_y_update(
-            params.mu_z0(j).reshape(dim, 1), params.Sigma_z0(j),
-            ys_[0].reshape(s, 1), H)
+            params.mu_z0(j).reshape(dim, 1), params.Sigma_z0(j), ys_[0].reshape(s, 1), H
+        )
         m_read[0, j] = z[:q]
         P_read[0, j] = P[:q, :q]
     for n in range(1, N):
@@ -488,8 +484,8 @@ def exact_regime_smoother(params, ys):
     for path in product(range(K), repeat=N):
         k0 = path[0]
         z, P, ll = _kalman_exact_y_update(
-            params.mu_z0(k0).reshape(dim, 1), params.Sigma_z0(k0),
-            ys[0].reshape(s, 1), H)
+            params.mu_z0(k0).reshape(dim, 1), params.Sigma_z0(k0), ys[0].reshape(s, 1), H
+        )
         lw = float(np.log(params.pi0[k0] + 1e-300) + ll)
         for n in range(1, N):
             k = path[n]
@@ -529,8 +525,8 @@ def gpb2_bank(params, ys):
     la = np.zeros(K)
     for k in range(K):
         z, P, ll = _kalman_exact_y_update(
-            params.mu_z0(k).reshape(dim, 1), params.Sigma_z0(k),
-            ys[0].reshape(s, 1), H)
+            params.mu_z0(k).reshape(dim, 1), params.Sigma_z0(k), ys[0].reshape(s, 1), H
+        )
         zs[0, k], Ps[0, k] = z, P
         la[k] = np.log(params.pi0[k] + 1e-300) + ll
     alpha[0] = np.exp(la - la.max())
@@ -550,9 +546,9 @@ def gpb2_bank(params, ys):
             wsum = w.sum()
             w = w / wsum if wsum > 0 else np.full(K, 1.0 / K)
             zbar = sum(w[j] * upd[j][0] for j in range(K))
-            Pbar = sum(w[j] * (upd[j][1]
-                               + (upd[j][0] - zbar) @ (upd[j][0] - zbar).T)
-                       for j in range(K))
+            Pbar = sum(
+                w[j] * (upd[j][1] + (upd[j][0] - zbar) @ (upd[j][0] - zbar).T) for j in range(K)
+            )
             zs[n, k], Ps[n, k] = zbar, Pbar
         un = alpha[n - 1] @ A_n[n - 1]
         alpha[n] = un / un.sum()
@@ -607,8 +603,10 @@ def pair_rts_smoother(params, ys, with_residuals=False):
     M, Gam, _ = _slaving(params)
     C = [params.f_matrix.C(k) for k in range(K)]
     SV = [params.noise_cov.Sigma_V(k) for k in range(K)]
-    W = [[Gam[j] @ C[k].T @ np.linalg.inv(C[k] @ Gam[j] @ C[k].T + SV[k])
-          for k in range(K)] for j in range(K)]
+    W = [
+        [Gam[j] @ C[k].T @ np.linalg.inv(C[k] @ Gam[j] @ C[k].T + SV[k]) for k in range(K)]
+        for j in range(K)
+    ]
     zs, Ps, alpha, A_n = gpb2_bank(params, ys_)
     beta = np.zeros((N, K))
     beta[N - 1] = 1.0
@@ -641,12 +639,10 @@ def pair_rts_smoother(params, ys, with_residuals=False):
                     if n >= 1:
                         # at n=0 the bank covariance is the (updated) initial
                         # law, not Gamma_j, so G_y = W_jk(P_0) != W_jk there
-                        res["w"] = max(res["w"],
-                                       np.max(np.abs(Gy - W[j][k])) / nGy)
+                        res["w"] = max(res["w"], np.max(np.abs(Gy - W[j][k])) / nGy)
                     GxM = Gx @ M[k]
                     nGxM = np.max(np.abs(GxM)) + 1e-300
-                    res["c0"] = max(res["c0"],
-                                    np.max(np.abs(Gy + GxM)) / nGxM)
+                    res["c0"] = max(res["c0"], np.max(np.abs(Gy + GxM)) / nGxM)
             new[j] = zs[n, j] + corr
         zsm = new
         Ex[n] = gam[n] @ zsm[:, :q, 0]
@@ -706,8 +702,8 @@ def hbh_smoother(params, ys, diffuse=1e8, variant="pair"):
     zs, Ps, la = [], [], np.zeros(K)
     for k in range(K):
         z, P, ll = _kalman_exact_y_update(
-            params.mu_z0(k).reshape(dim, 1), params.Sigma_z0(k),
-            ys_[0].reshape(s, 1), H)
+            params.mu_z0(k).reshape(dim, 1), params.Sigma_z0(k), ys_[0].reshape(s, 1), H
+        )
         zs.append(z)
         Ps.append(P)
         la[k] = np.log(params.pi0[k] + 1e-300) + ll
@@ -722,10 +718,8 @@ def hbh_smoother(params, ys, diffuse=1e8, variant="pair"):
             cbar = w.sum()
             w = w / cbar
             z0 = sum(w[j] * zs[j] for j in range(K))
-            P0 = sum(w[j] * (Ps[j] + (zs[j] - z0) @ (zs[j] - z0).T)
-                     for j in range(K))
-            z, P, ll = _kalman_exact_y_update(
-                F[k] @ z0 + b[k], F[k] @ P0 @ F[k].T + SW[k], y, H)
+            P0 = sum(w[j] * (Ps[j] + (zs[j] - z0) @ (zs[j] - z0).T) for j in range(K))
+            z, P, ll = _kalman_exact_y_update(F[k] @ z0 + b[k], F[k] @ P0 @ F[k].T + SW[k], y, H)
             nzs.append(z)
             nPs.append(P)
             nla[k] = np.log(cbar + 1e-300) + ll
@@ -742,10 +736,10 @@ def hbh_smoother(params, ys, diffuse=1e8, variant="pair"):
     for k in range(K):
         zb[k, q:, 0] = ys_[N - 1]
         Pb[k][:q, :q] = diffuse * np.eye(q)
-    zbp_all = np.zeros((N, K, dim, 1))    # mixed backward PREDICTED (per j)
+    zbp_all = np.zeros((N, K, dim, 1))  # mixed backward PREDICTED (per j)
     Pbp_all = np.zeros((N, K, dim, dim))
     lmp_all = np.full((N, K), -np.inf)
-    zpr_all = np.zeros((N, K, dim, 1))    # UNMIXED backward predicted (per k)
+    zpr_all = np.zeros((N, K, dim, 1))  # UNMIXED backward predicted (per k)
     Ppr_all = np.zeros((N, K, dim, dim))
     for n in range(N - 2, -1, -1):
         # backward prediction per mode k (transition n->n+1 has mode r_{n+1}=k)
@@ -758,20 +752,17 @@ def hbh_smoother(params, ys, diffuse=1e8, variant="pair"):
         # the exact-y measurement update with y_n (HBH order: mix first)
         nzb, nPb, nlm = np.zeros_like(zb), np.zeros_like(Pb), np.zeros(K)
         for j in range(K):
-            lw = np.array([np.log(params.P[j, k] + 1e-300) + lm[k]
-                           for k in range(K)])
+            lw = np.array([np.log(params.P[j, k] + 1e-300) + lm[k] for k in range(K)])
             mx = lw.max()
             w = np.exp(lw - mx)
             tot = w.sum()
             w /= tot
             z0 = sum(w[k] * zpr[k] for k in range(K))
-            P0 = sum(w[k] * (Ppr[k] + (zpr[k] - z0) @ (zpr[k] - z0).T)
-                     for k in range(K))
+            P0 = sum(w[k] * (Ppr[k] + (zpr[k] - z0) @ (zpr[k] - z0).T) for k in range(K))
             zbp_all[n, j], Pbp_all[n, j] = z0, P0
             lmp = mx + np.log(tot)
             lmp_all[n, j] = lmp
-            z, P, ll = _kalman_exact_y_update(z0, P0,
-                                              ys_[n].reshape(s, 1), H)
+            z, P, ll = _kalman_exact_y_update(z0, P0, ys_[n].reshape(s, 1), H)
             nzb[j], nPb[j], nlm[j] = z, P, lmp + ll
         zb, Pb, lm = nzb, nPb, nlm - nlm.max()
 
@@ -793,8 +784,9 @@ def hbh_smoother(params, ys, diffuse=1e8, variant="pair"):
                     Djk = Pf[n, j] + Ppr_all[n, k]
                     d = (zpr_all[n, k] - zf[n, j]).ravel()
                     _, logdet = np.linalg.slogdet(2 * np.pi * Djk)
-                    lw[k] = (np.log(params.P[j, k] + 1e-300)
-                             - 0.5 * (d @ np.linalg.solve(Djk, d) + logdet))
+                    lw[k] = np.log(params.P[j, k] + 1e-300) - 0.5 * (
+                        d @ np.linalg.solve(Djk, d) + logdet
+                    )
                     G = Pf[n, j] @ np.linalg.inv(Djk)
                     zpair[k] = zf[n, j] + G @ (zpr_all[n, k] - zf[n, j])
                 mx = lw.max()
@@ -809,8 +801,11 @@ def hbh_smoother(params, ys, diffuse=1e8, variant="pair"):
                 Psum = Pf[n, j] + Pbp_all[n, j]
                 d = (zbp_all[n, j] - zf[n, j]).ravel()
                 _, logdet = np.linalg.slogdet(2 * np.pi * Psum)
-                lwt[j] = (np.log(alf[n, j] + 1e-300) + lmp_all[n, j]
-                          - 0.5 * (d @ np.linalg.solve(Psum, d) + logdet))
+                lwt[j] = (
+                    np.log(alf[n, j] + 1e-300)
+                    + lmp_all[n, j]
+                    - 0.5 * (d @ np.linalg.solve(Psum, d) + logdet)
+                )
                 G = Pf[n, j] @ np.linalg.inv(Psum)
                 zsm[j] = zf[n, j] + G @ (zbp_all[n, j] - zf[n, j])
         w = np.exp(lwt - lwt.max())
@@ -846,9 +841,14 @@ def exp_ab_gauge():
         g_cgv.append(_rel(Vx_cg, Vx_s))
         # S4: naive smoothed read-out fed the EXACT smoothed regime posterior
         yv = np.asarray(ys, float).reshape(-1, p.s)
-        Ex_naive = np.array([
-            sum(gam_ex[n, k] * (M[k] @ yv[n].reshape(p.s, 1) + c[k]).ravel()
-                for k in range(p.K)) for n in range(N_STEPS)])
+        Ex_naive = np.array(
+            [
+                sum(
+                    gam_ex[n, k] * (M[k] @ yv[n].reshape(p.s, 1) + c[k]).ravel() for k in range(p.K)
+                )
+                for n in range(N_STEPS)
+            ]
+        )
         g_naive.append(_rel(Ex_naive, Ex_s))
         Ex_f, _, _ = exact_mixture_filter(p, ys)
         g_gain.append(_rel(Ex_f, Ex_s))
@@ -859,11 +859,15 @@ def exp_ab_gauge():
     print(f"  S1  (R,Y) FB regime smoother, kernel Q : {_med_max(g_reg)}")
     print(f"  S3  constant-gain smoother, mean       : {_med_max(g_cgm)}")
     print(f"  S3  constant-gain smoother, variance   : {_med_max(g_cgv)}")
-    print(f"  S4  naive smoothed read-out (trap)     : median"
-          f" {np.median(g_naive):.2f}"
-          f"  (smoothing gain scale {np.median(g_gain):.2f})")
-    print(f"  S2d reweighting formula under AB       : median"
-          f" {np.median(g_rw):.2f}  (expected O(1) failure)")
+    print(
+        f"  S4  naive smoothed read-out (trap)     : median"
+        f" {np.median(g_naive):.2f}"
+        f"  (smoothing gain scale {np.median(g_gain):.2f})"
+    )
+    print(
+        f"  S2d reweighting formula under AB       : median"
+        f" {np.median(g_rw):.2f}  (expected O(1) failure)"
+    )
     return exact_by_seed
 
 
@@ -933,23 +937,36 @@ def exp_rts(exact_ab, exact_c0, exact_A):
             r_c0.append(res["c0"])
         if branch == "slaved":
             print(f"  {label}: mean {_med_max(errs)}")
-            print(f"      gain identity G==[0,W_jk]: |G_x|/|G_y| max"
-                  f" {np.max(r_gx):.1e}, |G_y-W|/|W| max {np.max(r_w):.1e}")
+            print(
+                f"      gain identity G==[0,W_jk]: |G_x|/|G_y| max"
+                f" {np.max(r_gx):.1e}, |G_y-W|/|W| max {np.max(r_w):.1e}"
+            )
         else:
-            print(f"  {label}: mean median {np.median(errs):.2e}"
-                  f"  [{np.min(errs):.0e},{np.max(errs):.0e}]  <- BIASED")
-            print(f"      gain identity G_y==-G_x M_k: residual max"
-                  f" {np.max(r_c0):.1e}  (the gain is degenerate; the bias"
-                  " is the k-conditional backward input)")
+            print(
+                f"  {label}: mean median {np.median(errs):.2e}"
+                f"  [{np.min(errs):.0e},{np.max(errs):.0e}]  <- BIASED"
+            )
+            print(
+                f"      gain identity G_y==-G_x M_k: residual max"
+                f" {np.max(r_c0):.1e}  (the gain is degenerate; the bias"
+                " is the k-conditional backward input)"
+            )
 
 
 def equal_dynamics_c0_model():
     """S9 control: the CGO gauge with EQUAL state dynamics A_1 = A_2, which
     switches off the mode-dependent backward-Jacobian defect of the
     HBH-structure two-filter while keeping (G2) (SV contrast 0.20/0.60)."""
-    return _params(A=[0.55, 0.55], B=[0.10, 0.10], C=[0.0, 0.0],
-                   D=[0.50, 0.50], SU=[0.40, 0.35], Dt=[0.15, -0.20],
-                   SV=[0.20, 0.60], p_switch=0.10)
+    return _params(
+        A=[0.55, 0.55],
+        B=[0.10, 0.10],
+        C=[0.0, 0.0],
+        D=[0.50, 0.50],
+        SU=[0.40, 0.35],
+        Dt=[0.15, -0.20],
+        SV=[0.20, 0.60],
+        p_switch=0.10,
+    )
 
 
 def exp_hbh(exact_c0, exact_A):
@@ -959,8 +976,10 @@ def exp_hbh(exact_c0, exact_A):
     print("S9  HBH-structure two-filter (backward-time IMM + fusion):")
     pab = ab_model(0.4, dB=0.0)
     dets = [float(np.linalg.det(pab.f_matrix.F(k))) for k in range(pab.K)]
-    print(f"  AB gauge          : det F_r = {dets[0]:.2e}, {dets[1]:.2e}"
-          "  -> backward-time filter inapplicable (F_r singular on AB)")
+    print(
+        f"  AB gauge          : det F_r = {dets[0]:.2e}, {dets[1]:.2e}"
+        "  -> backward-time filter inapplicable (F_r singular on AB)"
+    )
     p_eq = equal_dynamics_c0_model()
     exact_eq = {}
     for sd in range(N_SEEDS):
@@ -968,41 +987,49 @@ def exp_hbh(exact_c0, exact_A):
         Ex_s, Vx_s, gam_ex = exact_path_smoother(p_eq, ys)
         exact_eq[sd] = (ys, Ex_s, Vx_s, gam_ex)
     for label, p, exact in (
-            ("{C==0} gauge      ", cgo_memory_model(), exact_c0),
-            ("{C==0}, equal A   ", p_eq, exact_eq),
-            ("{A==MC} \\ AB gauge", ab_model(0.4, dB=0.15), exact_A)):
+        ("{C==0} gauge      ", cgo_memory_model(), exact_c0),
+        ("{C==0}, equal A   ", p_eq, exact_eq),
+        ("{A==MC} \\ AB gauge", ab_model(0.4, dB=0.15), exact_A),
+    ):
         g_m, g_r = [], []
         for sd in range(N_SEEDS):
             ys, Ex_s, _, gam_ex = exact[sd]
             Ex_h, mu_h = hbh_smoother(p, ys)
             g_m.append(_rel(Ex_h, Ex_s))
             g_r.append(_rel(mu_h, gam_ex))
-        print(f"  {label}: mean median {np.median(g_m):.2e}"
-              f"  [{np.min(g_m):.0e},{np.max(g_m):.0e}]"
-              f"   regime median {np.median(g_r):.2e}")
+        print(
+            f"  {label}: mean median {np.median(g_m):.2e}"
+            f"  [{np.min(g_m):.0e},{np.max(g_m):.0e}]"
+            f"   regime median {np.median(g_r):.2e}"
+        )
     g_m = []
     for sd in range(N_SEEDS):
         ys, Ex_s, _, _ = exact_c0[sd]
         Ex_h, _ = hbh_smoother(cgo_memory_model(), ys, variant="mixed")
         g_m.append(_rel(Ex_h, Ex_s))
-    print(f"  {{C==0}}, alt. n-smoother variant (Sec. V): mean median"
-          f" {np.median(g_m):.2e}")
+    print(f"  {{C==0}}, alt. n-smoother variant (Sec. V): mean median {np.median(g_m):.2e}")
 
 
 def near_c0_model(eta):
     """S6b gauge: the CGO gauge with the channel switched on -- C = eta at
     both regimes, full state memory A = (0.7, 0.4) != MC: the dual approach
     direction, toward the autonomy branch."""
-    return _params(A=[0.7, 0.4], B=[0.10, 0.10], C=[eta, eta],
-                   D=[0.50, 0.50], SU=[0.40, 0.35], Dt=[0.15, -0.20],
-                   SV=[0.20, 0.60], p_switch=0.10)
+    return _params(
+        A=[0.7, 0.4],
+        B=[0.10, 0.10],
+        C=[eta, eta],
+        D=[0.50, 0.50],
+        SU=[0.40, 0.35],
+        Dt=[0.15, -0.20],
+        SV=[0.20, 0.60],
+        p_switch=0.10,
+    )
 
 
 def exp_off_domain2(etas=(0.02, 0.08, 0.3)):
     """S6b: off-domain degradation on the dual gauge (toward autonomy):
     smoothed regime posterior, pair-RTS state mean, reweighting state mean."""
-    print("S6b off-domain, dual gauge (C=eta at both regimes, memory"
-          " A=(0.7,0.4)):")
+    print("S6b off-domain, dual gauge (C=eta at both regimes, memory A=(0.7,0.4)):")
     m_reg, m_rts, m_rw = [], [], []
     for eta in etas:
         p = near_c0_model(eta)
@@ -1017,18 +1044,18 @@ def exp_off_domain2(etas=(0.02, 0.08, 0.3)):
         m_reg.append(np.median(e_reg))
         m_rts.append(np.median(e_rts))
         m_rw.append(np.median(e_rw))
-        print(f"  eta={eta:<5} regime {m_reg[-1]:.2e}"
-              f"  RTS mean {m_rts[-1]:.2e}  reweight mean {m_rw[-1]:.2e}")
+        print(
+            f"  eta={eta:<5} regime {m_reg[-1]:.2e}"
+            f"  RTS mean {m_rts[-1]:.2e}  reweight mean {m_rw[-1]:.2e}"
+        )
     x = np.log10(etas)
     sl = [np.polyfit(x, np.log10(v), 1)[0] for v in (m_reg, m_rts, m_rw)]
-    print(f"  slopes: regime {sl[0]:.2f}  RTS mean {sl[1]:.2f}"
-          f"  reweight mean {sl[2]:.2f}")
+    print(f"  slopes: regime {sl[0]:.2f}  RTS mean {sl[1]:.2f}  reweight mean {sl[2]:.2f}")
 
 
 def exp_mixed(A0s=(0.0, 0.4, 0.8), C1=0.7):
     """S10: mixed-family smoothing -- uniformity inherited, asymmetry too."""
-    print(f"S10 mixed branches (r1: C=0, memory A0; r2: C1={C1}, A=MC,"
-          " B!=MD):")
+    print(f"S10 mixed branches (r1: C=0, memory A0; r2: C1={C1}, A=MC, B!=MD):")
     for A0 in A0s:
         p = mixed_branch_model(A0, C1)
         e_lag, e_rts, e_reg, e_fm, e_fp = [], [], [], [], []
@@ -1043,18 +1070,22 @@ def exp_mixed(A0s=(0.0, 0.4, 0.8), C1=0.7):
             ex_g, _, pi_g, _ = gpb2_filter(p, ys)
             e_fm.append(_rel(ex_g, Ex_f))
             e_fp.append(_rel(pi_g, pi_f))
-        print(f"  A0={A0:<4} smoothed: lag-1 {np.median(e_lag):.1e}"
-              f"  pair-RTS {np.median(e_rts):.1e}"
-              f"  regime {np.median(e_reg):.1e}"
-              f" | GPB2 filtered: mean {np.median(e_fm):.1e}"
-              f"  post {np.median(e_fp):.1e}")
+        print(
+            f"  A0={A0:<4} smoothed: lag-1 {np.median(e_lag):.1e}"
+            f"  pair-RTS {np.median(e_rts):.1e}"
+            f"  regime {np.median(e_reg):.1e}"
+            f" | GPB2 filtered: mean {np.median(e_fm):.1e}"
+            f"  post {np.median(e_fp):.1e}"
+        )
 
 
 def exp_matrix_cross_annihilation():
     """S11: matrix cross-annihilation gauge -- regime smoother exact, no state
     smoother of this paper exact, GPB2 filter exact (baseline)."""
-    print("S11 matrix case q=2 (E10 gauge): cross-annihilation C_k N_j = 0 vs"
-          " rotated rows (C_k N_j != 0):")
+    print(
+        "S11 matrix case q=2 (E10 gauge): cross-annihilation C_k N_j = 0 vs"
+        " rotated rows (C_k N_j != 0):"
+    )
     out = {}
     for tag, ann in (("C_k N_j = 0 ", True), ("C_k N_j != 0", False)):
         p = cross_annihilation_model(annihilate=ann)
@@ -1069,11 +1100,13 @@ def exp_matrix_cross_annihilation():
             Ex_f, _, _ = exact_mixture_filter(p, ys)
             e["filt"].append(_rel(gpb2_filter(p, ys)[0], Ex_f))
         out[ann] = {k: _med_max(v) for k, v in e.items()}
-        print(f"  {tag}  smoothed regime {np.median(e['regime']):.1e}"
-              f" | smoothed mean: pair-RTS {np.median(e['rts']):.1e}"
-              f"  lag-1 {np.median(e['lag1']):.1e}"
-              f"  reweighting {np.median(e['reweight']):.1e}"
-              f" | GPB2 filtered mean {np.median(e['filt']):.1e}")
+        print(
+            f"  {tag}  smoothed regime {np.median(e['regime']):.1e}"
+            f" | smoothed mean: pair-RTS {np.median(e['rts']):.1e}"
+            f"  lag-1 {np.median(e['lag1']):.1e}"
+            f"  reweighting {np.median(e['reweight']):.1e}"
+            f" | GPB2 filtered mean {np.median(e['filt']):.1e}"
+        )
     return out
 
 
@@ -1105,18 +1138,21 @@ def exp_separation(etas=(0.02, 0.08, 0.3)):
         err_rts.append(np.median(e_rts))
         err_cg.append(np.median(e_cg))
         err_rw.append(np.median(e_rw))
-        print(f"  eta={eta:<5} err: RTS {err_rts[-1]:.2e}"
-              f"  one-step {err_cg[-1]:.2e}"
-              f"  reweight {err_rw[-1]:.2e}"
-              f" | sep: RTS/1step {sep_rc[-1]:.2e}"
-              f"  RTS/rw {sep_rw[-1]:.2e}  1step/rw {sep_cw[-1]:.2e}")
+        print(
+            f"  eta={eta:<5} err: RTS {err_rts[-1]:.2e}"
+            f"  one-step {err_cg[-1]:.2e}"
+            f"  reweight {err_rw[-1]:.2e}"
+            f" | sep: RTS/1step {sep_rc[-1]:.2e}"
+            f"  RTS/rw {sep_rw[-1]:.2e}  1step/rw {sep_cw[-1]:.2e}"
+        )
     x = np.log10(etas)
     sl = [np.polyfit(x, np.log10(v), 1)[0] for v in (sep_rc, sep_rw, sep_cw)]
-    print(f"  separation slopes: RTS/1step {sl[0]:.2f}"
-          f"  RTS/rw {sl[1]:.2f}  1step/rw {sl[2]:.2f}")
+    print(f"  separation slopes: RTS/1step {sl[0]:.2f}  RTS/rw {sl[1]:.2f}  1step/rw {sl[2]:.2f}")
     sle = [np.polyfit(x, np.log10(v), 1)[0] for v in (err_rts, err_cg, err_rw)]
-    print(f"  error slopes (state mean): RTS {sle[0]:.2f}"
-          f"  one-step {sle[1]:.2f}  reweight {sle[2]:.2f}")
+    print(
+        f"  error slopes (state mean): RTS {sle[0]:.2f}"
+        f"  one-step {sle[1]:.2f}  reweight {sle[2]:.2f}"
+    )
 
 
 def exp_off_domain(etas=(0.02, 0.08, 0.3), n_seeds=20):
@@ -1129,8 +1165,7 @@ def exp_off_domain(etas=(0.02, 0.08, 0.3), n_seeds=20):
         errs = []
         for sd in range(n_seeds):
             _, _, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
-            errs.append(_rel(gpb2_regime_smoother(p, ys),
-                             exact_regime_smoother(p, ys)))
+            errs.append(_rel(gpb2_regime_smoother(p, ys), exact_regime_smoother(p, ys)))
         meds.append(np.median(errs))
         print(f"  S6  eta={eta:<5} median {meds[-1]:.2e}")
     slope = np.polyfit(np.log10(etas), np.log10(meds), 1)[0]
@@ -1139,8 +1174,7 @@ def exp_off_domain(etas=(0.02, 0.08, 0.3), n_seeds=20):
 
 
 def main():
-    print(f"[smoothing_exactness] N={N_STEPS}, {N_SEEDS} seeds,"
-          f" ground truth K^N path smoother\n")
+    print(f"[smoothing_exactness] N={N_STEPS}, {N_SEEDS} seeds, ground truth K^N path smoother\n")
     exact_ab = exp_ab_gauge()
     print()
     exact_c0 = exp_c0_gauge()

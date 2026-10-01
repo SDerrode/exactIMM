@@ -100,7 +100,13 @@ def _params(A, B, C, D, SU, Dt, SV, p_switch, P=None):
     fm = FMatrix(K, q, s, as_mat(A), as_mat(B), as_mat(C), as_mat(D))
     nc = GSSNoiseCovariance(K, q, s, as_mat(SU), as_mat(Dt), as_mat(SV))
     p = GSSParams(
-        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
         mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
         Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
     )
@@ -118,8 +124,14 @@ def cgo_memory_model():
     the posterior comparison would be close to vacuous.
     """
     return _params(
-        A=[0.7, 0.4], B=[0.10, 0.10], C=[0.0, 0.0], D=[0.50, 0.50],
-        SU=[0.40, 0.35], Dt=[0.15, -0.20], SV=[0.20, 0.60], p_switch=0.10,
+        A=[0.7, 0.4],
+        B=[0.10, 0.10],
+        C=[0.0, 0.0],
+        D=[0.50, 0.50],
+        SU=[0.40, 0.35],
+        Dt=[0.15, -0.20],
+        SV=[0.20, 0.60],
+        p_switch=0.10,
     )
 
 
@@ -130,10 +142,9 @@ def slaving_A_model(C, dB=0.15, p_switch=0.02):
     SV, M = [0.20, 0.60], [0.6, -0.5]
     D = [0.50, 0.50]
     Dt = [M[k] * SV[k] for k in range(2)]
-    A = [M[k] * C for k in range(2)]           # condition (A)
-    B = [M[k] * D[k] + dB for k in range(2)]   # condition (B) broken
-    return _params(A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV,
-                   p_switch=p_switch)
+    A = [M[k] * C for k in range(2)]  # condition (A)
+    B = [M[k] * D[k] + dB for k in range(2)]  # condition (B) broken
+    return _params(A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV, p_switch=p_switch)
 
 
 def off_union_model(C, eps, p_switch=0.02):
@@ -142,10 +153,9 @@ def off_union_model(C, eps, p_switch=0.02):
     SV, M = [0.20, 0.60], [0.6, -0.5]
     D = [0.50, 0.50]
     Dt = [M[k] * SV[k] for k in range(2)]
-    A = [M[k] * C + eps for k in range(2)]     # violates (A) by eps
+    A = [M[k] * C + eps for k in range(2)]  # violates (A) by eps
     B = [M[k] * D[k] for k in range(2)]
-    return _params(A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV,
-                   p_switch=p_switch)
+    return _params(A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV, p_switch=p_switch)
 
 
 def mixed_branch_model(A0, C1):
@@ -157,8 +167,9 @@ def mixed_branch_model(A0, C1):
     Dt = [M[k] * SV[k] for k in range(2)]
     A1 = M[1] * C1
     B1 = M[1] * D[1] + 0.20
-    return _params(A=[A0, A1], B=[0.10, B1], C=[0.0, C1], D=D,
-                   SU=[0.40, 0.35], Dt=Dt, SV=SV, p_switch=0.10)
+    return _params(
+        A=[A0, A1], B=[0.10, B1], C=[0.0, C1], D=D, SU=[0.40, 0.35], Dt=Dt, SV=SV, p_switch=0.10
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -183,16 +194,22 @@ def matrix_slaving_model(C_row=(0.5, 0.2), p_switch=0.02):
     SV = [np.array([[0.20]]), np.array([[0.60]])]
     M = [np.array([[0.6], [-0.3]]), np.array([[-0.5], [0.4]])]  # q x s
     D = [np.array([[0.50]]), np.array([[0.50]])]
-    C = [np.array([list(C_row)]), np.array([list(C_row)])]      # s x q
-    A = [M[k] @ C[k] for k in range(K)]                          # rank <= s
-    B = [M[k] @ D[k] + 0.15 for k in range(K)]                   # (B) broken
-    Dt = [M[k] @ SV[k] for k in range(K)]                        # q x s
+    C = [np.array([list(C_row)]), np.array([list(C_row)])]  # s x q
+    A = [M[k] @ C[k] for k in range(K)]  # rank <= s
+    B = [M[k] @ D[k] + 0.15 for k in range(K)]  # (B) broken
+    Dt = [M[k] @ SV[k] for k in range(K)]  # q x s
     Gam = [np.diag([0.25, 0.30]), np.diag([0.30, 0.20])]
     SU = [Gam[k] + M[k] @ SV[k] @ M[k].T for k in range(K)]
     fm = _FM(K, q, s, A, B, C, D)
     nc = _NC(K, q, s, SU, Dt, SV)
     p = GSSParams(
-        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
         mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
         Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
     )
@@ -224,7 +241,13 @@ def three_regime_mixed_model(A0, C1):
     fm = _FM(K, q, s, m(A), m(B), m(C), m(D))
     nc = _NC(K, q, s, m(SU), m(Dt), m(SV))
     p = GSSParams(
-        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
         mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
         Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
     )
@@ -244,15 +267,16 @@ def g2_degenerate_model(C=0.5, distinct_rows=False):
     matrix gets distinct rows ([[.9,.1],[.2,.8]]) while the observation row
     stays regime-free: the second half of (G2) alone restores the theorem
     (the IMM regime posterior is biased again)."""
-    SV = [0.30, 0.30]                    # common observation noise
+    SV = [0.30, 0.30]  # common observation noise
     M = [0.6, -0.5]
-    D = [0.50, 0.50]                     # common D
+    D = [0.50, 0.50]  # common D
     Dt = [M[k] * SV[k] for k in range(2)]
-    A = [M[k] * C for k in range(2)]     # condition (A) at both regimes
-    B = [0.10, 0.40]                     # state rows DO differ across regimes
+    A = [M[k] * C for k in range(2)]  # condition (A) at both regimes
+    B = [0.10, 0.40]  # state rows DO differ across regimes
     P = [[0.9, 0.1], [0.2, 0.8]] if distinct_rows else None
-    p = _params(A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV,
-                p_switch=0.5, P=P)       # p_switch=0.5: identical rows (i.i.d.)
+    p = _params(
+        A=A, B=B, C=[C, C], D=D, SU=[0.25, 0.30], Dt=Dt, SV=SV, p_switch=0.5, P=P
+    )  # p_switch=0.5: identical rows (i.i.d.)
     return p
 
 
@@ -282,7 +306,13 @@ def g2_vector_model(couple=False):
     fm = _FM(K, q, s, A, B, C, D)
     nc = _NC(K, q, s, SU, Dt, SV)
     p = GSSParams(
-        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
         mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
         Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
     )
@@ -297,9 +327,16 @@ def constant_second_order_model(p_switch=0.10):
     is identifiable through D). Under a regime-common initialization every
     per-history covariance is the same and the gain step of the necessity
     proof is empty; GPB2 is biased nonetheless (likelihood step)."""
-    return _params(A=[0.5, 0.5], B=[0.10, 0.30], C=[0.4, 0.4], D=[0.2, 0.6],
-                   SU=[0.30, 0.30], Dt=[0.10, 0.10], SV=[0.30, 0.30],
-                   p_switch=p_switch)
+    return _params(
+        A=[0.5, 0.5],
+        B=[0.10, 0.30],
+        C=[0.4, 0.4],
+        D=[0.2, 0.6],
+        SU=[0.30, 0.30],
+        Dt=[0.10, 0.10],
+        SV=[0.30, 0.30],
+        p_switch=p_switch,
+    )
 
 
 def cross_annihilation_model(annihilate=True, p_switch=0.10):
@@ -328,7 +365,13 @@ def cross_annihilation_model(annihilate=True, p_switch=0.10):
     fm = _FM(K, q, s, A, B, C, D)
     nc = _NC(K, q, s, SU, Dt, SV)
     p = GSSParams(
-        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
         mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
         Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
     )
@@ -361,7 +404,13 @@ def ry_markov_model(residual_in_kernel=True, beta=(0.2, -0.15), p_switch=0.10):
     fm = _FM(K, q, s, A, B, C, D)
     nc = _NC(K, q, s, SU, Dt, SV)
     p = GSSParams(
-        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
         mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
         Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
     )
@@ -374,8 +423,13 @@ def _with_init(params, mu_list, Sigma_list):
     """Copy of ``params`` with the given per-regime initial laws for Z_1."""
     K = params.K
     return GSSParams(
-        K=K, q=params.q, s=params.s, P=params.P, f_matrix=params.f_matrix,
-        noise_cov=params.noise_cov, pi0=params.pi0,
+        K=K,
+        q=params.q,
+        s=params.s,
+        P=params.P,
+        f_matrix=params.f_matrix,
+        noise_cov=params.noise_cov,
+        pi0=params.pi0,
         mu_z0_list=[np.array(m, dtype=float) for m in mu_list],
         Sigma_z0_list=[0.5 * (np.array(S) + np.array(S).T) for S in Sigma_list],
         b_list=[params.b(k) for k in range(K)],
@@ -395,6 +449,7 @@ def _rel(a, b):
 def _run_cg(params, ys):
     """Constant-gain (NGH-MSM) filter, the third filter of the map."""
     from prg.experiments.study import _run
+
     ex, pi, var = _run(params, ys, "ngh_kf")
     return ex, var, pi
 
@@ -447,13 +502,14 @@ def gaps(params, n_steps=N_STEPS, with_cg=False, n_seeds=N_SEEDS):
     for sd in range(n_seeds):
         _, _, ys = _simulate(params, n_steps, seed=SEED0 + sd)
         ex_e, v_e, pi_e = exact_mixture_filter(params, ys)
-        runs = {"imm": lambda: imm_filter(params, ys)[:3],
-                "gpb2": lambda: gpb2_filter(params, ys)[:3],
-                "cg": lambda: _run_cg(params, ys)}
+        runs = {
+            "imm": lambda: imm_filter(params, ys)[:3],
+            "gpb2": lambda: gpb2_filter(params, ys)[:3],
+            "cg": lambda: _run_cg(params, ys),
+        }
         for name in names:
             ex, v, pi = runs[name]()
-            for i, g in enumerate((_rel(ex, ex_e), _rel(v, v_e),
-                                   _rel(pi, pi_e))):
+            for i, g in enumerate((_rel(ex, ex_e), _rel(v, v_e), _rel(pi, pi_e))):
                 acc[name][i].append(g)
     return {k: tuple(Gap(c) for c in cols) for k, cols in acc.items()}
 
@@ -476,8 +532,10 @@ def exp2_slaving_A(Cs=(0.0, 0.2, 0.4, 0.55)):
     for C in Cs:
         g = gaps(slaving_A_model(C))
         out[C] = g
-        print(f"    C={C:<5} IMM  E_x {g['imm'][0]:<22} post {g['imm'][2]:<22}"
-              f"| GPB2 E_x {g['gpb2'][0]:<12} post {g['gpb2'][2]}")
+        print(
+            f"    C={C:<5} IMM  E_x {g['imm'][0]:<22} post {g['imm'][2]:<22}"
+            f"| GPB2 E_x {g['gpb2'][0]:<12} post {g['gpb2'][2]}"
+        )
     return out
 
 
@@ -487,8 +545,10 @@ def exp3_off_union(C=0.4, epss=(0.05, 0.2, 0.5)):
     for eps in epss:
         g = gaps(off_union_model(C, eps))
         out[eps] = g
-        print(f"    eta={eps:<5} GPB2 E_x {g['gpb2'][0]:<22} post {g['gpb2'][2]:<22}"
-              f"| IMM E_x {g['imm'][0]}")
+        print(
+            f"    eta={eps:<5} GPB2 E_x {g['gpb2'][0]:<22} post {g['gpb2'][2]:<22}"
+            f"| IMM E_x {g['imm'][0]}"
+        )
     return out
 
 
@@ -499,8 +559,10 @@ def exp5_mixed_branch(A0s=(0.0, 0.4, 0.8), C1s=(0.3, 0.7)):
         for C1 in C1s:
             g = gaps(mixed_branch_model(A0, C1))
             out[(A0, C1)] = g
-            print(f"    A0={A0:<4} C1={C1:<4} GPB2 E_x {g['gpb2'][0]:<22}"
-                  f" post {g['gpb2'][2]:<22}| IMM E_x {g['imm'][0]}")
+            print(
+                f"    A0={A0:<4} C1={C1:<4} GPB2 E_x {g['gpb2'][0]:<22}"
+                f" post {g['gpb2'][2]:<22}| IMM E_x {g['imm'][0]}"
+            )
     return out
 
 
@@ -513,8 +575,10 @@ def exp6_constant_gain(Cs=(0.4, 0.55)):
             g = gaps(ab_model(C, dB=dB), with_cg=True)
             out[(C, dB)] = g
             tag = "AB    " if dB == 0.0 else "{A=MC}"
-            print(f"    C={C:<5} {tag} CG {g['cg'][0]:<22}"
-                  f"| GPB2 {g['gpb2'][0]:<12} | IMM {g['imm'][0]}")
+            print(
+                f"    C={C:<5} {tag} CG {g['cg'][0]:<22}"
+                f"| GPB2 {g['gpb2'][0]:<12} | IMM {g['imm'][0]}"
+            )
     return out
 
 
@@ -522,37 +586,41 @@ def exp7_beyond_scalar():
     """Dimension and regime-count generalizations of E2 and E5."""
     print("E7  beyond the scalar two-regime case:")
     g = gaps(matrix_slaving_model())
-    print(f"    q=2,s=1 {{A=MC}} (rank(A)<=s)  GPB2 {g['gpb2'][0]:<12}"
-          f"| IMM {g['imm'][0]}")
+    print(f"    q=2,s=1 {{A=MC}} (rank(A)<=s)  GPB2 {g['gpb2'][0]:<12}| IMM {g['imm'][0]}")
     out = {"q2": g}
     for A0 in (0.0, 0.8):
         g3 = gaps(three_regime_mixed_model(A0, 0.7), n_steps=8)
         out[f"K3_A0={A0}"] = g3
-        print(f"    K=3,N=8 mixed A0={A0:<4}        GPB2 {g3['gpb2'][0]:<22}"
-              f"| IMM {g3['imm'][0]}")
+        print(f"    K=3,N=8 mixed A0={A0:<4}        GPB2 {g3['gpb2'][0]:<22}| IMM {g3['imm'][0]}")
     return out
 
 
 def exp8_g2_sharpness():
     """Sharpness of (G2): with the observation row regime-free and an i.i.d.
     regime, the IMM is exact although C != 0 (Remark 'G2 is sharp')."""
-    print("E8  sharpness of (G2) (regime-free observation row, i.i.d. regime,"
-          " C=0.5):")
+    print("E8  sharpness of (G2) (regime-free observation row, i.i.d. regime, C=0.5):")
     g = gaps(g2_degenerate_model())
-    print(f"    (G2) fails:  IMM  E_x {g['imm'][0]}   post {g['imm'][2]}"
-          f"   (GPB2 E_x {g['gpb2'][0]})")
+    print(
+        f"    (G2) fails:  IMM  E_x {g['imm'][0]}   post {g['imm'][2]}   (GPB2 E_x {g['gpb2'][0]})"
+    )
     g2 = gaps(g2_degenerate_model(distinct_rows=True))
-    print(f"    rows distinct, observation row still regime-free:"
-          f"  IMM  E_x {g2['imm'][0]}   post {g2['imm'][2]}"
-          f"   (GPB2 E_x {g2['gpb2'][0]})")
+    print(
+        f"    rows distinct, observation row still regime-free:"
+        f"  IMM  E_x {g2['imm'][0]}   post {g2['imm'][2]}"
+        f"   (GPB2 E_x {g2['gpb2'][0]})"
+    )
     g3 = gaps(g2_vector_model())
-    print(f"    s=2, regime in the state-blind component y2, i.i.d. rows:"
-          f"  IMM  E_x {g3['imm'][0]}   post {g3['imm'][2]}"
-          f"   (GPB2 E_x {g3['gpb2'][0]})")
+    print(
+        f"    s=2, regime in the state-blind component y2, i.i.d. rows:"
+        f"  IMM  E_x {g3['imm'][0]}   post {g3['imm'][2]}"
+        f"   (GPB2 E_x {g3['gpb2'][0]})"
+    )
     g4 = gaps(g2_vector_model(couple=True))
-    print(f"    s=2, y2 coupled into y1 (D_12 regime-dependent):"
-          f"  IMM  E_x {g4['imm'][0]}   post {g4['imm'][2]}"
-          f"   (GPB2 E_x {g4['gpb2'][0]})")
+    print(
+        f"    s=2, y2 coupled into y1 (D_12 regime-dependent):"
+        f"  IMM  E_x {g4['imm'][0]}   post {g4['imm'][2]}"
+        f"   (GPB2 E_x {g4['gpb2'][0]})"
+    )
     return g, g2, g3, g4
 
 
@@ -572,29 +640,30 @@ def exp4_time_profile(n_steps=13, n_seeds=25, p_fast=0.2):
             sc = np.max(np.abs(ex_e)) + 1e-12
             prof.append(np.max(np.abs(ex - ex_e), axis=1) / sc)
         med = np.median(np.array(prof), axis=0)
-        h1 = float(np.median(med[3:8])); h2 = float(np.median(med[8:]))
+        h1 = float(np.median(med[3:8]))
+        h2 = float(np.median(med[8:]))
         return h1, h2, h2 / h1
 
     r_gpb2 = lambda p, ys: gpb2_filter(p, ys)[0]
     r_imm = lambda p, ys: imm_filter(p, ys)[0]
     r_cg = lambda p, ys: _run(p, ys, "ngh_kf")[0]
 
-    print(f"E4  time profiles (fast mixing p={p_fast}, N={n_steps}):"
-          " stationary/transient ratios")
+    print(f"E4  time profiles (fast mixing p={p_fast}, N={n_steps}): stationary/transient ratios")
     out = {}
     for eta in (0.1, 0.3):
         p = off_union_model(0.4, eta, p_switch=p_fast)
         for name, r in (("GPB2", r_gpb2), ("IMM", r_imm)):
             h1, h2, ratio = profile(p, r)
             out[(name, eta)] = ratio
-            print(f"    {name:<4} eta={eta:<4} transient {h1:.2e}"
-                  f"  stationary {h2:.2e}  ratio {ratio:.2f}")
+            print(
+                f"    {name:<4} eta={eta:<4} transient {h1:.2e}"
+                f"  stationary {h2:.2e}  ratio {ratio:.2f}"
+            )
     for dB in (0.1, 0.3):
         p = slaving_A_model(0.4, dB=dB, p_switch=p_fast)
         h1, h2, ratio = profile(p, r_cg)
         out[("CG", dB)] = ratio
-        print(f"    CG   dB={dB:<4} transient {h1:.2e}"
-              f"  stationary {h2:.2e}  ratio {ratio:.2f}")
+        print(f"    CG   dB={dB:<4} transient {h1:.2e}  stationary {h2:.2e}  ratio {ratio:.2f}")
     return out
 
 
@@ -605,8 +674,10 @@ def exp9_g3_initialization():
         exact (necessity carried by the likelihood step);
     (b) same means, initial covariances scaled by 0.5 / 2.0 per regime: the
         covariances spread (Lemma 'Reachable covariances'), the bias grows."""
-    print("E9  (G3) and the initialization quantifier (constant 2nd-order"
-          " blocks, C=0.4, A=0.5 != MC):")
+    print(
+        "E9  (G3) and the initialization quantifier (constant 2nd-order"
+        " blocks, C=0.4, A=0.5 != MC):"
+    )
     p = constant_second_order_model()
     K = p.K
     mu0 = sum(p.mu_z0(k) for k in range(K)) / K
@@ -614,12 +685,16 @@ def exp9_g3_initialization():
     out = {}
     pa = _with_init(p, [mu0] * K, [S0] * K)
     out["common"] = gaps(pa)
-    print(f"    (a) common init, gain step empty  GPB2 E_x {out['common']['gpb2'][0]}"
-          f"  post {out['common']['gpb2'][2]}| IMM E_x {out['common']['imm'][0]}")
+    print(
+        f"    (a) common init, gain step empty  GPB2 E_x {out['common']['gpb2'][0]}"
+        f"  post {out['common']['gpb2'][2]}| IMM E_x {out['common']['imm'][0]}"
+    )
     pb = _with_init(p, [mu0] * K, [0.5 * S0, 2.0 * S0])
     out["spread"] = gaps(pb)
-    print(f"    (b) Sigma0(r) x0.5/x2, spread  GPB2 E_x {out['spread']['gpb2'][0]}"
-          f"  post {out['spread']['gpb2'][2]}| IMM E_x {out['spread']['imm'][0]}")
+    print(
+        f"    (b) Sigma0(r) x0.5/x2, spread  GPB2 E_x {out['spread']['gpb2'][0]}"
+        f"  post {out['spread']['gpb2'][2]}| IMM E_x {out['spread']['imm'][0]}"
+    )
     return out
 
 
@@ -627,34 +702,44 @@ def exp10_cross_annihilation():
     """E10: the matrix case -- GPB2 exact on the cross-annihilation family
     outside the union, biased once the observation rows leave the kernel of
     the memories."""
-    print("E10 matrix case q=2: cross-annihilation C_k N_j = 0 (all memories"
-          " singular, nonzero; C_k != 0):")
+    print(
+        "E10 matrix case q=2: cross-annihilation C_k N_j = 0 (all memories"
+        " singular, nonzero; C_k != 0):"
+    )
     out = {}
     for tag, ann in (("C_k N_j = 0 ", True), ("C_k N_j != 0", False)):
         g = gaps(cross_annihilation_model(annihilate=ann))
         out[ann] = g
-        print(f"    {tag}  GPB2 E_x {g['gpb2'][0]:<22} var {g['gpb2'][1]:<22}"
-              f" post {g['gpb2'][2]:<22}| IMM E_x {g['imm'][0]}")
+        print(
+            f"    {tag}  GPB2 E_x {g['gpb2'][0]:<22} var {g['gpb2'][1]:<22}"
+            f" post {g['gpb2'][2]:<22}| IMM E_x {g['imm'][0]}"
+        )
     return out
 
 
 def exp11_ry_markov():
     """E11: the (R,Y)-Markov class -- NGH regime recursion exact on it (state
     read-out not), biased off it; GPB2 exact on both (cross-annihilation)."""
-    print("E11 (R,Y)-Markov class (q=2): C_k N_j = 0, input residual B-MD in / out"
-          " of ker C:")
+    print("E11 (R,Y)-Markov class (q=2): C_k N_j = 0, input residual B-MD in / out of ker C:")
     out = {}
-    for tag, inker in (("B-MD in ker C  [(R,Y) Markov]", True), ("B-MD seen by C [not Markov]", False)):
+    for tag, inker in (
+        ("B-MD in ker C  [(R,Y) Markov]", True),
+        ("B-MD seen by C [not Markov]", False),
+    ):
         g = gaps(ry_markov_model(residual_in_kernel=inker), with_cg=True)
         out[inker] = g
-        print(f"    {tag}  NGH post {g['cg'][2]:<22} NGH E_x {g['cg'][0]:<22}"
-              f"| GPB2 post {g['gpb2'][2]:<12} E_x {g['gpb2'][0]:<12}| IMM post {g['imm'][2]}")
+        print(
+            f"    {tag}  NGH post {g['cg'][2]:<22} NGH E_x {g['cg'][0]:<22}"
+            f"| GPB2 post {g['gpb2'][2]:<12} E_x {g['gpb2'][0]:<12}| IMM post {g['imm'][2]}"
+        )
     return out
 
 
 def main():
-    print(f"Exactness-domain checks -- ground truth: exact K^N mixture filter "
-          f"(N={N_STEPS}, {N_SEEDS} seeds), normalized sup-norm gaps:\nmedian [min,max] off the domains; a single number = machine precision (max over all runs).\n")
+    print(
+        f"Exactness-domain checks -- ground truth: exact K^N mixture filter "
+        f"(N={N_STEPS}, {N_SEEDS} seeds), normalized sup-norm gaps:\nmedian [min,max] off the domains; a single number = machine precision (max over all runs).\n"
+    )
     exp1_imm_realizes_cgo()
     print()
     exp2_slaving_A()

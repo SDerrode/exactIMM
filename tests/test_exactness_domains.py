@@ -75,9 +75,14 @@ def test_gpb2_domain_matches_exact_filter():
 
 
 def test_assumption_g_holds_on_the_suite_models():
-    for p in (cgo_memory_model(), slaving_A_model(0.4), ab_model(0.4),
-              off_union_model(0.4, 0.2), mixed_branch_model(0.8, 0.7),
-              cross_annihilation_model(True)):
+    for p in (
+        cgo_memory_model(),
+        slaving_A_model(0.4),
+        ab_model(0.4),
+        off_union_model(0.4, 0.2),
+        mixed_branch_model(0.8, 0.7),
+        cross_annihilation_model(True),
+    ):
         g = assumption_g(p)
         assert g["g1"] and g["g2"] and g["g"], g
         assert exactness_domains(p)["assumption_g"]

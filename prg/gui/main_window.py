@@ -868,7 +868,7 @@ class GSSMainWindow(QMainWindow):
         notes: list[str] = []
         try:
             g = assumption_g(params)
-        except (np.linalg.LinAlgError, ValueError):
+        except np.linalg.LinAlgError, ValueError:
             return notes
         if not g["g1"]:
             notes.append(

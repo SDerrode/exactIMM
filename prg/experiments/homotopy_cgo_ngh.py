@@ -80,13 +80,13 @@ N_STEPS = 10
 SEED0 = 2000
 
 # shared blocks ------------------------------------------------------------
-SV = [0.20, 0.60]            # observation noise (regime identifiable)
-M = [0.6, -0.5]              # slaved gain Delta / Sigma_V
+SV = [0.20, 0.60]  # observation noise (regime identifiable)
+M = [0.6, -0.5]  # slaved gain Delta / Sigma_V
 D = [0.50, 0.50]
-GAM = [0.25, 0.30]           # residual state noise
-A0 = [0.7, 0.4]              # CGO endpoint: state memory
+GAM = [0.25, 0.30]  # residual state noise
+A0 = [0.7, 0.4]  # CGO endpoint: state memory
 B0 = [0.10, 0.10]
-C1 = [0.5, 0.5]              # NGH endpoint: active channel
+C1 = [0.5, 0.5]  # NGH endpoint: active channel
 P_SWITCH = 0.10
 
 
@@ -123,7 +123,13 @@ def _build(b: dict) -> GSSParams:
     fm = FMatrix(K, q, s, as_mat(b["A"]), as_mat(b["B"]), as_mat(b["C"]), as_mat(b["D"]))
     nc = GSSNoiseCovariance(K, q, s, as_mat(b["SU"]), as_mat(b["Dt"]), as_mat(b["SV"]))
     p = GSSParams(
-        K=K, q=q, s=s, P=P, f_matrix=fm, noise_cov=nc, pi0=None,
+        K=K,
+        q=q,
+        s=s,
+        P=P,
+        f_matrix=fm,
+        noise_cov=nc,
+        pi0=None,
         mu_z0_list=[np.zeros((q + s, 1)) for _ in range(K)],
         Sigma_z0_list=[np.eye(q + s) for _ in range(K)],
     )
@@ -156,18 +162,23 @@ def project_kl(eps: float, kind: str, family: str) -> GSSParams:
     p = model(eps, kind)
     b = path_blocks(eps, kind)
     mu, Sig = stationary_moments(p)
-    S_j = [Sig[j] + mu[j] @ mu[j].T for j in range(2)]          # E[z z^T | r=j]
+    S_j = [Sig[j] + mu[j] @ mu[j].T for j in range(2)]  # E[z z^T | r=j]
     pi = np.asarray(p.pi0).ravel()
     P = np.asarray(p.P)
     new = {k: list(v) for k, v in b.items()}
     for k in range(2):
-        w = pi * P[:, k]; w = w / w.sum()
-        S = sum(w[j] * S_j[j] for j in range(2))                # departure law reaching k
+        w = pi * P[:, k]
+        w = w / w.sum()
+        S = sum(w[j] * S_j[j] for j in range(2))  # departure law reaching k
         F = np.array([[b["A"][k], b["B"][k]], [b["C"][k], b["D"][k]]])
         W = np.linalg.inv(np.array([[b["SU"][k], b["Dt"][k]], [b["Dt"][k], b["SV"][k]]]))
-        if family == "cgo":     # F' = a E1 + bb E2 + d E3, C' = 0
-            basis = [np.array([[1, 0], [0, 0]]), np.array([[0, 1], [0, 0]]), np.array([[0, 0], [0, 1]])]
-        elif family == "ngh":   # F' = c [[M,0],[1,0]] + d [[0,M],[0,1]]
+        if family == "cgo":  # F' = a E1 + bb E2 + d E3, C' = 0
+            basis = [
+                np.array([[1, 0], [0, 0]]),
+                np.array([[0, 1], [0, 0]]),
+                np.array([[0, 0], [0, 1]]),
+            ]
+        elif family == "ngh":  # F' = c [[M,0],[1,0]] + d [[0,M],[0,1]]
             basis = [np.array([[M[k], 0], [1, 0]]), np.array([[0, M[k]], [0, 1]])]
         else:
             raise ValueError(family)
@@ -199,9 +210,9 @@ def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = 
     pc_kl, pn_kl = project_kl(eps, kind, "cgo"), project_kl(eps, kind, "ngh")
     keys = ("cgo", "ngh", "cgo_blk", "ngh_blk", "cgo_kl", "ngh_kl", "gpb2", "imm")
     se = {k: 0.0 for k in ("exact",) + keys}
-    d2 = {k: 0.0 for k in keys}      # sum (f - e)^2
-    cross = {k: 0.0 for k in keys}   # sum (f - e)(e - x): orthogonality check
-    var_e = 0.0                      # sum of exact posterior variances
+    d2 = {k: 0.0 for k in keys}  # sum (f - e)^2
+    cross = {k: 0.0 for k in keys}  # sum (f - e)(e - x): orthogonality check
+    var_e = 0.0  # sum of exact posterior variances
     gap = {k: [] for k in keys}
     n_tot = 0
     for sd in range(n_seeds):
@@ -209,13 +220,21 @@ def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = 
         x = xs[:, 0]
         ex_e, var_x, _ = exact_mixture_filter(p, ys)
         var_e += float(np.sum(np.asarray(var_x).reshape(len(x), -1)[:, 0]))
-        ex_c, _, _ = imm_filter(p0, ys)[:3]          # CGO exact filter, frozen at eps=0
-        ex_n, _, _ = _run(p1, ys, "ngh_kf")           # NGH constant gain, frozen at eps=1
-        ex_g, _, _ = gpb2_filter(p, ys)[:3]           # GPB2, true parameters
-        ex_i, _, _ = imm_filter(p, ys)[:3]            # pairwise IMM, true parameters (approximate off C=0)
-        est = {"exact": ex_e[:, 0], "cgo": ex_c[:, 0], "ngh": ex_n[:, 0], "gpb2": ex_g[:, 0], "imm": ex_i[:, 0],
-               "cgo_blk": imm_filter(pc_blk, ys)[0][:, 0], "ngh_blk": _run(pn_blk, ys, "ngh_kf")[0][:, 0],
-               "cgo_kl": imm_filter(pc_kl, ys)[0][:, 0], "ngh_kl": _run(pn_kl, ys, "ngh_kf")[0][:, 0]}
+        ex_c, _, _ = imm_filter(p0, ys)[:3]  # CGO exact filter, frozen at eps=0
+        ex_n, _, _ = _run(p1, ys, "ngh_kf")  # NGH constant gain, frozen at eps=1
+        ex_g, _, _ = gpb2_filter(p, ys)[:3]  # GPB2, true parameters
+        ex_i, _, _ = imm_filter(p, ys)[:3]  # pairwise IMM, true parameters (approximate off C=0)
+        est = {
+            "exact": ex_e[:, 0],
+            "cgo": ex_c[:, 0],
+            "ngh": ex_n[:, 0],
+            "gpb2": ex_g[:, 0],
+            "imm": ex_i[:, 0],
+            "cgo_blk": imm_filter(pc_blk, ys)[0][:, 0],
+            "ngh_blk": _run(pn_blk, ys, "ngh_kf")[0][:, 0],
+            "cgo_kl": imm_filter(pc_kl, ys)[0][:, 0],
+            "ngh_kl": _run(pn_kl, ys, "ngh_kf")[0][:, 0],
+        }
         for k, v in est.items():
             se[k] += float(np.sum((v - x) ** 2))
         for k in keys:
@@ -225,24 +244,33 @@ def run_eps(eps: float, p0: GSSParams, p1: GSSParams, n_seeds: int, kind: str = 
         n_tot += len(x)
     rmse = {k: float(np.sqrt(v / n_tot)) for k, v in se.items()}
     post_var = var_e / n_tot
-    out = {"eps": eps, "path": kind, "rho": spectral_radius(eps, kind), "rmse": rmse, "posterior_var": post_var,
-           "excess_mse": {k: d2[k] / n_tot for k in d2},
-           "excess": {k: (d2[k] / n_tot) / post_var for k in d2},
-           "cross_term": {k: cross[k] / n_tot for k in cross},
-           "excess_rmse_raw": {k: rmse[k] / rmse["exact"] - 1.0 for k in keys},
-           "gap_median": {k: float(np.median(v)) for k, v in gap.items()},
-           }
+    out = {
+        "eps": eps,
+        "path": kind,
+        "rho": spectral_radius(eps, kind),
+        "rmse": rmse,
+        "posterior_var": post_var,
+        "excess_mse": {k: d2[k] / n_tot for k in d2},
+        "excess": {k: (d2[k] / n_tot) / post_var for k in d2},
+        "cross_term": {k: cross[k] / n_tot for k in cross},
+        "excess_rmse_raw": {k: rmse[k] / rmse["exact"] - 1.0 for k in keys},
+        "gap_median": {k: float(np.median(v)) for k, v in gap.items()},
+    }
     out["kl_blocks"] = {"cgo": _blocks_of(pc_kl), "ngh": _blocks_of(pn_kl)}
     return out
 
 
 def _blocks_of(p: GSSParams) -> dict:
     fm = p.f_matrix
-    return {name: [float(getattr(fm, name)(k)[0, 0]) for k in range(p.K)] for name in ("A", "B", "C", "D")}
+    return {
+        name: [float(getattr(fm, name)(k)[0, 0]) for k in range(p.K)]
+        for name in ("A", "B", "C", "D")
+    }
 
 
-def endpoint_sensitivity(eps0: float, kind: str = "straight", delta: float = 0.02,
-                         n_seeds: int = 200) -> float:
+def endpoint_sensitivity(
+    eps0: float, kind: str = "straight", delta: float = 0.02, n_seeds: int = 200
+) -> float:
     """Relative mean-square sensitivity s^2 of the Bayes filter to the path at eps0.
 
     A filter frozen at endpoint eps0 and run under P_eps satisfies
@@ -261,7 +289,7 @@ def endpoint_sensitivity(eps0: float, kind: str = "straight", delta: float = 0.0
         _, _, ys = _simulate(p, N_STEPS, seed=SEED0 + sd)
         d = (gpb2_filter(phi, ys)[0][:, 0] - gpb2_filter(plo, ys)[0][:, 0]) / (hi - lo)
         _, var, _ = exact_mixture_filter(p, ys)
-        num += float(np.sum(d ** 2))
+        num += float(np.sum(d**2))
         den += float(np.sum(np.asarray(var).reshape(len(d), -1)[:, 0]))
     return num / den
 
@@ -281,6 +309,7 @@ def crossing(rows, key_a="cgo", key_b="ngh", field="excess"):
 def plot(results: Path, figdir: Path) -> None:
     """Two panels: relative excess MSE (linear) and gap-to-exact (log)."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -289,10 +318,12 @@ def plot(results: Path, figdir: Path) -> None:
     eps = np.array([r["eps"] for r in rows])
     figdir.mkdir(parents=True, exist_ok=True)
     col = {"cgo": "#1f5f8b", "ngh": "#b8451f", "gpb2": "#5f7d3a", "imm": "#8a6d1f"}
-    lab = {"cgo": r"CGO exact filter, frozen at $\varepsilon=0$",
-           "ngh": r"NGH constant-gain filter, frozen at $\varepsilon=1$",
-           "gpb2": "GPB2, true parameters (reference)",
-           "imm": "IMM, true parameters"}
+    lab = {
+        "cgo": r"CGO exact filter, frozen at $\varepsilon=0$",
+        "ngh": r"NGH constant-gain filter, frozen at $\varepsilon=1$",
+        "gpb2": "GPB2, true parameters (reference)",
+        "imm": "IMM, true parameters",
+    }
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 3.9))
     for k in ("cgo", "ngh", "gpb2", "imm"):
         if k == "imm" and "imm" not in rows[0]["excess"]:
@@ -303,62 +334,109 @@ def plot(results: Path, figdir: Path) -> None:
     xc = crossing(rows)
     if np.isfinite(xc):
         a1.axvline(xc, color="k", ls=":", lw=1)
-        a1.text(xc + 0.02, 0.5 * a1.get_ylim()[1], rf"crossing $\varepsilon^\ast\approx{xc:.2f}$", ha="left", va="center", fontsize=8)
+        a1.text(
+            xc + 0.02,
+            0.5 * a1.get_ylim()[1],
+            rf"crossing $\varepsilon^\ast\approx{xc:.2f}$",
+            ha="left",
+            va="center",
+            fontsize=8,
+        )
     a1.set_xlabel(r"$\varepsilon$  (0 = CGO model, 1 = NGH model)")
     a1.set_ylabel(r"relative excess MSE  $\mathbb{E}(f-e)^2\,/\,\mathrm{Var}[X\mid y]$")
     a1.set_title("(a) excess over the Bayes filter", fontsize=10)
-    a1.grid(alpha=.3); a1.legend(fontsize=7.5, loc="upper left")
+    a1.grid(alpha=0.3)
+    a1.legend(fontsize=7.5, loc="upper left")
     a2.axhspan(1e-17, 1e-12, color="0.88", zorder=0)
-    a2.text(0.5, 3e-15, "round-off floor (double precision)", ha="center", va="center", fontsize=7.5, color="0.35")
+    a2.text(
+        0.5,
+        3e-15,
+        "round-off floor (double precision)",
+        ha="center",
+        va="center",
+        fontsize=7.5,
+        color="0.35",
+    )
     a2.set_ylim(1e-17, 3.0)
-    a2.set_xlabel(r"$\varepsilon$"); a2.set_ylabel("median normalized sup-norm gap to exact")
-    a2.set_title("(b) gap to the exact filter (log)", fontsize=10); a2.grid(alpha=.3, which="both")
+    a2.set_xlabel(r"$\varepsilon$")
+    a2.set_ylabel("median normalized sup-norm gap to exact")
+    a2.set_title("(b) gap to the exact filter (log)", fontsize=10)
+    a2.grid(alpha=0.3, which="both")
     fig.tight_layout()
     out = figdir / "homotopy_cgo_ngh.pdf"
-    fig.savefig(out); fig.savefig(out.with_suffix(".png"), dpi=160)
+    fig.savefig(out)
+    fig.savefig(out.with_suffix(".png"), dpi=160)
     print(f"[homotopy] figure -> {out}   crossing eps* = {xc:.3f}")
 
 
 def plot_compare(results_list, figdir: Path) -> None:
     """One panel per path: relative excess MSE of the two frozen filters."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     figdir.mkdir(parents=True, exist_ok=True)
     col = {"cgo": "#1f5f8b", "ngh": "#b8451f", "gpb2": "#5f7d3a"}
-    title = {"straight": "(a) straight path: $C$, $A$, $B$ move together",
-             "c_first": "(b) channel first, then slaving",
-             "ab_first": "(c) slaving first, then channel"}
-    fig, axes = plt.subplots(1, len(results_list), figsize=(3.6 * len(results_list), 3.7), sharey=True)
+    title = {
+        "straight": "(a) straight path: $C$, $A$, $B$ move together",
+        "c_first": "(b) channel first, then slaving",
+        "ab_first": "(c) slaving first, then channel",
+    }
+    fig, axes = plt.subplots(
+        1, len(results_list), figsize=(3.6 * len(results_list), 3.7), sharey=True
+    )
     axes = np.atleast_1d(axes)
     style = {"": "o-", "_blk": "s--", "_kl": "^:"}
     vlab = {"": "frozen endpoint", "_blk": "block projection", "_kl": "KL projection"}
     for ax, rp in zip(axes, results_list):
-        res = json.loads(Path(rp).read_text()); rows = res["rows"]; kind = res.get("path", "straight")
+        res = json.loads(Path(rp).read_text())
+        rows = res["rows"]
+        kind = res.get("path", "straight")
         eps = [r["eps"] for r in rows]
         for fam, name in (("cgo", "CGO"), ("ngh", "NGH")):
             for suf, st in style.items():
                 key = fam + suf
                 if key not in rows[0]["excess"]:
                     continue
-                ax.plot(eps, [r["excess"][key] for r in rows], st, ms=3.2, lw=1.2, color=col[fam],
-                        label=f"{name} filter, {vlab[suf]}")
-        ax.plot(eps, [r["excess"]["gpb2"] for r in rows], "o-", ms=3, color=col["gpb2"], label="GPB2, true model")
+                ax.plot(
+                    eps,
+                    [r["excess"][key] for r in rows],
+                    st,
+                    ms=3.2,
+                    lw=1.2,
+                    color=col[fam],
+                    label=f"{name} filter, {vlab[suf]}",
+                )
+        ax.plot(
+            eps,
+            [r["excess"]["gpb2"] for r in rows],
+            "o-",
+            ms=3,
+            color=col["gpb2"],
+            label="GPB2, true model",
+        )
         xc = crossing(rows)
         if np.isfinite(xc):
             ax.axvline(xc, color="k", ls=":", lw=1)
-            ax.text(xc + 0.02, 0.55 * ax.get_ylim()[1] if ax.get_ylim()[1] > 0 else 0.05,
-                    rf"$\varepsilon^\ast\approx{xc:.2f}$", fontsize=8, ha="left")
+            ax.text(
+                xc + 0.02,
+                0.55 * ax.get_ylim()[1] if ax.get_ylim()[1] > 0 else 0.05,
+                rf"$\varepsilon^\ast\approx{xc:.2f}$",
+                fontsize=8,
+                ha="left",
+            )
         if kind != "straight":
-            ax.axvline(0.5, color="gray", lw=0.8, alpha=.6)
-        ax.set_title(title.get(kind, kind), fontsize=9.5); ax.grid(alpha=.3)
+            ax.axvline(0.5, color="gray", lw=0.8, alpha=0.6)
+        ax.set_title(title.get(kind, kind), fontsize=9.5)
+        ax.grid(alpha=0.3)
         ax.set_xlabel(r"$\varepsilon$")
     axes[0].set_ylabel(r"relative excess MSE  $\mathbb{E}(f-e)^2/\mathrm{Var}[X\mid y]$")
     axes[0].legend(fontsize=6.5, loc="upper left")
     fig.tight_layout()
     out = figdir / "homotopy_paths.pdf"
-    fig.savefig(out); fig.savefig(out.with_suffix(".png"), dpi=160)
+    fig.savefig(out)
+    fig.savefig(out.with_suffix(".png"), dpi=160)
     print(f"[homotopy] comparison figure -> {out}")
 
 
@@ -368,10 +446,19 @@ def main():
     ap.add_argument("--out", type=Path, default=Path("data/experiments/homotopy_cgo_ngh"))
     ap.add_argument("--grid", type=str, default="0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0")
     ap.add_argument("--path", choices=PATHS, default="straight")
-    ap.add_argument("--plot-only", type=Path, default=None,
-                    help="skip the sweep; plot this results.json into --figdir")
-    ap.add_argument("--compare", type=Path, nargs="*", default=None,
-                    help="plot several results.json side by side into --figdir")
+    ap.add_argument(
+        "--plot-only",
+        type=Path,
+        default=None,
+        help="skip the sweep; plot this results.json into --figdir",
+    )
+    ap.add_argument(
+        "--compare",
+        type=Path,
+        nargs="*",
+        default=None,
+        help="plot several results.json side by side into --figdir",
+    )
     ap.add_argument("--figdir", type=Path, default=None)
     args = ap.parse_args()
     if args.plot_only is not None:
@@ -386,21 +473,46 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
     warnings.filterwarnings("ignore")
     p0, p1 = model(0.0), model(1.0)
-    print(f"[homotopy] path={kind} N={N_STEPS}, {args.seeds} seeds; rho(F) along the path: "
-          + ", ".join(f"{spectral_radius(e, kind):.3f}" for e in (0, 0.25, 0.5, 0.75, 1)))
-    print(f"{'eps':>5} {'postvar':>8} | {'cgo':>8} {'cgo_blk':>8} {'cgo_kl':>8} | "
-          f"{'ngh':>8} {'ngh_blk':>8} {'ngh_kl':>8} | {'gpb2':>8} {'imm':>8}")
+    print(
+        f"[homotopy] path={kind} N={N_STEPS}, {args.seeds} seeds; rho(F) along the path: "
+        + ", ".join(f"{spectral_radius(e, kind):.3f}" for e in (0, 0.25, 0.5, 0.75, 1))
+    )
+    print(
+        f"{'eps':>5} {'postvar':>8} | {'cgo':>8} {'cgo_blk':>8} {'cgo_kl':>8} | "
+        f"{'ngh':>8} {'ngh_blk':>8} {'ngh_kl':>8} | {'gpb2':>8} {'imm':>8}"
+    )
     rows = []
     for eps in [float(e) for e in args.grid.split(",")]:
         r = run_eps(eps, p0, p1, args.seeds, kind)
         rows.append(r)
         xs = r["excess"]
-        print(f"{eps:5.2f} {r['posterior_var']:8.4f} | {xs['cgo']:8.4f} {xs['cgo_blk']:8.4f} {xs['cgo_kl']:8.4f} | "
-              f"{xs['ngh']:8.4f} {xs['ngh_blk']:8.4f} {xs['ngh_kl']:8.4f} | {xs['gpb2']:8.1e} {xs['imm']:8.1e}", flush=True)
-    (args.out / "results.json").write_text(json.dumps(
-        {"N": N_STEPS, "seeds": args.seeds, "path": kind, "blocks": {"A0": A0, "B0": B0, "C1": C1, "D": D,
-         "SV": SV, "M": M, "Gamma": GAM, "p_switch": P_SWITCH}, "rows": rows}, indent=1))
-    print(f"[homotopy] results -> {args.out/'results.json'}")
+        print(
+            f"{eps:5.2f} {r['posterior_var']:8.4f} | {xs['cgo']:8.4f} {xs['cgo_blk']:8.4f} {xs['cgo_kl']:8.4f} | "
+            f"{xs['ngh']:8.4f} {xs['ngh_blk']:8.4f} {xs['ngh_kl']:8.4f} | {xs['gpb2']:8.1e} {xs['imm']:8.1e}",
+            flush=True,
+        )
+    (args.out / "results.json").write_text(
+        json.dumps(
+            {
+                "N": N_STEPS,
+                "seeds": args.seeds,
+                "path": kind,
+                "blocks": {
+                    "A0": A0,
+                    "B0": B0,
+                    "C1": C1,
+                    "D": D,
+                    "SV": SV,
+                    "M": M,
+                    "Gamma": GAM,
+                    "p_switch": P_SWITCH,
+                },
+                "rows": rows,
+            },
+            indent=1,
+        )
+    )
+    print(f"[homotopy] results -> {args.out / 'results.json'}")
     plot(args.out / "results.json", args.figdir or args.out)
 
 

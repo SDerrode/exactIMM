@@ -30,8 +30,8 @@ keywords:
   - ENSO
   - signal processing
 license: AGPL-3.0
-version: "2.1.0"
-date-released: "2026-09-12"
+version: "2.1.1"
+date-released: "2026-10-01"
 preferred-citation:
   type: generic
   title: "Exact Constant-Gain Filtering in Gaussian Markov Switching Systems"

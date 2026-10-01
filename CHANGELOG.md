@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-10-01
+
+### Fixed
+
+- CI hygiene on the v2.1.0 line, caught once pushed to GitHub for the first time: 2 unused
+  imports in `tests/test_exactness_domains.py`, and a `ruff format` pass on 6 files
+  (`cns_exactness.py`, `homotopy_cgo_ngh.py`, `make_cns_figures.py`,
+  `smoothing_exactness.py`, `main_window.py`, `test_exactness_domains.py`). No behavior
+  change; full suite green (341 tests), `ruff check`/`ruff format --check` clean.
+
 ## [2.1.0] — 2026-09-12
 
 ### Added

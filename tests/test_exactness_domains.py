@@ -3,9 +3,6 @@ gauges of the committed experiment suite and the exact mixture filter."""
 
 from __future__ import annotations
 
-import numpy as np
-import pytest
-
 from prg.experiments.cns_exactness import (
     ab_model,
     cgo_memory_model,

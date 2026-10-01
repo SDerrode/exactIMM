@@ -10,11 +10,7 @@ authors:
     family-names: Derrode
     email: stephane.derrode@ec-lyon.fr
     affiliation: École Centrale de Lyon
-    orcid: "https://orcid.org/0000-0002-3989-4540"
-  - given-names: Wojciech
-    family-names: Pieczynski
-    email: wojciech.pieczynski@telecom-sudparis.eu
-    affiliation: Télécom SudParis
+    orcid: "https://orcid.org/0000-0002-2865-2057"
 repository-code: "https://github.com/SDerrode/exactIMM"
 abstract: >-
   Reference implementation of the AB-constrained Gaussian Switching

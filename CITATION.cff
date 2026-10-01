@@ -12,6 +12,13 @@ authors:
     affiliation: École Centrale de Lyon
     orcid: "https://orcid.org/0000-0002-2865-2057"
 repository-code: "https://github.com/SDerrode/exactIMM"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.23081387"
+    description: "Archived snapshot of this exact version (v2.1.1) on Zenodo."
+  - type: doi
+    value: "10.5281/zenodo.23081190"
+    description: "Concept DOI: always resolves to the latest archived version on Zenodo."
 abstract: >-
   Reference implementation of the AB-constrained Gaussian Switching
   System (GSS) framework: a fast constant-gain exact optimal filter under

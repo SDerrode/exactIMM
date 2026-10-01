@@ -5,6 +5,8 @@ Simulation and **fast exact jump-filtering** algorithms for the paper:
 > *Exact Constant-Gain Filtering in Gaussian Markov Switching Systems*  
 > Stéphane Derrode, Clément Fernandes, Frédéric Lehmann & Wojciech Pieczynski (preprint, 2026)
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23081190.svg)](https://doi.org/10.5281/zenodo.23081190)
+
 The paper introduces an exact, **linear-time** optimal filter for Gaussian
 switching state-space models satisfying a closed-form structural constraint
 (the **AB constraint**). The commands that regenerate its figures from this code are in
